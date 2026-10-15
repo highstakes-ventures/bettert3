@@ -1,7 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as TestClock from "effect/testing/TestClock";
 import { FetchHttpClient } from "effect/http";
 import { beforeEach, vi } from "vite-plus/test";
 import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
@@ -10,11 +14,14 @@ import * as CodexCloudChats from "./CodexCloudChats.ts";
 
 const wire = vi.hoisted(() => ({
   account: "account-a",
+  credential: "credential-a",
   authMethod: "chatgpt",
   closed: 0,
   opened: 0,
   requests: [] as Array<{ method: string; params: Record<string, unknown> }>,
   authInputs: [] as Array<{ homePath?: string; environment?: NodeJS.ProcessEnv }>,
+  disconnects: [] as Array<() => void>,
+  initializeResponse: (): unknown => ({}),
   response: (_method: string, _params: Record<string, unknown>): unknown => ({}),
 }));
 
@@ -29,7 +36,10 @@ vi.mock("./CodexProvider.ts", async () => {
       return Effect.succeed({
         client: {
           request: () =>
-            Effect.succeed({ authMethod: wire.authMethod, authToken: `e30.${claims}.signature` }),
+            Effect.succeed({
+              authMethod: wire.authMethod,
+              authToken: `e30.${claims}.${wire.credential}`,
+            }),
         },
       });
     },
@@ -41,10 +51,20 @@ vi.mock("@effect/platform-node/NodeSocket", async () => {
   return {
     NodeWS: {
       WebSocket: class extends EventEmitter {
+        static OPEN = 1;
+        readyState = 0;
+        terminated = false;
         constructor() {
           super();
           wire.opened++;
-          queueMicrotask(() => this.emit("open"));
+          wire.disconnects.push(() => {
+            this.readyState = 3;
+            this.emit("close");
+          });
+          queueMicrotask(() => {
+            this.readyState = 1;
+            this.emit("open");
+          });
         }
         send(payload: string) {
           const request = JSON.parse(payload) as {
@@ -54,20 +74,34 @@ vi.mock("@effect/platform-node/NodeSocket", async () => {
           };
           wire.requests.push({ method: request.method, params: request.params ?? {} });
           if (request.id === undefined) return;
-          if (request.method === "initialize") {
-            queueMicrotask(() =>
-              this.emit("message", Buffer.from(JSON.stringify({ id: request.id, result: {} }))),
-            );
-            return;
-          }
-          const result = wire.response(request.method, request.params ?? {});
-          queueMicrotask(() =>
-            result === "disconnect"
-              ? this.emit("close")
-              : this.emit("message", Buffer.from(JSON.stringify({ id: request.id, result }))),
-          );
+          const result =
+            request.method === "initialize"
+              ? wire.initializeResponse()
+              : wire.response(request.method, request.params ?? {});
+          void Promise.resolve(result).then((result) => {
+            if (result === "disconnect") {
+              this.readyState = 3;
+              this.emit("close");
+            } else {
+              this.emit(
+                "message",
+                Buffer.from(
+                  result === "malformed"
+                    ? "invalid JSON"
+                    : JSON.stringify(
+                        result === "protocol-error"
+                          ? { id: request.id, error: { code: -32600 } }
+                          : { id: request.id, result },
+                      ),
+                ),
+              );
+            }
+          });
         }
         terminate() {
+          if (this.terminated) return;
+          this.terminated = true;
+          this.readyState = 3;
           wire.closed++;
           this.emit("close");
         }
@@ -104,11 +138,14 @@ const page = {
 beforeEach(() => {
   vi.unstubAllGlobals();
   wire.account = "account-a";
+  wire.credential = "credential-a";
   wire.authMethod = "chatgpt";
   wire.closed = 0;
   wire.opened = 0;
   wire.requests = [];
   wire.authInputs = [];
+  wire.disconnects = [];
+  wire.initializeResponse = () => ({});
   wire.response = (method) =>
     method === "thread/list"
       ? {
@@ -135,37 +172,35 @@ const provide = <A, E, R>(
     ),
   );
 
-it.effect(
-  "lists visible root chats, preserves creation time, initializes before reading, and closes its socket",
-  () =>
-    provide(
-      Effect.gen(function* () {
-        const service = yield* CodexCloudChats.CodexCloudChats;
-        const result = yield* service.list();
-        expect(result).toEqual({
-          accountId: "account-a",
-          hasMore: false,
-          chats: [
-            {
-              id: threadId,
-              title: "My question",
-              origin: "user",
-              createdAt: 100,
-              updatedAt: 200,
-              status: "idle",
-              repository: null,
-              githubRunUrl: null,
-            },
-          ],
-        });
-        expect(wire.requests.slice(0, 3).map((r) => r.method)).toEqual([
-          "initialize",
-          "initialized",
-          "thread/list",
-        ]);
-        expect(wire.closed).toBe(1);
-      }),
-    ),
+it.effect("lists visible root chats, preserves creation time, and initializes before reading", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      const result = yield* service.list();
+      expect(result).toEqual({
+        accountId: "account-a",
+        hasMore: false,
+        chats: [
+          {
+            id: threadId,
+            title: "My question",
+            origin: "user",
+            createdAt: 100,
+            updatedAt: 200,
+            status: "idle",
+            repository: null,
+            githubRunUrl: null,
+          },
+        ],
+      });
+      expect(wire.requests.slice(0, 3).map((r) => r.method)).toEqual([
+        "initialize",
+        "initialized",
+        "thread/list",
+      ]);
+      expect(wire.closed).toBe(0);
+    }),
+  ),
 );
 
 it.effect("lists named user chats without loading each conversation's turns", () =>
@@ -215,6 +250,188 @@ it.effect("reads a history page in order and excludes tool items", () =>
         sortDirection: "desc",
         limit: 10,
       });
+    }),
+  ),
+);
+
+it.effect(
+  "shares an initialized socket across list and history reads while rechecking authentication",
+  () =>
+    provide(
+      Effect.gen(function* () {
+        const service = yield* CodexCloudChats.CodexCloudChats;
+        yield* service.list();
+        yield* service.read({ threadId, accountId: "account-a" });
+        expect(wire.opened).toBe(1);
+        expect(wire.requests.filter((request) => request.method === "initialize")).toHaveLength(1);
+        expect(wire.authInputs).toHaveLength(2);
+        expect(wire.closed).toBe(0);
+      }),
+    ).pipe(Effect.tap(() => Effect.sync(() => expect(wire.closed).toBe(1)))),
+);
+
+it.effect("keeps account and credential changes on separate sockets", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      yield* service.read({ threadId, accountId: "account-a" });
+      wire.credential = "credential-b";
+      yield* service.read({ threadId, accountId: "account-a" });
+      expect(wire.opened).toBe(2);
+      wire.account = "account-b";
+      const wrongAccount = yield* service
+        .read({ threadId, accountId: "account-a" })
+        .pipe(Effect.result);
+      expect(wrongAccount).toMatchObject({
+        _tag: "Failure",
+        failure: { reason: "accountChanged" },
+      });
+      expect(wire.opened).toBe(2);
+      yield* service.read({ threadId, accountId: "account-b" });
+      expect(wire.opened).toBe(3);
+    }),
+  ),
+);
+
+it.effect(
+  "closes a socket after 30 seconds without borrowers and opens a fresh one on the next read",
+  () =>
+    provide(
+      Effect.gen(function* () {
+        const service = yield* CodexCloudChats.CodexCloudChats;
+        const input = { threadId, accountId: "account-a" };
+        yield* service.read(input);
+        yield* TestClock.adjust("29 seconds");
+        expect(wire.closed).toBe(0);
+        yield* service.read(input);
+        expect(wire.opened).toBe(1);
+        yield* TestClock.adjust("29 seconds");
+        expect(wire.closed).toBe(0);
+        yield* TestClock.adjust("1 second");
+        expect(wire.closed).toBe(1);
+        yield* service.read(input);
+        expect(wire.opened).toBe(2);
+      }),
+    ),
+);
+
+it.effect("reconnects once after an idle socket disconnects", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      const input = { threadId, accountId: "account-a" };
+      yield* service.read(input);
+      wire.disconnects[0]!();
+      expect((yield* service.read(input)).messages.at(-1)?.text).toBe("The answer");
+      expect(wire.opened).toBe(2);
+      expect(wire.requests.filter((request) => request.method === "initialize")).toHaveLength(2);
+    }),
+  ),
+);
+
+it.effect("retries a disconnected history read once and returns the recovered result", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      let reads = 0;
+      wire.response = () => (++reads === 1 ? "disconnect" : page);
+      const result = yield* service.read({ threadId, accountId: "account-a" });
+      expect(result.messages.at(-1)?.text).toBe("The answer");
+      expect(reads).toBe(2);
+      expect(wire.opened).toBe(2);
+    }),
+  ),
+);
+
+it.effect("replaces a failed initialization before retrying the history read", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      let initializations = 0;
+      wire.initializeResponse = () => (++initializations === 1 ? "disconnect" : {});
+      expect((yield* service.read({ threadId, accountId: "account-a" })).messages).toHaveLength(2);
+      expect(wire.opened).toBe(2);
+      expect(wire.closed).toBe(1);
+      expect(
+        wire.requests.filter((request) => request.method === "thread/turns/list"),
+      ).toHaveLength(1);
+    }),
+  ),
+);
+
+it.effect("shares the replacement when concurrent reads lose the same connection", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      let reads = 0;
+      wire.response = () => (++reads <= 2 ? "disconnect" : page);
+      const results = yield* Effect.all(
+        [threadId, "other-chat"].map((threadId) =>
+          service.read({ threadId, accountId: "account-a" }),
+        ),
+        { concurrency: 2 },
+      );
+      expect(results.map((result) => result.messages.at(-1)?.text)).toEqual([
+        "The answer",
+        "The answer",
+      ]);
+      expect(wire.opened).toBe(2);
+      expect(wire.closed).toBe(1);
+      expect(reads).toBe(4);
+    }),
+  ),
+);
+
+it.effect(
+  "keeps concurrent reads alive when one borrower cancels and starts idle expiry after release",
+  () =>
+    provide(
+      Effect.gen(function* () {
+        const service = yield* CodexCloudChats.CodexCloudChats;
+        const started = yield* Deferred.make<void>();
+        const replies = new Map<string, (value: unknown) => void>();
+        wire.response = (_method, params) =>
+          new Promise((resolve) => {
+            replies.set(String(params.threadId), resolve);
+            if (replies.size === 2) Deferred.doneUnsafe(started, Exit.void);
+          });
+        const first = yield* service
+          .read({ threadId, accountId: "account-a" })
+          .pipe(Effect.forkChild);
+        const second = yield* service
+          .read({ threadId: "other-chat", accountId: "account-a" })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+        expect(wire.opened).toBe(1);
+        expect(wire.requests.filter((request) => request.method === "initialize")).toHaveLength(1);
+        yield* TestClock.adjust("19 seconds");
+        expect(wire.closed).toBe(0);
+        yield* Fiber.interrupt(first);
+        expect(wire.closed).toBe(0);
+        replies.get("other-chat")!(page);
+        expect((yield* Fiber.join(second)).messages.at(-1)?.text).toBe("The answer");
+        replies.get(threadId)!(page);
+        wire.response = () => page;
+        yield* service.read({ threadId, accountId: "account-a" });
+        expect(wire.opened).toBe(1);
+        yield* TestClock.adjust("30 seconds");
+        expect(wire.closed).toBe(1);
+      }),
+    ),
+);
+
+it.effect.each(["protocol-error", "malformed"])("does not retry a %s reply", (reply) =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      wire.response = () => reply;
+      const result = yield* service.read({ threadId, accountId: "account-a" }).pipe(Effect.result);
+      expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "protocol" } });
+      expect(wire.opened).toBe(1);
+      expect(wire.closed).toBe(1);
+      wire.response = () => page;
+      expect((yield* service.read({ threadId, accountId: "account-a" })).messages).toHaveLength(2);
+      expect(wire.opened).toBe(2);
     }),
   ),
 );
@@ -398,7 +615,8 @@ it.effect("returns a connection error and releases the socket on a disconnect", 
       const service = yield* CodexCloudChats.CodexCloudChats;
       const result = yield* service.list().pipe(Effect.result);
       expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "connection" } });
-      expect(wire.closed).toBe(1);
+      expect(wire.opened).toBe(2);
+      expect(wire.closed).toBe(2);
     }),
   ),
 );
