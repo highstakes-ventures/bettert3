@@ -32,7 +32,17 @@ export const CloudChatReadResult = Schema.Struct({
       id: Schema.String,
       role: Schema.Literals(["user", "assistant"]),
       text: Schema.String,
+      createdAt: Schema.optional(Schema.NullOr(Schema.Number)),
     }),
+  ),
+  latestTurn: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        id: Schema.String,
+        status: Schema.String,
+        startedAt: Schema.NullOr(Schema.Number),
+      }),
+    ),
   ),
   nextCursor: Schema.NullOr(Schema.String),
 });

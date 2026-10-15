@@ -1,8 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
 import type { CloudChatSummary } from "@t3tools/contracts";
 import { WorkflowIcon } from "lucide-react";
-import * as Schema from "effect/Schema";
-import { useLocalStorage } from "../../hooks/useLocalStorage";
+import { useLayoutEffect } from "react";
 import { cn } from "../../lib/utils";
 import { cloudChats } from "../../state/cloudChats";
 import { usePrimaryEnvironmentId } from "../../state/environments";
@@ -52,15 +51,18 @@ function AutomaticChatRow({
   );
 }
 
-export function AutomaticChatsSection() {
+export function AutomaticChatsSection({
+  expanded,
+  onToggle,
+  onLayoutChange,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  onLayoutChange: () => void;
+}) {
   const environmentId = usePrimaryEnvironmentId();
   const query = useEnvironmentQuery(
     environmentId ? cloudChats.list({ environmentId, input: {} }) : null,
-  );
-  const [expanded, setExpanded] = useLocalStorage(
-    "t3code:sidebar:automatic-shelf-expanded",
-    false,
-    Schema.Boolean,
   );
   const rows = (query.error ? [] : (query.data?.chats ?? []))
     .filter((chat) => chat.origin === "automatic")
@@ -69,13 +71,20 @@ export function AutomaticChatsSection() {
         Number(b.status === "active") - Number(a.status === "active") || b.updatedAt - a.updatedAt,
     );
   const running = rows.filter((chat) => chat.status === "active").length;
+  const layoutKey = expanded
+    ? `${query.error ?? ""}:${query.data !== null}:${rows.map((chat) => chat.id).join(":")}`
+    : "collapsed";
+  useLayoutEffect(() => {
+    void layoutKey;
+    onLayoutChange();
+  }, [layoutKey, onLayoutChange]);
   if (!environmentId) return null;
   return (
-    <section aria-label="Automatic" data-testid="sidebar-automatic-section">
-      <div className="mx-0.5 h-8">
+    <>
+      <li className="mx-0.5 h-8 list-none" data-testid="sidebar-automatic-header">
         <CollapsibleSectionHeader
           expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
+          onClick={onToggle}
           accessory={
             <span className="shrink-0 text-xs tabular-nums" aria-live="polite">
               {query.error
@@ -88,33 +97,34 @@ export function AutomaticChatsSection() {
         >
           Automatic
         </CollapsibleSectionHeader>
-      </div>
+      </li>
       {expanded ? (
         <>
           {query.error ? (
-            <p role="alert" className="px-2.5 py-2 text-xs text-sidebar-muted-foreground">
+            <li
+              role="alert"
+              className="list-none px-2.5 py-2 text-xs text-sidebar-muted-foreground"
+            >
               {query.error}
-            </p>
+            </li>
           ) : query.data ? (
             rows.length > 0 ? (
-              <ul className="flex flex-col gap-px">
-                {rows.map((chat) => (
-                  <AutomaticChatRow key={chat.id} chat={chat} environmentId={environmentId} />
-                ))}
-              </ul>
+              rows.map((chat) => (
+                <AutomaticChatRow key={chat.id} chat={chat} environmentId={environmentId} />
+              ))
             ) : (
-              <p className="px-2.5 py-2 text-xs text-sidebar-muted-foreground">
+              <li className="list-none px-2.5 py-2 text-xs text-sidebar-muted-foreground">
                 No automatic kickoffs yet.
-              </p>
+              </li>
             )
           ) : null}
           {query.data?.hasMore && !query.error ? (
-            <p className="px-2.5 py-2 text-xs text-sidebar-muted-foreground">
+            <li className="list-none px-2.5 py-2 text-xs text-sidebar-muted-foreground">
               Showing automatic kickoffs among the 100 most recent cloud chats.
-            </p>
+            </li>
           ) : null}
         </>
       ) : null}
-    </section>
+    </>
   );
 }

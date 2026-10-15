@@ -3032,10 +3032,20 @@ export default function Sidebar() {
     false,
     Schema.Boolean,
   );
-  const toggleSettledShelf = useCallback(
-    () => setSettledShelfExpanded((value) => !value),
-    [setSettledShelfExpanded],
+  const [automaticShelfExpanded, setAutomaticShelfExpanded] = useLocalStorage(
+    "t3code:sidebar:automatic-shelf-expanded",
+    false,
+    Schema.Boolean,
   );
+  const automaticShelfOpen = automaticShelfExpanded && !settledShelfExpanded;
+  const toggleSettledShelf = useCallback(() => {
+    setAutomaticShelfExpanded(false);
+    setSettledShelfExpanded((value) => !value);
+  }, [setAutomaticShelfExpanded, setSettledShelfExpanded]);
+  const toggleAutomaticShelf = useCallback(() => {
+    setSettledShelfExpanded(false);
+    setAutomaticShelfExpanded(!automaticShelfOpen);
+  }, [automaticShelfOpen, setAutomaticShelfExpanded, setSettledShelfExpanded]);
   const renderedSettledThreads = useMemo(() => {
     if (settledShelfExpanded) return visibleSettledThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
@@ -3878,6 +3888,9 @@ export default function Sidebar() {
     }
   }, [cancelThreadDrag, dragState, sidebarListItems]);
   const listMotionPaused = dragState !== null;
+  const updateAutomaticListMotion = useCallback(() => {
+    listMotionRef.current?.update(!listMotionPaused);
+  }, [listMotionPaused]);
   // Every shell event rebuilds sidebarListItems, but rows only move when the
   // rendered order or a row's section changes. Keying the motion pass on that
   // keeps ordinary updates from forcing a layout read and animating rows
@@ -5591,6 +5604,11 @@ export default function Sidebar() {
                         </button>
                       </li>
                     ) : null}
+                    <AutomaticChatsSection
+                      expanded={automaticShelfOpen}
+                      onToggle={toggleAutomaticShelf}
+                      onLayoutChange={updateAutomaticListMotion}
+                    />
                   </ul>
                 </SortableContext>
               </DndContext>
@@ -5624,7 +5642,6 @@ export default function Sidebar() {
               )}
             </div>
           ) : null}
-          {!isSearchingThreads ? <AutomaticChatsSection /> : null}
         </SidebarGroup>
       </SidebarContent>
       <SidebarChromeFooter />

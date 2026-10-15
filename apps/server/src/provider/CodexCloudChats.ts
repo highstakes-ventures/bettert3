@@ -4,6 +4,7 @@ import {
   CodexSettings,
   resolveProviderInstanceEnabled,
   type CloudChatReadInput,
+  type CloudChatReadResult,
   type CloudChatSummary,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -38,11 +39,23 @@ const Item = Schema.Struct({
   type: Schema.String,
   text: Schema.optional(Schema.String),
   content: Schema.optional(
-    Schema.Array(Schema.Struct({ type: Schema.String, text: Schema.optional(Schema.String) })),
+    Schema.Array(
+      Schema.Union([
+        Schema.String,
+        Schema.Struct({ type: Schema.String, text: Schema.optional(Schema.String) }),
+      ]),
+    ),
   ),
 });
 const Turns = Schema.Struct({
-  data: Schema.Array(Schema.Struct({ id: Schema.String, items: Schema.Array(Item) })),
+  data: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      items: Schema.Array(Item),
+      status: Schema.optional(Schema.String),
+      startedAt: Schema.optional(Schema.NullOr(Schema.Number)),
+    }),
+  ),
   nextCursor: Schema.NullOr(Schema.String),
 });
 const Reply = Schema.Struct({
@@ -66,8 +79,7 @@ function messageText(item: typeof Item.Type): string {
   return item.type === "agentMessage"
     ? (item.text ?? "")
     : (item.content ?? [])
-        .filter((c) => c.type === "text")
-        .map((c) => c.text ?? "")
+        .flatMap((c) => (typeof c !== "string" && c.type === "text" ? [c.text ?? ""] : []))
         .join("\n");
 }
 
@@ -186,14 +198,9 @@ export class CodexCloudChats extends Context.Service<
       { accountId: string; chats: ReadonlyArray<CloudChatSummary>; hasMore: boolean },
       CloudChatError
     >;
-    readonly read: (input: CloudChatReadInput) => Effect.Effect<
-      {
-        threadId: string;
-        messages: ReadonlyArray<{ id: string; role: "user" | "assistant"; text: string }>;
-        nextCursor: string | null;
-      },
-      CloudChatError
-    >;
+    readonly read: (
+      input: CloudChatReadInput,
+    ) => Effect.Effect<typeof CloudChatReadResult.Type, CloudChatError>;
   }
 >()("t3/provider/CodexCloudChats") {}
 
@@ -262,12 +269,18 @@ const make = Effect.gen(function* () {
       Effect.timeout("60 seconds"),
       Effect.catchTags({ TimeoutError: () => new CloudChatError({ reason: "connection" }) }),
     );
-  const turns = (request: CloudRequest, threadId: string, limit: number, cursor?: string) =>
+  const turns = (
+    request: CloudRequest,
+    threadId: string,
+    limit: number,
+    cursor?: string,
+    sortDirection: "asc" | "desc" = "asc",
+  ) =>
     request("thread/turns/list", {
       threadId,
       limit,
       cursor: cursor ?? null,
-      sortDirection: "asc",
+      sortDirection,
       itemsView: "full",
     }).pipe(
       Effect.flatMap((value) =>
@@ -353,11 +366,20 @@ const make = Effect.gen(function* () {
     read: (input) =>
       withCloud(input.accountId, (request) =>
         Effect.gen(function* () {
-          const page: TurnsPage = yield* turns(request, input.threadId, 10, input.cursor);
+          const page: TurnsPage = yield* turns(request, input.threadId, 10, input.cursor, "desc");
           return {
             threadId: input.threadId,
             nextCursor: page.nextCursor,
-            messages: page.data.flatMap((turn) =>
+            ...(page.data[0]?.status
+              ? {
+                  latestTurn: {
+                    id: page.data[0].id,
+                    status: page.data[0].status,
+                    startedAt: page.data[0].startedAt ?? null,
+                  },
+                }
+              : {}),
+            messages: page.data.toReversed().flatMap((turn) =>
               turn.items.flatMap((item) =>
                 item.type === "userMessage" || item.type === "agentMessage"
                   ? [
@@ -366,6 +388,7 @@ const make = Effect.gen(function* () {
                         role:
                           item.type === "userMessage" ? ("user" as const) : ("assistant" as const),
                         text: messageText(item),
+                        ...(turn.startedAt != null ? { createdAt: turn.startedAt } : {}),
                       },
                     ]
                   : [],

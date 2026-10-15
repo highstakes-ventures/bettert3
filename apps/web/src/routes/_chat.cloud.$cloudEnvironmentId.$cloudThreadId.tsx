@@ -1,17 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { CloudIcon, ExternalLinkIcon, WorkflowIcon } from "lucide-react";
-import { EnvironmentId, type CloudChatListResult } from "@t3tools/contracts";
-import { useState } from "react";
-import ChatMarkdown from "../components/ChatMarkdown";
+import { CloudIcon, ExternalLinkIcon, RefreshCwIcon, WorkflowIcon } from "lucide-react";
+import { EnvironmentId, MessageId, type CloudChatListResult } from "@t3tools/contracts";
+import { useMemo, useRef, useState } from "react";
+import type { LegendListRef } from "@legendapp/list/react";
+import { MessagesTimeline } from "../components/chat/MessagesTimeline";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
 import { Button } from "../components/ui/button";
+import { Spinner } from "../components/ui/spinner";
+import { useClientSettings } from "../hooks/useSettings";
+import { useTheme } from "../hooks/useTheme";
+import type { TimelineEntry } from "../session-logic";
 import { cloudChats } from "../state/cloudChats";
 import { useEnvironmentQuery, type EnvironmentQueryView } from "../state/query";
 
 export const Route = createFileRoute("/_chat/cloud/$cloudEnvironmentId/$cloudThreadId")({
   component: CloudChatView,
 });
+
+const noAction = () => {};
 
 function CloudChatView() {
   const { cloudEnvironmentId, cloudThreadId } = Route.useParams();
@@ -29,29 +36,66 @@ function CloudChatView() {
 
 function CloudChatHistory({
   environmentId,
-  threadId: cloudThreadId,
+  threadId,
   list,
 }: {
   environmentId: EnvironmentId;
   threadId: string;
   list: EnvironmentQueryView<typeof CloudChatListResult.Type>;
 }) {
-  const chat = list.error ? undefined : list.data?.chats.find((chat) => chat.id === cloudThreadId);
+  const chat = list.error ? undefined : list.data?.chats.find((chat) => chat.id === threadId);
   const [cursors, setCursors] = useState<Array<string | undefined>>([undefined]);
   const cursor = cursors.at(-1);
-  const history = useEnvironmentQuery(
+  const query = (cursor?: string) =>
     list.data && !list.error
       ? cloudChats.read({
           environmentId,
-          input: {
-            threadId: cloudThreadId,
-            accountId: list.data.accountId,
-            ...(cursor ? { cursor } : {}),
-          },
+          input: { threadId, accountId: list.data.accountId, ...(cursor ? { cursor } : {}) },
         })
-      : null,
+      : null;
+  const history = useEnvironmentQuery(query(cursor));
+  const liveHistory = useEnvironmentQuery(cursor ? query() : null);
+  const latestHistory = cursor ? liveHistory : history;
+  const latestTurn = latestHistory.data?.latestTurn;
+  const refreshError = list.error ?? history.error ?? liveHistory.error;
+  const isWorking =
+    !list.error &&
+    !latestHistory.error &&
+    (latestTurn ? latestTurn.status === "inProgress" : chat?.status === "active");
+  const activeTurnStartedAt =
+    latestTurn?.startedAt != null ? new Date(latestTurn.startedAt * 1000).toISOString() : null;
+  const listRef = useRef<LegendListRef>(null);
+  const { resolvedTheme } = useTheme();
+  const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
+  const timelineEntries = useMemo<ReadonlyArray<TimelineEntry>>(
+    () =>
+      (list.error || history.error ? [] : (history.data?.messages ?? [])).map((message) => {
+        const createdAt = new Date(
+          (message.createdAt ?? chat?.createdAt ?? 0) * 1000,
+        ).toISOString();
+        return {
+          id: message.id,
+          kind: "message",
+          createdAt,
+          message: {
+            id: MessageId.make(message.id),
+            role: message.role,
+            text: message.text,
+            runId: null,
+            streaming: false,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        };
+      }),
+    [chat?.createdAt, history.data, history.error, list.error],
   );
   const automatic = chat?.origin === "automatic";
+  const refresh = () => {
+    list.refresh();
+    history.refresh();
+    if (cursor) liveHistory.refresh();
+  };
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-background">
       <WorkspacePageHeader electron={isElectron} className="border-b border-border">
@@ -63,14 +107,15 @@ function CloudChatHistory({
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-medium">{chat?.title ?? "Cloud chat"}</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {automatic
-              ? `Automatic kickoff · ${chat?.repository ?? "Codex Cloud"}`
-              : chat?.origin === "user"
-                ? "Started by you · Codex Cloud"
-                : "Origin unconfirmed · Codex Cloud"}
-            {chat ? ` · ${chat.status === "active" ? "Running" : chat.status}` : ""}
+            {chat?.repository ?? "Codex"} · Remote
           </p>
         </div>
+        {isWorking ? (
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Spinner size="sm" />
+            Working
+          </span>
+        ) : null}
         {chat?.githubRunUrl ? (
           <a
             href={chat.githubRunUrl}
@@ -82,109 +127,84 @@ function CloudChatHistory({
             <ExternalLinkIcon aria-hidden className="size-3" />
           </a>
         ) : null}
+        <Button variant="ghost" size="icon-sm" aria-label="Refresh conversation" onClick={refresh}>
+          <RefreshCwIcon aria-hidden className="size-4" />
+        </Button>
       </WorkspacePageHeader>
-      <div className="scrollbar-gutter-both min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-6 py-10">
-          {automatic ? (
-            <p className="mb-10 text-sm text-muted-foreground">
-              {chat?.githubRunUrl ? "Started from GitHub." : "Started automatically."} Follow the
-              result here without managing it in your chat list.
-            </p>
+      {refreshError ? (
+        <div role="alert" className="px-6 py-3 text-sm text-destructive">
+          {refreshError}
+          <Button variant="ghost" onClick={refresh}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+      {history.isPending && !history.data ? (
+        <p className="px-6 py-3 text-sm text-muted-foreground">Loading conversation…</p>
+      ) : null}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <MessagesTimeline
+          isWorking={!cursor && isWorking}
+          runlessWorkActive={!cursor && isWorking}
+          activeTurnInProgress={!cursor && isWorking}
+          activeTurnStartedAt={activeTurnStartedAt}
+          listRef={listRef}
+          timelineEntries={timelineEntries}
+          latestRun={null}
+          turnDiffSummaries={[]}
+          routeThreadKey={`cloud/${environmentId}/${threadId}`}
+          onOpenTurnDiff={noAction}
+          onOpenThread={noAction}
+          onForkFromRun={async () => {}}
+          onRollbackCheckpoint={noAction}
+          supportsConversationRollback={false}
+          onRevertToTurnCount={noAction}
+          isRevertingCheckpoint={false}
+          onImageExpand={noAction}
+          activeThreadEnvironmentId={environmentId}
+          markdownCwd={undefined}
+          resolvedTheme={resolvedTheme}
+          timestampFormat={timestampFormat}
+          workspaceRoot={undefined}
+          providerStatuses={[]}
+          runs={[]}
+          anchorMessageId={null}
+          onAnchorReady={noAction}
+          onAnchorSizeChanged={noAction}
+          contentInsetEndAdjustment={0}
+          onIsAtEndChange={noAction}
+          liveFollowEnabled={true}
+          onManualNavigation={noAction}
+          hideEmptyPlaceholder={history.isPending || !!history.error || !!list.error}
+        />
+      </div>
+      {cursors.length > 1 || history.data?.nextCursor ? (
+        <div className="flex justify-center gap-2 px-6 py-2">
+          {history.data?.nextCursor ? (
+            <Button
+              variant="ghost"
+              onClick={() =>
+                setCursors((previous) => [...previous, history.data?.nextCursor ?? undefined])
+              }
+            >
+              Older messages
+            </Button>
           ) : null}
-          {history.error || list.error ? (
-            <div role="alert" className="mb-6 text-sm text-destructive">
-              {history.error ?? list.error}
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  list.refresh();
-                  history.refresh();
-                }}
-              >
-                Retry
-              </Button>
-            </div>
-          ) : null}
-          {history.isPending && !history.data ? (
-            <p className="text-sm text-muted-foreground">Loading conversation…</p>
-          ) : null}
-          {history.data?.messages.length === 0 && !history.error && !list.error ? (
-            <p className="text-sm text-muted-foreground">No messages yet.</p>
-          ) : null}
-          <div className="space-y-8">
-            {(!list.error && !history.error ? history.data?.messages : undefined)?.map(
-              (message) => (
-                <article
-                  key={message.id}
-                  className={
-                    message.role === "user" ? "ml-8 rounded-2xl bg-muted px-5 py-4" : "py-2"
-                  }
-                >
-                  <p className="mb-3 text-xs font-medium text-muted-foreground">
-                    {message.role === "user" ? (automatic ? "GitHub kickoff" : "You") : "Codex"}
-                  </p>
-                  {automatic &&
-                  message.role === "user" &&
-                  message.text.includes("Immutable trusted request") ? (
-                    <details>
-                      <summary className="cursor-pointer text-sm">
-                        View kickoff instructions
-                      </summary>
-                      <div className="mt-4">
-                        <ChatMarkdown
-                          text={message.text}
-                          cwd={undefined}
-                          environmentId={environmentId}
-                        />
-                      </div>
-                    </details>
-                  ) : (
-                    <ChatMarkdown
-                      text={message.text}
-                      cwd={undefined}
-                      environmentId={environmentId}
-                    />
-                  )}
-                </article>
-              ),
-            )}
-          </div>
-          <div className="mt-6 flex gap-2">
-            {cursors.length > 1 ? (
+          {cursors.length > 1 ? (
+            <>
               <Button
                 variant="ghost"
                 onClick={() => setCursors((previous) => previous.slice(0, -1))}
               >
-                Previous messages
+                Newer messages
               </Button>
-            ) : null}
-            {history.data?.nextCursor && !history.error && !list.error ? (
-              <Button
-                variant="ghost"
-                onClick={() =>
-                  setCursors((previous) => [...previous, history.data?.nextCursor ?? undefined])
-                }
-              >
-                Next messages
+              <Button variant="ghost" onClick={() => setCursors([undefined])}>
+                Latest messages
               </Button>
-            ) : null}
-          </div>
+            </>
+          ) : null}
         </div>
-      </div>
-      <footer className="mx-auto w-full max-w-3xl px-6 pb-6 pt-3">
-        <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          {automatic
-            ? "Automatic kickoff. No inbox action required."
-            : "Cloud chat preview. Replying from T3 is the next step."}
-          <a
-            className="mt-2 flex w-fit items-center gap-1.5 text-xs text-foreground underline underline-offset-4"
-            href={`codex://threads/${cloudThreadId}?hostId=durable`}
-          >
-            Open in Codex
-            <ExternalLinkIcon aria-hidden className="size-3" />
-          </a>
-        </div>
-      </footer>
+      ) : null}
     </main>
   );
 }

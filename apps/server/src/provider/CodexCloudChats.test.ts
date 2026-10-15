@@ -185,9 +185,80 @@ it.effect("reads a history page in order and excludes tool items", () =>
       });
       expect(wire.requests.at(-1)?.params).toMatchObject({
         cursor: "older-page",
-        sortDirection: "asc",
+        sortDirection: "desc",
         limit: 10,
       });
+    }),
+  ),
+);
+
+it.effect("opens the newest turns in chronological order and re-reads their changing replies", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      let reply = "First progress update";
+      wire.response = (_method, params) => ({
+        data:
+          params.sortDirection === "desc"
+            ? [
+                {
+                  id: "latest-turn",
+                  status: "inProgress",
+                  startedAt: 123,
+                  items: [{ id: "latest", type: "agentMessage", text: reply }],
+                },
+                {
+                  id: "preceding-turn",
+                  items: [{ id: "preceding", type: "agentMessage", text: "Earlier reply" }],
+                },
+              ]
+            : [
+                {
+                  id: "oldest-turn",
+                  items: [{ id: "oldest", type: "agentMessage", text: "Old kickoff reply" }],
+                },
+              ],
+        nextCursor: "older-turns",
+      });
+      const input = { threadId, accountId: "account-a" };
+      expect((yield* service.read(input)).messages).toEqual([
+        { id: "preceding", role: "assistant", text: "Earlier reply" },
+        { id: "latest", role: "assistant", text: reply, createdAt: 123 },
+      ]);
+      reply = "Updated progress and result";
+      const refreshed = yield* service.read(input);
+      expect(refreshed.messages.at(-1)?.text).toBe(reply);
+      expect(refreshed.nextCursor).toBe("older-turns");
+      expect(refreshed.latestTurn).toEqual({
+        id: "latest-turn",
+        status: "inProgress",
+        startedAt: 123,
+      });
+    }),
+  ),
+);
+
+it.effect("keeps replies readable when a turn includes reasoning content strings", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      wire.response = () => ({
+        data: [
+          {
+            id: "turn",
+            items: [
+              { id: "u", type: "userMessage", content: [{ type: "text", text: "My question" }] },
+              { id: "r", type: "reasoning", summary: [], content: ["Provider reasoning content"] },
+              { id: "a", type: "agentMessage", text: "A readable reply" },
+            ],
+          },
+        ],
+        nextCursor: null,
+      });
+      expect((yield* service.read({ threadId, accountId: "account-a" })).messages).toEqual([
+        { id: "u", role: "user", text: "My question" },
+        { id: "a", role: "assistant", text: "A readable reply" },
+      ]);
     }),
   ),
 );

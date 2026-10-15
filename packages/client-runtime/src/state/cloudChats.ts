@@ -15,8 +15,8 @@ export function createCloudChatAtoms<R, E>(runtime: Atom.AtomRuntime<Environment
     read: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:cloud-chats:read",
       tag: WS_METHODS.cloudChatsRead,
-      refreshIntervalMs: 15_000,
-      staleTimeMs: 10_000,
+      refreshIntervalMs: 5_000,
+      staleTimeMs: 3_000,
       idleTtlMs: 0,
     }),
   };
