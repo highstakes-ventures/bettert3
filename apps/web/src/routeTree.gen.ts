@@ -36,6 +36,7 @@ import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-reques
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
+import { Route as ChatCloudCloudEnvironmentIdCloudThreadIdRouteImport } from './routes/_chat.cloud.$cloudEnvironmentId.$cloudThreadId'
 
 const WelcomeRoute = WelcomeRouteImport.update({
   id: '/welcome',
@@ -173,6 +174,12 @@ const ChatEnvironmentIdThreadIdRoute =
     path: '/$environmentId/$threadId',
     getParentRoute: () => ChatRoute,
   } as any)
+const ChatCloudCloudEnvironmentIdCloudThreadIdRoute =
+  ChatCloudCloudEnvironmentIdCloudThreadIdRouteImport.update({
+    id: '/cloud/$cloudEnvironmentId/$cloudThreadId',
+    path: '/cloud/$cloudEnvironmentId/$cloudThreadId',
+    getParentRoute: () => ChatRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
@@ -201,6 +208,7 @@ export interface FileRoutesByFullPath {
   '/settings/storage': typeof SettingsStorageRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/cloud/$cloudEnvironmentId/$cloudThreadId': typeof ChatCloudCloudEnvironmentIdCloudThreadIdRoute
 }
 export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
@@ -229,6 +237,7 @@ export interface FileRoutesByTo {
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/cloud/$cloudEnvironmentId/$cloudThreadId': typeof ChatCloudCloudEnvironmentIdCloudThreadIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -259,6 +268,7 @@ export interface FileRoutesById {
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/_chat/cloud/$cloudEnvironmentId/$cloudThreadId': typeof ChatCloudCloudEnvironmentIdCloudThreadIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -289,6 +299,7 @@ export interface FileRouteTypes {
     | '/settings/storage'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/cloud/$cloudEnvironmentId/$cloudThreadId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/connect'
@@ -317,6 +328,7 @@ export interface FileRouteTypes {
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/cloud/$cloudEnvironmentId/$cloudThreadId'
   id:
     | '__root__'
     | '/_chat'
@@ -346,6 +358,7 @@ export interface FileRouteTypes {
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/_chat/cloud/$cloudEnvironmentId/$cloudThreadId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -550,6 +563,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatEnvironmentIdThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/cloud/$cloudEnvironmentId/$cloudThreadId': {
+      id: '/_chat/cloud/$cloudEnvironmentId/$cloudThreadId'
+      path: '/cloud/$cloudEnvironmentId/$cloudThreadId'
+      fullPath: '/cloud/$cloudEnvironmentId/$cloudThreadId'
+      preLoaderRoute: typeof ChatCloudCloudEnvironmentIdCloudThreadIdRouteImport
+      parentRoute: typeof ChatRoute
+    }
   }
 }
 
@@ -559,6 +579,7 @@ interface ChatRouteChildren {
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
+  ChatCloudCloudEnvironmentIdCloudThreadIdRoute: typeof ChatCloudCloudEnvironmentIdCloudThreadIdRoute
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
@@ -567,6 +588,8 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,
+  ChatCloudCloudEnvironmentIdCloudThreadIdRoute:
+    ChatCloudCloudEnvironmentIdCloudThreadIdRoute,
 }
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)

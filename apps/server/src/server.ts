@@ -1,3 +1,4 @@
+import * as CodexCloudChats from "./provider/CodexCloudChats.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Clock from "effect/Clock";
@@ -736,6 +737,7 @@ const layerMakeRoutes = Layer.mergeAll(
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP. Provided
   // after the guide service so it reaches that too.
   Layer.provide(layerPullRequestService),
+  Layer.provide(CodexCloudChats.layer),
   // The stream route and the WebSocket RPCs share one browser.
   Layer.provide(ServerBrowser.layer.pipe(Layer.provide(DesktopBrowserChannel.layer))),
   // Server browser tabs and HTML render previews install and run the same headless browser.

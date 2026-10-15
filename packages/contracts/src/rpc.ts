@@ -1,4 +1,11 @@
 import {
+  CloudChatListInput,
+  CloudChatListResult,
+  CloudChatReadInput,
+  CloudChatReadResult,
+  CloudChatError,
+} from "./cloudChats.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -370,6 +377,8 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
+  cloudChatsList: "cloudChats.list",
+  cloudChatsRead: "cloudChats.read",
   // Project registry methods
   projectsList: "projects.list",
   projectsAdd: "projects.add",
@@ -1875,7 +1884,20 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
+const WsCloudChatsListRpc = Rpc.make(WS_METHODS.cloudChatsList, {
+  payload: CloudChatListInput,
+  success: CloudChatListResult,
+  error: Schema.Union([CloudChatError, EnvironmentAuthorizationError]),
+});
+const WsCloudChatsReadRpc = Rpc.make(WS_METHODS.cloudChatsRead, {
+  payload: CloudChatReadInput,
+  success: CloudChatReadResult,
+  error: Schema.Union([CloudChatError, EnvironmentAuthorizationError]),
+});
+
 export const WsRpcGroup = RpcGroup.make(
+  WsCloudChatsListRpc,
+  WsCloudChatsReadRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

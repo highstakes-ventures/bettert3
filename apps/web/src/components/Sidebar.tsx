@@ -1,3 +1,4 @@
+import { CloudChatsSection } from "./sidebar/CloudChatsSection";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
@@ -5190,6 +5191,7 @@ export default function Sidebar() {
         }
       >
         <SidebarGroup className="flex-1" role="presentation">
+          {!isSearchingThreads ? <CloudChatsSection /> : null}
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -5595,6 +5597,7 @@ export default function Sidebar() {
               </DndContext>
             </TooltipProvider>
           ) : null}
+          {!isSearchingThreads ? <CloudChatsSection automatic /> : null}
           {!isSearchingThreads &&
           visibleDraftSessionCount === 0 &&
           pinnedThreads.length +
