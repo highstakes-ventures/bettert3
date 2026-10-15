@@ -786,7 +786,7 @@ const SIDEBAR_DRAG_LABEL_HEIGHT = 24;
 function CategoryDropMeasurements({ previewKey }: { previewKey: string | null }) {
   const { measureDroppableContainers } = useDndContext();
   useLayoutEffect(() => {
-    // Moving a row changes heading positions without resizing their nodes.
+    // Opening a collapsed destination moves headings without resizing their nodes.
     void previewKey;
     measureDroppableContainers([]);
   }, [measureDroppableContainers, previewKey]);
@@ -4047,7 +4047,6 @@ export default function Sidebar() {
     sidebarListOrderKey,
     visibleDraftSessionCount,
   ]);
-  const sortableIds = useMemo(() => sidebarListItems.map(sidebarListItemId), [sidebarListItems]);
   const draggedSettledOrder = useMemo(() => {
     const thread = dragState === null ? undefined : threadByKey.get(dragState.activeKey);
     if (dragState === null || thread === undefined) return [];
@@ -4118,29 +4117,29 @@ export default function Sidebar() {
     [threads],
   );
   const categoryDrag = sectionGrouping === "section" && dragState !== null && !isContextDrag;
-  const storedCategoryGroups = useMemo(
+  const categoryGroups = useMemo(
     () => groupThreadsBySection(sectionProjects, activeThreads, { includeEmpty: true }),
     [sectionProjects, activeThreads],
   );
-  const categoryPreview = useMemo(() => {
+  // Heading targets share the sortable context so the lifted chat keeps its
+  // normal pointer transform while hovering a category instead of a chat.
+  const sortableIds = useMemo(
+    () => [
+      ...sidebarListItems.map(sidebarListItemId),
+      ...(sectionGrouping === "section"
+        ? categoryGroups.map((group) => `category:${group.key}`)
+        : []),
+    ],
+    [sidebarListItems, sectionGrouping, categoryGroups],
+  );
+  const categoryDropTarget = useMemo(() => {
     if (!categoryDrag || dragState.targetCategoryKey === null) return null;
     const source = threadByKey.get(dragState.activeKey);
-    const target = storedCategoryGroups.find((group) => group.key === dragState.targetCategoryKey);
+    const target = categoryGroups.find((group) => group.key === dragState.targetCategoryKey);
     if (!source || !target) return null;
     const assignment = resolveThreadSectionDrop(source, target.project, target.section?.id ?? null);
-    return assignment ? { source, target, thread: { ...source, ...assignment } } : null;
-  }, [categoryDrag, dragState, storedCategoryGroups, threadByKey]);
-  // Preview membership only. Persisted shells and lifecycle shelves change on drop.
-  const categoryGroups = useMemo(() => {
-    if (!categoryPreview) return storedCategoryGroups;
-    return storedCategoryGroups.map((group) => ({
-      ...group,
-      threads: [
-        ...(group.key === categoryPreview.target.key ? [categoryPreview.thread] : []),
-        ...group.threads.filter((thread) => thread !== categoryPreview.source),
-      ],
-    }));
-  }, [categoryPreview, storedCategoryGroups]);
+    return assignment ? target : null;
+  }, [categoryDrag, dragState, categoryGroups, threadByKey]);
   const categoryTargets = useMemo(() => {
     const targets = new Map<string, (typeof categoryGroups)[number]>();
     for (const group of categoryGroups) {
@@ -4183,8 +4182,8 @@ export default function Sidebar() {
     const source = threadByKey.get(draggedThreadKey);
     if (source === undefined) return createSidebarCollisionDetection(() => false);
     if (sectionGrouping === "section")
-      return (args: Parameters<typeof pointerWithin>[0]) =>
-        pointerWithin({
+      return (args: Parameters<typeof pointerWithin>[0]) => {
+        const collisions = pointerWithin({
           ...args,
           droppableContainers: args.droppableContainers.filter((container) => {
             const target = categoryTargets.get(String(container.id));
@@ -4194,6 +4193,10 @@ export default function Sidebar() {
             );
           }),
         });
+        // Keep the card following the pointer in gaps and over invalid targets.
+        // The source is a no-op drop target and never shows an insertion line.
+        return collisions.length > 0 ? collisions : [{ id: args.active.id }];
+      };
     return createSidebarCollisionDetection(
       (id) => {
         const target = resolveSidebarDropTarget(sidebarListItems, draggedThreadKey, id);
@@ -5552,7 +5555,7 @@ export default function Sidebar() {
                 onDragEnd={handleThreadDragEnd}
               >
                 <SidebarDragLifecycle onUnmount={cancelThreadDrag} />
-                <CategoryDropMeasurements previewKey={categoryPreview?.target.key ?? null} />
+                <CategoryDropMeasurements previewKey={categoryDropTarget?.key ?? null} />
                 <SortableContext items={sortableIds} strategy={sidebarSortingStrategy}>
                   <ul
                     ref={attachListMotionRef}
@@ -5617,7 +5620,7 @@ export default function Sidebar() {
                             isPinned={thread.pinnedAt != null}
                             sortable={sortable}
                             dropVerb={
-                              dragState?.activeKey === threadKey
+                              sectionGrouping !== "section" && dragState?.activeKey === threadKey
                                 ? resolveSidebarDropVerb(dragState.activeSection, dragTargetSection)
                                 : null
                             }
@@ -5733,12 +5736,7 @@ export default function Sidebar() {
                       ];
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
-                          if (
-                            sectionGrouping === "section" &&
-                            (item.section === "active" ||
-                              (categoryPreview !== null && item.key === dragState?.activeKey))
-                          )
-                            continue;
+                          if (sectionGrouping === "section" && item.section === "active") continue;
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
                           continue;
                         }
@@ -5794,7 +5792,7 @@ export default function Sidebar() {
                                     section={group.section}
                                     count={group.threads.length}
                                     dropEnabled={sameProject}
-                                    expandForDrop={categoryPreview?.target.key === group.key}
+                                    expandForDrop={categoryDropTarget?.key === group.key}
                                     showProject={sectionProjects.length > 1}
                                     onNewThread={() => {
                                       void handleNewThreadRef.current(
@@ -5809,16 +5807,11 @@ export default function Sidebar() {
                                 );
                                 if (
                                   !collapsedThreadSections.includes(group.key) ||
-                                  categoryPreview?.target.key === group.key
+                                  categoryDropTarget?.key === group.key
                                 ) {
                                   items.push(
                                     ...group.threads.map((thread) =>
-                                      renderThreadRow(
-                                        thread,
-                                        categoryPreview?.thread === thread
-                                          ? (dragState?.activeSection ?? "active")
-                                          : "active",
-                                      ),
+                                      renderThreadRow(thread, "active"),
                                     ),
                                   );
                                 }

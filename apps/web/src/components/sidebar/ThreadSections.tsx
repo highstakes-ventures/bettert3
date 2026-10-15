@@ -315,7 +315,7 @@ export function ThreadSectionHeading({
   expandForDrop?: boolean;
 }) {
   const key = threadSectionKey(project, section?.id ?? null);
-  const { setNodeRef, isOver } = useDroppable({
+  const { setNodeRef } = useDroppable({
     id: `category:${key}`,
     disabled: !dropEnabled,
   });
@@ -340,11 +340,17 @@ export function ThreadSectionHeading({
         ref={setNodeRef}
         data-category-key={key}
         className={cn(
-          "group/category mt-3 flex min-w-0 items-center gap-1 rounded px-2 text-xs",
+          "group/category relative mt-3 flex min-w-0 items-center gap-1 rounded px-2 text-xs",
           section ? projectIconColorClassName(section.color) : "text-sidebar-muted-foreground",
-          isOver && "bg-sidebar-row-hover outline outline-1 outline-sidebar-border",
         )}
       >
+        {expandForDrop ? (
+          <span
+            aria-hidden
+            data-category-drop-indicator
+            className="pointer-events-none absolute inset-x-2 -bottom-px z-10 h-0.5 rounded-full bg-current"
+          />
+        ) : null}
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring"
