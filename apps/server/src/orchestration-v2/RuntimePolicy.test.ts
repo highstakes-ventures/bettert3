@@ -69,6 +69,7 @@ const supportedRuntimeModesByInstance = new Map<ProviderInstanceId, ReadonlyArra
 ]);
 const providerInstanceFor = (instanceId: ProviderInstanceId) =>
   ({
+    driverKind: instanceId === grokInstanceId ? "grok" : "codex",
     snapshot: {
       getSnapshot: Effect.succeed({
         supportedRuntimeModes: supportedRuntimeModesByInstance.get(instanceId),
@@ -154,3 +155,25 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
     }),
   );
 });
+
+it.effect(
+  "keeps the Cloud workspace and refuses a different provider without using the local project",
+  () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const runDestination = {
+        kind: "codexCloud" as const,
+        accountId: "account",
+        environmentConfigId: "workspace",
+        name: "Cloud",
+        cwd: "/workspace",
+      };
+      const thread = { ...makeThread({ now, worktreePath: null }), runDestination };
+      assert.equal((yield* policy.resolve({ thread, modelSelection })).cwd, "/workspace");
+      const failed = yield* policy
+        .resolve({ thread, modelSelection: { ...modelSelection, instanceId: grokInstanceId } })
+        .pipe(Effect.result);
+      assert.equal(failed._tag, "Failure");
+    }).pipe(Effect.provide(layerTest)),
+);

@@ -159,6 +159,7 @@ function resetComposerDraftStore() {
     stickyModelSelectionByProvider: {},
     stickyOptionsByModelByProvider: {},
     stickyActiveProvider: null,
+    lastRunDestinationByProject: {},
   });
 }
 
@@ -3565,5 +3566,55 @@ describe("composerDraftStore attachment references", () => {
     expect(merged.draftsByThreadKey[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)]?.prompt).toBe(
       prompt,
     );
+  });
+});
+
+describe("remembered run destination", () => {
+  beforeEach(resetComposerDraftStore);
+  it("restores the explicit Cloud destination after persistence, and remembers returning to a machine", () => {
+    const projectRef = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("project-destination"));
+    const key = scopedProjectKey(projectRef);
+    const first = DraftId.make("draft-destination-first");
+    const second = DraftId.make("draft-destination-second");
+    const cloud = {
+      kind: "codexCloud" as const,
+      accountId: "account",
+      environmentConfigId: "cloud-workspace",
+      name: "Cloud",
+      cwd: "/workspace",
+    };
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId(key, projectRef, first);
+    store.setDraftThreadContext(first, {
+      runDestination: cloud,
+      environmentSelection: "manual",
+      branch: null,
+      worktreePath: null,
+      envMode: "local",
+    });
+    const merge = useComposerDraftStore.persist.getOptions().merge!;
+    const hydrated = merge(
+      JSON.parse(
+        JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
+      ),
+      useComposerDraftStore.getInitialState(),
+    );
+    useComposerDraftStore.setState(hydrated);
+    useComposerDraftStore.getState().setLogicalProjectDraftThreadId(key, projectRef, second, {
+      envMode: "worktree",
+      branch: "main",
+    });
+    expect(useComposerDraftStore.getState().getDraftSession(second)).toMatchObject({
+      runDestination: cloud,
+      envMode: "local",
+      branch: null,
+      worktreePath: null,
+    });
+    useComposerDraftStore
+      .getState()
+      .setDraftThreadContext(second, { runDestination: null, environmentSelection: "manual" });
+    const third = DraftId.make("draft-destination-third");
+    useComposerDraftStore.getState().setLogicalProjectDraftThreadId(key, projectRef, third);
+    expect(useComposerDraftStore.getState().getDraftSession(third)?.runDestination).toBeNull();
   });
 });

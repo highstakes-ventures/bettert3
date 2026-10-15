@@ -1515,6 +1515,9 @@ export function threadShellFromProjection(
     pullRequests: projection.thread.pullRequests,
   });
   return {
+    ...(projection.thread.runDestination === undefined
+      ? {}
+      : { runDestination: projection.thread.runDestination }),
     createdBy: projection.thread.createdBy,
     creationSource: projection.thread.creationSource,
     id: projection.thread.id,
@@ -1783,6 +1786,9 @@ function shellFromState(input: {
   readonly visibleItemCount: number;
 }): OrchestrationV2ThreadShell {
   return {
+    ...(input.state.thread.runDestination === undefined
+      ? {}
+      : { runDestination: input.state.thread.runDestination }),
     createdBy: input.state.thread.createdBy,
     creationSource: input.state.thread.creationSource,
     id: input.state.thread.id,

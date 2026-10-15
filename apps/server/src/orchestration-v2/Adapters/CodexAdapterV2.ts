@@ -1,3 +1,4 @@
+import * as CodexCloudChats from "../../provider/CodexCloudChats.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
@@ -1290,6 +1291,7 @@ type CodexSubAgentActivityItem = Extract<
 
 export interface CodexAppServerClientFactoryShape {
   readonly open: (input: {
+    readonly onTransportError?: (error: CodexErrors.CodexAppServerError) => Effect.Effect<void>;
     readonly instanceId: ProviderInstanceId;
     readonly threadId: ThreadId;
     readonly providerSessionId: OrchestrationV2ProviderSession["id"];
@@ -1530,17 +1532,38 @@ function isSensitiveCodexProtocolKey(key: string): boolean {
 export const layerAppServerClientFactory: Layer.Layer<
   CodexAppServerClientFactory,
   never,
-  ChildProcessSpawner.ChildProcessSpawner | ProviderEventLoggers.ProviderEventLoggers
+  | ChildProcessSpawner.ChildProcessSpawner
+  | ProviderEventLoggers.ProviderEventLoggers
+  | CodexCloudChats.CodexCloudChats
 > = Layer.effect(
   CodexAppServerClientFactory,
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const cloud = yield* CodexCloudChats.CodexCloudChats;
     const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
     const agentScope = yield* AgentScope;
 
     return CodexAppServerClientFactory.of({
       open: (input) =>
         Effect.gen(function* () {
+          if (input.runtimePolicy.runDestination) {
+            return yield* cloud
+              .openClient(
+                input.runtimePolicy.runDestination,
+                input.instanceId,
+                input.onTransportError,
+              )
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapter.ProviderAdapterOpenSessionError({
+                      driver: CODEX_PROVIDER,
+                      providerSessionId: input.providerSessionId,
+                      cause,
+                    }),
+                ),
+              );
+          }
           const scope = yield* Scope.Scope;
           const environment = {
             ...codexAppServerEnvironment(input.environment),
@@ -1742,7 +1765,20 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     }),
                 ),
               );
+        const transportFailure = yield* Deferred.make<
+          never,
+          ProviderAdapter.ProviderAdapterEventStreamError
+        >();
         const client = yield* clientFactory.open({
+          onTransportError: (cause) =>
+            Deferred.fail(
+              transportFailure,
+              new ProviderAdapter.ProviderAdapterEventStreamError({
+                driver: CODEX_PROVIDER,
+                providerSessionId: input.providerSessionId,
+                cause,
+              }),
+            ).pipe(Effect.asVoid),
           instanceId: adapterOptions.instanceId,
           threadId: input.threadId,
           providerSessionId: input.providerSessionId,
@@ -6286,7 +6322,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         ) =>
           Effect.gen(function* () {
             const threadId = yield* getNativeThreadId(turnInput.providerThread);
-            const mcpSession = yield* mcpSessions.read(turnInput.threadId);
+            const mcpSession = input.runtimePolicy.runDestination
+              ? undefined
+              : yield* mcpSessions.read(turnInput.threadId);
             const turnStartParams = yield* buildCodexTurnStartParams({
               nativeThreadId: threadId,
               codexInput,
@@ -6515,7 +6553,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           driver: CODEX_PROVIDER,
           providerSessionId: input.providerSessionId,
           providerSession: session,
-          events: Stream.fromEffectRepeat(Queue.take(events)),
+          events: input.runtimePolicy.runDestination
+            ? Stream.fromEffectRepeat(Queue.take(events)).pipe(
+                Stream.merge(Stream.fromEffect(Deferred.await(transportFailure))),
+              )
+            : Stream.fromEffectRepeat(Queue.take(events)),
           canReuseContextUsage: canReuseCodexContextUsage,
           // Known gap: a subagent that Codex resumes later reads as completed
           // (not pending) between turns, so idle release can win the race
@@ -6565,7 +6607,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             }),
           ensureThread: (threadInput) =>
             ensureInitialized.pipe(
-              Effect.andThen(mcpSessions.read(threadInput.threadId)),
+              Effect.andThen(
+                input.runtimePolicy.runDestination
+                  ? Effect.succeed(undefined)
+                  : mcpSessions.read(threadInput.threadId),
+              ),
               Effect.flatMap((mcpSession) =>
                 client.request(
                   "thread/start",
@@ -6603,9 +6649,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 threadId: nativeThreadId,
                 excludeTurns: true,
                 ...codexThreadRuntimeParams({
-                  mcpSession: yield* readMcpSession(
-                    threadInput.threadId ?? threadInput.providerThread.appThreadId,
-                  ),
+                  mcpSession: input.runtimePolicy.runDestination
+                    ? undefined
+                    : yield* readMcpSession(
+                        threadInput.threadId ?? threadInput.providerThread.appThreadId,
+                      ),
                   ...(threadInput.modelSelection === undefined
                     ? {}
                     : { modelSelection: threadInput.modelSelection }),
@@ -7334,7 +7382,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   threadId,
                   excludeTurns: true,
                   ...codexThreadRuntimeParams({
-                    mcpSession: yield* readMcpSession(threadInput.providerThread.appThreadId),
+                    mcpSession: input.runtimePolicy.runDestination
+                      ? undefined
+                      : yield* readMcpSession(threadInput.providerThread.appThreadId),
                     modelSelection: input.modelSelection,
                     runtimePolicy: input.runtimePolicy,
                   }),

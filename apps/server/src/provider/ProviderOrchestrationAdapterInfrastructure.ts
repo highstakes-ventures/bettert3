@@ -1,3 +1,4 @@
+import * as CodexCloudChats from "./CodexCloudChats.ts";
 import * as Layer from "effect/Layer";
 
 import * as ClaudeAdapterV2 from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
@@ -24,7 +25,7 @@ export type ProviderOrchestrationAdapterInfrastructure =
  */
 export const layer = Layer.mergeAll(
   ClaudeAdapterV2.layerQueryRunner,
-  CodexAdapterV2.layerAppServerClientFactory,
+  CodexAdapterV2.layerAppServerClientFactory.pipe(Layer.provide(CodexCloudChats.layer)),
   CursorAgentSdk.layer.pipe(Layer.provideMerge(CursorSdk.layer)),
   CursorKeychain.layer,
   IdAllocator.layer,

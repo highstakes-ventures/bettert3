@@ -75,6 +75,7 @@ import {
   CircleDashedIcon,
   CircleDotDashedIcon,
   ClockIcon,
+  CloudIcon,
   EyeIcon,
   FolderIcon,
   GitBranchIcon,
@@ -490,13 +491,21 @@ function SidebarThreadTooltip({
             <div className="min-w-0 truncate text-foreground/75">{projectDisplayName}</div>
           </div>
         ) : null}
-        {environmentLabel ? (
+        {thread.source.runDestination || environmentLabel ? (
           <div className="flex min-w-0 items-center gap-2">
-            <EnvironmentMachineIcon
-              kind={environmentMachine}
-              className="size-3 shrink-0 stroke-muted-foreground"
-            />
-            <div className="min-w-0 truncate text-foreground/75">{environmentLabel}</div>
+            {thread.source.runDestination ? (
+              <CloudIcon className="size-3 shrink-0 stroke-muted-foreground" />
+            ) : (
+              <EnvironmentMachineIcon
+                kind={environmentMachine}
+                className="size-3 shrink-0 stroke-muted-foreground"
+              />
+            )}
+            <div className="min-w-0 truncate text-foreground/75">
+              {thread.source.runDestination
+                ? `Codex Cloud · ${thread.source.runDestination.name}`
+                : environmentLabel}
+            </div>
           </div>
         ) : null}
         {thread.branch ? (
@@ -1377,12 +1386,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     ? getTriggerDisplayModelLabel(selectedModel)
     : thread.modelSelection.model;
 
-  // The local environment is "this machine" and needs no marker; every other
-  // one gets its machine glyph. With no local environment (the hosted app)
-  // that is every thread, which is the point: the glyph is what tells rows on
-  // different machines apart.
-  const isRemote = thread.environmentId !== props.currentEnvironmentId;
-  const showsScratchMachine = !thread.branch && props.scratchMachineLabel !== null;
+  const showsScratchMachine =
+    !thread.source.runDestination && !thread.branch && props.scratchMachineLabel !== null;
 
   const detailsTooltip = (
     <SidebarThreadTooltip
@@ -2209,13 +2214,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 aria-hidden
                 className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
               >
-                {isRemote && !showsScratchMachine ? (
+                {!showsScratchMachine ? (
                   <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                    <EnvironmentMachineIcon
-                      aria-hidden
-                      kind={props.environmentMachine}
-                      className="size-3.5"
-                    />
+                    {thread.source.runDestination ? (
+                      <CloudIcon aria-hidden className="size-3.5" />
+                    ) : (
+                      <EnvironmentMachineIcon
+                        aria-hidden
+                        kind={props.environmentMachine}
+                        className="size-3.5"
+                      />
+                    )}
                   </span>
                 ) : null}
                 <SidebarProviderStack

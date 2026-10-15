@@ -1,5 +1,18 @@
 import * as Schema from "effect/Schema";
 
+export const CodexCloudDestination = Schema.Struct({
+  kind: Schema.Literal("codexCloud"),
+  accountId: Schema.String,
+  environmentConfigId: Schema.String,
+  name: Schema.String,
+  cwd: Schema.String.check(Schema.isPattern(/^\//)),
+});
+export type CodexCloudDestination = typeof CodexCloudDestination.Type;
+
+export const CloudChatDestinationsResult = Schema.Struct({
+  destinations: Schema.Array(CodexCloudDestination),
+});
+
 export const CloudChatSummary = Schema.Struct({
   id: Schema.String,
   title: Schema.String,

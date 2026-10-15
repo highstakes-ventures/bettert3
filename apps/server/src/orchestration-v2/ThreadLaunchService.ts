@@ -1,3 +1,4 @@
+import type { CodexCloudDestination } from "@t3tools/contracts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -74,6 +75,7 @@ export interface ThreadLaunchInitialMessage {
 }
 
 export interface ThreadLaunchInput {
+  readonly runDestination?: CodexCloudDestination;
   readonly commandId: CommandId;
   readonly threadId?: ThreadId;
   readonly reuseExistingThread?: boolean;
@@ -789,6 +791,17 @@ const make = Effect.gen(function* () {
 
   const launch: ThreadLaunchService["Service"]["launch"] = Effect.fn("ThreadLaunchService.launch")(
     function* (input) {
+      if (
+        input.runDestination &&
+        (input.workspaceStrategy.type !== "root" ||
+          input.workspaceStrategy.branch !== undefined ||
+          input.reuseExistingThread)
+      ) {
+        return yield* mapError(
+          input,
+          "create-thread",
+        )("Cloud launches cannot prepare a local workspace.");
+      }
       yield* ProjectCloneTracker.rejectCommandsDuringClone(cloneTracker, {
         type: "thread.create",
         projectId: input.projectId,
@@ -857,7 +870,9 @@ const make = Effect.gen(function* () {
         // A Scratch thread launched at the project root runs in a folder of its
         // own. Only the first attempt claims one; a retry replays its create.
         const workspaceStrategy: ThreadLaunchWorkspaceStrategy =
-          input.workspaceStrategy.type === "root" && Option.isNone(launchReceipt)
+          !input.runDestination &&
+          input.workspaceStrategy.type === "root" &&
+          Option.isNone(launchReceipt)
             ? Option.match(
                 yield* managedFolders
                   .folderForThread({
@@ -894,6 +909,7 @@ const make = Effect.gen(function* () {
                 interactionMode: input.interactionMode,
                 branch: initialBranch,
                 worktreePath: initialWorktreePath,
+                ...(input.runDestination ? { runDestination: input.runDestination } : {}),
                 ...(input.importedNativeThread === undefined
                   ? {}
                   : { importedNativeThread: input.importedNativeThread }),
@@ -944,7 +960,9 @@ const make = Effect.gen(function* () {
               ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
               ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
               modelSelection: input.modelSelection,
-              dispatchMode: { type: "defer_start", workspaceStrategy },
+              dispatchMode: input.runDestination
+                ? { type: "start_immediately" }
+                : { type: "defer_start", workspaceStrategy },
               createdBy: input.createdBy,
               creationSource: input.creationSource,
             })
@@ -968,7 +986,8 @@ const make = Effect.gen(function* () {
         const runIsPreparing =
           runId !== null &&
           projection.runs.some((run) => run.id === runId && run.status === "preparing");
-        const shouldSchedule = runId === null ? Option.isNone(launchReceipt) : runIsPreparing;
+        const shouldSchedule =
+          !input.runDestination && (runId === null ? Option.isNone(launchReceipt) : runIsPreparing);
         // A retried root launch prepares the folder its first attempt bound, so
         // a Scratch thread keeps its own. Other root launches bind no folder.
         const boundWorktreePath = projection.thread.worktreePath;

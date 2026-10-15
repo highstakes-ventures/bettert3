@@ -277,7 +277,7 @@ export const layer: Layer.Layer<
         providerThread === undefined ||
         providerThread.providerSessionId === null ||
         message === undefined ||
-        checkpointScope === undefined
+        (checkpointScope === undefined && !projection.thread.runDestination)
       ) {
         return yield* new ProviderTurnStartError({
           runId,
@@ -461,7 +461,7 @@ export const layer: Layer.Layer<
         }
       }
       const { worktreePath, branch } = projection.thread;
-      if (worktreePath !== null && branch !== null) {
+      if (!projection.thread.runDestination && worktreePath !== null && branch !== null) {
         const exists = yield* fileSystem
           .exists(worktreePath)
           .pipe(Effect.orElseSucceed(() => true));
@@ -1235,7 +1235,7 @@ export const layer: Layer.Layer<
         session: deliverySession,
         run: runningRun,
         rootNode: runningRootNode,
-        checkpointScope,
+        checkpointScope: projection.thread.runDestination ? null : (checkpointScope ?? null),
         providerThread: runningProviderThread,
         attempt: runningAttempt,
         attemptId: attempt.id,

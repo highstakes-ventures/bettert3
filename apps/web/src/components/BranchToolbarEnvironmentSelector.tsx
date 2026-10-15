@@ -1,8 +1,9 @@
+import type { CodexCloudDestination } from "@t3tools/contracts";
 import { ComposerSelectControl } from "./chat/ComposerControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { ScaleIcon } from "lucide-react";
+import { CloudIcon, ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import type { EnvironmentOption } from "./BranchToolbar.logic";
@@ -18,6 +19,10 @@ import {
 } from "./ui/select";
 
 interface BranchToolbarEnvironmentSelectorProps {
+  cloudDestinations?: readonly CodexCloudDestination[] | undefined;
+  runDestination?: CodexCloudDestination | null | undefined;
+  onCloudDestinationChange?: ((destination: CodexCloudDestination) => void) | undefined;
+
   autoEnvironmentLabel?: string | undefined;
   onAutoEnvironment?: (() => void) | undefined;
   envLocked: boolean;
@@ -32,6 +37,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   envLocked,
   environmentId,
   availableEnvironments,
+  cloudDestinations,
+  runDestination,
+  onCloudDestinationChange,
   onEnvironmentChange,
 }: BranchToolbarEnvironmentSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
@@ -39,17 +47,33 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     return availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
   }, [availableEnvironments, environmentId]);
 
+  const destinationLabel = runDestination
+    ? `Codex Cloud · ${runDestination.name}`
+    : (autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on");
+  const destinationIcon = runDestination ? (
+    <CloudIcon className="size-3 shrink-0" aria-hidden="true" />
+  ) : (
+    <EnvironmentMachineIcon
+      kind={activeEnvironment?.machine ?? "server"}
+      className="size-3 shrink-0"
+    />
+  );
+
   const environmentItems = useMemo(
     () => [
       ...(onAutoEnvironment
         ? [{ value: "auto", label: autoEnvironmentLabel ?? "Auto balance" }]
         : []),
+      ...(cloudDestinations ?? []).map((destination) => ({
+        value: `cloud:${destination.environmentConfigId}`,
+        label: `Codex Cloud · ${destination.name}`,
+      })),
       ...availableEnvironments.map((env) => ({
         value: env.environmentId,
         label: env.label,
       })),
     ],
-    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment],
+    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment, cloudDestinations],
   );
 
   // The static label carries the xs control's height (h-7 sm:h-6) as well as
@@ -63,17 +87,22 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         className="inline-flex h-7 min-w-0 max-w-full items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6"
         data-composer-context-control
       >
-        <EnvironmentMachineIcon
-          kind={activeEnvironment?.machine ?? "server"}
-          className="size-3 shrink-0"
-        />
-        <ComposerContextLabel>{activeEnvironment?.label ?? "Run on"}</ComposerContextLabel>
+        {destinationIcon}
+        <ComposerContextLabel>
+          {runDestination
+            ? `Codex Cloud · ${runDestination.name}`
+            : (activeEnvironment?.label ?? "Run on")}
+        </ComposerContextLabel>
       </span>
     );
     return (
       <Tooltip>
         <TooltipTrigger render={lockedRow} />
-        <TooltipPopup>{activeEnvironment?.label ?? "Run on"}</TooltipPopup>
+        <TooltipPopup>
+          {runDestination
+            ? `Codex Cloud · ${runDestination.name}`
+            : (activeEnvironment?.label ?? "Run on")}
+        </TooltipPopup>
       </Tooltip>
     );
   }
@@ -81,10 +110,21 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   return (
     <Select
       modal={false}
-      value={autoEnvironmentLabel ? "auto" : environmentId}
-      onValueChange={(value) =>
-        value === "auto" ? onAutoEnvironment?.() : onEnvironmentChange(value as EnvironmentId)
+      value={
+        runDestination
+          ? `cloud:${runDestination.environmentConfigId}`
+          : autoEnvironmentLabel
+            ? "auto"
+            : environmentId
       }
+      onValueChange={(value) => {
+        const cloud = cloudDestinations?.find(
+          (destination) => `cloud:${destination.environmentConfigId}` === value,
+        );
+        if (cloud) onCloudDestinationChange?.(cloud);
+        else if (value === "auto") onAutoEnvironment?.();
+        else onEnvironmentChange(value as EnvironmentId);
+      }}
       items={environmentItems}
     >
       <Tooltip>
@@ -102,16 +142,13 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           {autoEnvironmentLabel ? (
             <ScaleIcon className="size-3 shrink-0" aria-hidden="true" />
           ) : (
-            <EnvironmentMachineIcon
-              kind={activeEnvironment?.machine ?? "server"}
-              className="size-3 shrink-0"
-            />
+            destinationIcon
           )}
           <ComposerContextLabel>
             <SelectValue />
           </ComposerContextLabel>
         </TooltipTrigger>
-        <TooltipPopup>{autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}</TooltipPopup>
+        <TooltipPopup>{destinationLabel}</TooltipPopup>
       </Tooltip>
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
         <SelectGroup>
@@ -129,6 +166,17 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               </span>
             </SelectItem>
           )}
+          {cloudDestinations?.map((destination) => (
+            <SelectItem
+              key={destination.environmentConfigId}
+              value={`cloud:${destination.environmentConfigId}`}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <CloudIcon className="size-3" />
+                Codex Cloud · {destination.name}
+              </span>
+            </SelectItem>
+          ))}
           {availableEnvironments.map((env) => (
             <SelectItem key={env.environmentId} value={env.environmentId}>
               <span className="inline-flex items-center gap-1.5">

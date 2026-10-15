@@ -1,3 +1,4 @@
+import { CodexCloudDestination } from "@t3tools/contracts";
 import { stripInlineContextReferences } from "./lib/composerContextReferences";
 import { elementContextToPreviewAnnotation } from "./lib/elementContext";
 import {
@@ -322,6 +323,7 @@ const PersistedDraftThreadState = Schema.Struct({
   projectId: ProjectId,
   logicalProjectKey: Schema.optionalKey(Schema.String),
   environmentSelection: Schema.optionalKey(Schema.Literals(["auto", "manual"])),
+  runDestination: Schema.optionalKey(Schema.NullOr(CodexCloudDestination)),
   loadBalancedEnvironmentId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
@@ -341,7 +343,16 @@ const PersistedDraftThreadState = Schema.Struct({
 });
 type PersistedDraftThreadState = typeof PersistedDraftThreadState.Type;
 
+const RunDestinationPreferences = Schema.Record(
+  Schema.String,
+  Schema.Struct({
+    environmentId: EnvironmentId,
+    projectId: ProjectId,
+    runDestination: Schema.NullOr(CodexCloudDestination),
+  }),
+);
 const PersistedComposerDraftStoreState = Schema.Struct({
+  lastRunDestinationByProject: Schema.optionalKey(RunDestinationPreferences),
   draftsByThreadKey: Schema.Record(Schema.String, PersistedComposerThreadDraftState),
   draftThreadsByThreadKey: Schema.Record(Schema.String, PersistedDraftThreadState),
   logicalProjectDraftThreadKeyByLogicalProjectKey: Schema.Record(Schema.String, Schema.String),
@@ -454,6 +465,7 @@ export interface DraftSessionState {
   projectId: ProjectId;
   logicalProjectKey: string;
   environmentSelection?: "auto" | "manual";
+  runDestination?: CodexCloudDestination | null;
   loadBalancedEnvironmentId?: EnvironmentId | null;
   createdAt: string;
   runtimeMode: RuntimeMode;
@@ -492,6 +504,7 @@ export type ComposerThreadTarget = ScopedThreadRef | DraftId;
  * - server thread composer state keyed by `ScopedThreadRef`
  */
 interface ComposerDraftStoreState {
+  lastRunDestinationByProject: typeof RunDestinationPreferences.Type;
   draftsByThreadKey: Record<string, ComposerThreadDraftState>;
   draftThreadsByThreadKey: Record<string, DraftThreadState>;
   logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string>;
@@ -543,6 +556,7 @@ interface ComposerDraftStoreState {
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
+      runDestination?: CodexCloudDestination | null;
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
@@ -560,6 +574,7 @@ interface ComposerDraftStoreState {
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
+      runDestination?: CodexCloudDestination | null;
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
@@ -576,6 +591,7 @@ interface ComposerDraftStoreState {
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
+      runDestination?: CodexCloudDestination | null;
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
@@ -1596,6 +1612,7 @@ function createDraftThreadState(
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
     environmentSelection?: "auto" | "manual";
+    runDestination?: CodexCloudDestination | null;
     loadBalancedEnvironmentId?: EnvironmentId | null;
   },
 ): DraftThreadState {
@@ -1629,6 +1646,10 @@ function createDraftThreadState(
     threadId,
     environmentId: projectRef.environmentId,
     projectId: projectRef.projectId,
+    runDestination:
+      options?.runDestination === undefined
+        ? (existingThread?.runDestination ?? null)
+        : options.runDestination,
     logicalProjectKey,
     ...(environmentSelection ? { environmentSelection } : {}),
     ...(options?.loadBalancedEnvironmentId !== undefined
@@ -1674,6 +1695,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.environmentId === right.environmentId &&
     left.projectId === right.projectId &&
     left.logicalProjectKey === right.logicalProjectKey &&
+    Equal.equals(left.runDestination, right.runDestination) &&
     left.environmentSelection === right.environmentSelection &&
     left.loadBalancedEnvironmentId === right.loadBalancedEnvironmentId &&
     left.createdAt === right.createdAt &&
@@ -1831,6 +1853,9 @@ function normalizePersistedDraftThreads(
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
         startFromOrigin,
+        ...(Schema.is(CodexCloudDestination)(candidateDraftThread.runDestination)
+          ? { runDestination: candidateDraftThread.runDestination }
+          : {}),
         ...(candidateDraftThread.environmentSelection === "manual" ||
         candidateDraftThread.environmentSelection === "auto"
           ? { environmentSelection: candidateDraftThread.environmentSelection }
@@ -2318,6 +2343,7 @@ export function partializeComposerDraftStoreState(
       state.stickyOptionsByModelByProvider,
     ),
     stickyActiveProvider: state.stickyActiveProvider,
+    lastRunDestinationByProject: state.lastRunDestinationByProject,
   };
 }
 
@@ -2392,6 +2418,11 @@ function normalizeCurrentPersistedComposerDraftStoreState(
         ? seedStickyOptionsByModel(stickyModelSelectionByProvider)
         : compactStickyOptionsByModel(normalizedPersistedState.stickyOptionsByModelByProvider),
     stickyActiveProvider,
+    lastRunDestinationByProject: Schema.is(RunDestinationPreferences)(
+      normalizedPersistedState.lastRunDestinationByProject,
+    )
+      ? normalizedPersistedState.lastRunDestinationByProject
+      : {},
   };
 }
 
@@ -2588,6 +2619,7 @@ function toHydratedDraftThreadState(
         ),
       ),
     createdAt: persistedDraftThread.createdAt,
+    runDestination: persistedDraftThread.runDestination ?? null,
     runtimeMode: persistedDraftThread.runtimeMode,
     interactionMode: persistedDraftThread.interactionMode,
     branch: persistedDraftThread.branch,
@@ -2626,6 +2658,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         stickyModelSelectionByProvider: {},
         stickyOptionsByModelByProvider: {},
         stickyActiveProvider: null,
+        lastRunDestinationByProject: {},
         getComposerDraft: (target) => getComposerDraftState(get(), target),
         getDraftThreadByLogicalProjectKey: (logicalProjectKey) => {
           return get().getDraftSessionByLogicalProjectKey(logicalProjectKey);
@@ -2730,12 +2763,33 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const existingThread = state.draftThreadsByThreadKey[draftId];
             const previousThreadKeyForLogicalProject =
               state.logicalProjectDraftThreadKeyByLogicalProjectKey[normalizedLogicalProjectKey];
+            const preference =
+              !existingThread && options?.environmentSelection !== "manual"
+                ? state.lastRunDestinationByProject[normalizedLogicalProjectKey]
+                : undefined;
+            const preferredProjectRef = preference
+              ? scopeProjectRef(preference.environmentId, preference.projectId)
+              : projectRef;
             const nextDraftThread = createDraftThreadState(
-              projectRef,
+              preferredProjectRef,
               options?.threadId ?? existingThread?.threadId ?? ThreadId.make(draftId),
               normalizedLogicalProjectKey,
               existingThread,
-              options,
+              preference
+                ? {
+                    ...options,
+                    runDestination: preference.runDestination,
+                    environmentSelection: "manual",
+                    ...(preference.runDestination
+                      ? {
+                          branch: null,
+                          worktreePath: null,
+                          envMode: "local",
+                          startFromOrigin: false,
+                        }
+                      : {}),
+                  }
+                : options,
             );
             const hasSameLogicalMapping = previousThreadKeyForLogicalProject === draftId;
             const hasNoStaleMappingsForDraft = Object.entries(
@@ -2814,6 +2868,17 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               }
             }
             return {
+              lastRunDestinationByProject:
+                options?.environmentSelection === "manual"
+                  ? {
+                      ...state.lastRunDestinationByProject,
+                      [normalizedLogicalProjectKey]: {
+                        environmentId: nextDraftThread.environmentId,
+                        projectId: nextDraftThread.projectId,
+                        runDestination: nextDraftThread.runDestination ?? null,
+                      },
+                    }
+                  : state.lastRunDestinationByProject,
               draftsByThreadKey: nextDraftsByThreadKey,
               draftThreadsByThreadKey: nextDraftThreadsByThreadKey,
               logicalProjectDraftThreadKeyByLogicalProjectKey:
@@ -2881,6 +2946,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               environmentId: nextProjectRef.environmentId,
               projectId: nextProjectRef.projectId,
               logicalProjectKey: existing.logicalProjectKey,
+              runDestination:
+                options.runDestination === undefined
+                  ? (existing.runDestination ?? null)
+                  : options.runDestination,
               ...(environmentSelection ? { environmentSelection } : {}),
               loadBalancedEnvironmentId:
                 options.loadBalancedEnvironmentId === undefined
@@ -2905,6 +2974,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.environmentId === existing.environmentId &&
               nextDraftThread.projectId === existing.projectId &&
               nextDraftThread.logicalProjectKey === existing.logicalProjectKey &&
+              Equal.equals(nextDraftThread.runDestination, existing.runDestination) &&
               nextDraftThread.environmentSelection === existing.environmentSelection &&
               nextDraftThread.loadBalancedEnvironmentId === existing.loadBalancedEnvironmentId &&
               nextDraftThread.createdAt === existing.createdAt &&
@@ -2919,6 +2989,17 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               return state;
             }
             return {
+              lastRunDestinationByProject:
+                options.environmentSelection === "manual"
+                  ? {
+                      ...state.lastRunDestinationByProject,
+                      [nextDraftThread.logicalProjectKey]: {
+                        environmentId: nextDraftThread.environmentId,
+                        projectId: nextDraftThread.projectId,
+                        runDestination: nextDraftThread.runDestination ?? null,
+                      },
+                    }
+                  : state.lastRunDestinationByProject,
               draftThreadsByThreadKey: {
                 ...state.draftThreadsByThreadKey,
                 [threadKey]: nextDraftThread,
@@ -4395,6 +4476,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           stickyModelSelectionByProvider: normalizedPersisted.stickyModelSelectionByProvider ?? {},
           stickyOptionsByModelByProvider: normalizedPersisted.stickyOptionsByModelByProvider ?? {},
           stickyActiveProvider: normalizedPersisted.stickyActiveProvider ?? null,
+          lastRunDestinationByProject: normalizedPersisted.lastRunDestinationByProject ?? {},
         };
       },
     },

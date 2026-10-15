@@ -5,6 +5,13 @@ import { createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 
 export function createCloudChatAtoms<R, E>(runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>) {
   return {
+    destinations: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:cloud-chats:destinations",
+      tag: WS_METHODS.cloudChatsDestinations,
+      refreshIntervalMs: 60_000,
+      staleTimeMs: 30_000,
+      idleTtlMs: 0,
+    }),
     list: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:cloud-chats:list",
       tag: WS_METHODS.cloudChatsList,

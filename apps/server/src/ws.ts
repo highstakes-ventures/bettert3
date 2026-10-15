@@ -1990,6 +1990,7 @@ const layerWsRpc = (
                     runtimeMode: input.runtimeMode,
                     interactionMode: input.interactionMode,
                     workspaceStrategy: input.workspaceStrategy,
+                    ...(input.runDestination ? { runDestination: input.runDestination } : {}),
                     ...(input.initialMessage === undefined
                       ? {}
                       : {
@@ -2491,6 +2492,10 @@ const layerWsRpc = (
                 Effect.forkScoped,
               ),
           ),
+        [WS_METHODS.cloudChatsDestinations]: (input) =>
+          cloudChats
+            .destinations(input.instanceId)
+            .pipe(Effect.map((destinations) => ({ destinations }))),
         [WS_METHODS.cloudChatsList]: () => cloudChats.list(),
         [WS_METHODS.cloudChatsRead]: (input) => cloudChats.read(input),
         [WS_METHODS.pullRequestsList]: (input) => pullRequests.list(input),

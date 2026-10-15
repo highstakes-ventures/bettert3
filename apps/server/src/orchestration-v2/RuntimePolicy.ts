@@ -64,7 +64,8 @@ export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2
     Effect.succeed({
       runtimeMode: input.thread.runtimeMode,
       interactionMode: input.thread.interactionMode,
-      cwd: input.thread.worktreePath,
+      cwd: input.thread.runDestination?.cwd ?? input.thread.worktreePath,
+      ...(input.thread.runDestination ? { runDestination: input.thread.runDestination } : {}),
     }),
 });
 
@@ -96,11 +97,19 @@ export const layerFromProjectStore: Layer.Layer<
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         const instance = yield* providerInstances.getInstance(input.modelSelection.instanceId);
+        if (input.thread.runDestination && instance?.driverKind !== "codex") {
+          return yield* new RuntimePolicyResolveError({
+            projectId: input.thread.projectId,
+            providerInstanceId: input.modelSelection.instanceId,
+            cause: "Codex Cloud requires a Codex provider.",
+          });
+        }
         const supportedRuntimeModes =
           instance === undefined
             ? undefined
             : (yield* instance.snapshot.getSnapshot).supportedRuntimeModes;
         const cwd =
+          input.thread.runDestination?.cwd ??
           input.thread.worktreePath ??
           (yield* projects.get(input.thread.projectId).pipe(
             Effect.mapError(
@@ -129,6 +138,7 @@ export const layerFromProjectStore: Layer.Layer<
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
+          ...(input.thread.runDestination ? { runDestination: input.thread.runDestination } : {}),
         });
       }),
     });

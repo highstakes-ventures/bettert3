@@ -1,3 +1,5 @@
+import { CloudChatError } from "@t3tools/contracts";
+import * as CodexCloudChats from "../../provider/CodexCloudChats.ts";
 import * as NodeOS from "node:os";
 
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
@@ -73,6 +75,12 @@ const encodeReplayTranscriptJson = Schema.encodeEffect(replayTranscriptJson);
 const decodeReplayTranscriptJson = Schema.decodeUnknownEffect(replayTranscriptJson);
 const encodeStringJson = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
 
+const unusedCloudChats = CodexCloudChats.CodexCloudChats.of({
+  list: () => Effect.die("Unexpected Cloud listing"),
+  read: () => Effect.die("Unexpected Cloud read"),
+  destinations: () => Effect.die("Unexpected Cloud catalogue"),
+  openClient: () => Effect.die("Unexpected Cloud execution"),
+});
 describe("Codex context usage compatibility", () => {
   const previous: ModelSelection = {
     instanceId: ProviderInstanceId.make("codex"),
@@ -749,6 +757,7 @@ describe("CodexAdapterV2 process spawning", () => {
       });
       const factory = yield* CodexAdapterV2.CodexAppServerClientFactory.pipe(
         Effect.provide(CodexAdapterV2.layerAppServerClientFactory),
+        Effect.provideService(CodexCloudChats.CodexCloudChats, unusedCloudChats),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(
           ProviderEventLoggers.ProviderEventLoggers,
@@ -803,7 +812,9 @@ describe("CodexAdapterV2 process spawning", () => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
-            CodexAdapterV2.layerAppServerClientFactory,
+            CodexAdapterV2.layerAppServerClientFactory.pipe(
+              Layer.provide(Layer.succeed(CodexCloudChats.CodexCloudChats, unusedCloudChats)),
+            ),
             ServerConfig.layerTest(process.cwd(), { prefix: "t3-codex-binary-home-" }),
           ),
         ),
@@ -1968,6 +1979,12 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       Effect.void,
     onRequest: (method: string, params: unknown) => Effect.Effect<void> = () => Effect.void,
     readChildMetadata?: Parameters<typeof withCodexReplayChildMetadata>[2],
+    cloud?: {
+      readonly destination: NonNullable<
+        ProviderAdapter.ProviderAdapterV2RuntimePolicy["runDestination"]
+      >;
+      readonly disconnected: Deferred.Deferred<void>;
+    },
   ) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1977,7 +1994,22 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         [];
       const clientFactory: CodexAdapterV2.CodexAppServerClientFactoryShape = {
         open: (openInput) =>
-          Layer.build(CodexReplay.layerReplay(transcript)).pipe(
+          Effect.gen(function* () {
+            if (cloud && openInput.onTransportError) {
+              yield* Deferred.await(cloud.disconnected).pipe(
+                Effect.andThen(
+                  openInput.onTransportError(
+                    new CodexError.CodexAppServerTransportError({
+                      operation: "read-input-stream",
+                      cause: "Cloud connection closed",
+                    }),
+                  ),
+                ),
+                Effect.forkScoped,
+              );
+            }
+            return yield* Layer.build(CodexReplay.layerReplay(transcript));
+          }).pipe(
             Effect.mapError(
               (cause) =>
                 new ProviderAdapter.ProviderAdapterOpenSessionError({
@@ -2023,16 +2055,20 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         },
       });
       const threadId = ThreadId.make(`thread-${transcript.scenario}`);
+      const runtimePolicy = {
+        ...CODEX_TEST_RUNTIME_POLICY,
+        ...(cloud ? { runDestination: cloud.destination } : {}),
+      };
       const runtime = yield* adapter.openSession({
         threadId,
         providerSessionId: ProviderSessionId.make(`provider-session-${transcript.scenario}`),
         modelSelection: CODEX_TEST_MODEL_SELECTION,
-        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        runtimePolicy,
       });
       const providerThread = yield* runtime.ensureThread({
         threadId,
         modelSelection: CODEX_TEST_MODEL_SELECTION,
-        runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        runtimePolicy,
       });
       const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
       const firstTerminal = yield* Deferred.make<void>();
@@ -2084,6 +2120,58 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         firstTerminal: Deferred.await(firstTerminal),
       };
     });
+
+  it.live("fails the Cloud event stream when disconnected after an accepted turn", () =>
+    Effect.gen(function* () {
+      const disconnected = yield* Deferred.make<void>();
+      const harness = yield* makeCodexReplayHarness(
+        makeCodexReplayTranscript({
+          scenario: "cloud-disconnected",
+          entries: codexReplayPreamble({
+            nativeThreadId: "cloud-disconnected",
+            nativeTurnId: "cloud-turn",
+            prompt: "Hello",
+          }),
+        }),
+        () => Effect.void,
+        () => Effect.void,
+        undefined,
+        {
+          destination: {
+            kind: "codexCloud",
+            accountId: "account",
+            environmentConfigId: "workspace",
+            name: "Cloud",
+            cwd: "/workspace",
+          },
+          disconnected,
+        },
+      );
+      yield* harness.runtime.startTurn(
+        makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("cloud-attempt"),
+          text: "Hello",
+        }),
+      );
+      yield* Deferred.succeed(disconnected, undefined);
+      const result = yield* harness.runtime.events.pipe(
+        Stream.runDrain,
+        Effect.timeout("1 second"),
+        Effect.result,
+      );
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure")
+        assert.equal(result.failure._tag, "ProviderAdapterEventStreamError");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
 
   it.effect.each(["supported", "unsupported", "invalid"] as const)(
     "delivers native history with %s app-server protocol",
@@ -9492,3 +9580,48 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     );
   });
 });
+
+it.effect("reports a Cloud connection failure without spawning a local provider", () =>
+  Effect.gen(function* () {
+    let spawned = false;
+    const spawner = ChildProcessSpawner.make(() => {
+      spawned = true;
+      return Effect.die("Must not fall back to local execution");
+    });
+    const factory = yield* CodexAdapterV2.CodexAppServerClientFactory.pipe(
+      Effect.provide(CodexAdapterV2.layerAppServerClientFactory),
+      Effect.provideService(CodexCloudChats.CodexCloudChats, {
+        ...unusedCloudChats,
+        openClient: () => Effect.fail(new CloudChatError({ reason: "connection" })),
+      }),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(
+        ProviderEventLoggers.ProviderEventLoggers,
+        ProviderEventLoggers.NoOpProviderEventLoggers,
+      ),
+    );
+    const result = yield* factory
+      .open({
+        instanceId: ProviderInstanceId.make("codex"),
+        threadId: ThreadId.make("thread:cloud-error"),
+        providerSessionId: ProviderSessionId.make("session:cloud-error"),
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: "/workspace",
+          runDestination: {
+            kind: "codexCloud",
+            accountId: "account",
+            environmentConfigId: "workspace",
+            name: "Cloud",
+            cwd: "/workspace",
+          },
+        },
+        settings: DEFAULT_CODEX_SETTINGS,
+        environment: {},
+      })
+      .pipe(Effect.scoped, Effect.result);
+    assert.equal(result._tag, "Failure");
+    assert.isFalse(spawned);
+  }),
+);

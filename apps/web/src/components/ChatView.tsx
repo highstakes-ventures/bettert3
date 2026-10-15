@@ -1,3 +1,5 @@
+import type { CodexCloudDestination } from "@t3tools/contracts";
+import { cloudChats } from "../state/cloudChats";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
@@ -1588,12 +1590,8 @@ export default function ChatView(props: ChatViewProps) {
     forceExpandedMobileComposer = false,
   } = props;
   const canOperateThread = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
-  const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
-  const hasTerminalWriteAccess = useCallback(
-    () => readEnvironmentScope(environmentId, AuthTerminalOperateScope),
-    [environmentId],
-  );
-  const canReadTerminal = useEnvironmentScope(environmentId, AuthTerminalReadScope);
+  const terminalOperatePermission = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
+  const terminalReadPermission = useEnvironmentScope(environmentId, AuthTerminalReadScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
   const { settleThread, pinThread, confirmAndUnpinThread } = useThreadActions();
@@ -2120,6 +2118,13 @@ export default function ChatView(props: ChatViewProps) {
   );
   const isServerThread = serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
+  const runDestination = serverThread?.source.runDestination ?? draftThread?.runDestination ?? null;
+  const canOperateTerminal = terminalOperatePermission && !runDestination;
+  const canReadTerminal = terminalReadPermission && !runDestination;
+  const hasTerminalWriteAccess = useCallback(
+    () => !runDestination && readEnvironmentScope(environmentId, AuthTerminalOperateScope),
+    [environmentId, runDestination],
+  );
   const serverLatestRun = useMemo(
     () => (serverProjection === null ? null : deriveLatestThreadRun(serverProjection)),
     [serverProjection],
@@ -2832,7 +2837,7 @@ export default function ChatView(props: ChatViewProps) {
     ) ?? null;
   const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
     activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment: hasMultipleEnvironments,
+    canPickEnvironment: hasMultipleEnvironments || Boolean(runDestination) || draftId !== null,
   });
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -3042,6 +3047,7 @@ export default function ChatView(props: ChatViewProps) {
   const loadBalancingSettings = useClientSettings();
   const automaticEnvironment = Boolean(
     clientSettingsHydrated &&
+    !runDestination &&
     draftId &&
     !envLocked &&
     canAutoBalanceEnvironments &&
@@ -3287,6 +3293,13 @@ export default function ChatView(props: ChatViewProps) {
   );
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const activeProviderInstanceId = selectedProviderEntry?.instanceId ?? null;
+  const cloudDestinationsQuery = useEnvironmentQuery(
+    selectedProvider === "codex" && activeProviderInstanceId && draftId
+      ? cloudChats.destinations({ environmentId, input: { instanceId: activeProviderInstanceId } })
+      : null,
+  );
+  const cloudDestinations = cloudDestinationsQuery.data?.destinations;
+
   const activeProviderStatus = selectedProviderEntry?.snapshot ?? null;
   const { enabled: interactionModeEnabled, interactionMode } = resolveComposerInteractionMode({
     planModeEnabled: settings.planModeEnabled,
@@ -4137,12 +4150,13 @@ export default function ChatView(props: ChatViewProps) {
       : JSON.stringify([itemId, latestCheckpointCompletedAt]);
   }, [serverVisibleTurnItems, turnDiffSummaries]);
 
-  const gitCwd = activeProject
-    ? projectScriptCwd({
-        project: { cwd: activeProject.workspaceRoot },
-        worktreePath: activeThread?.worktreePath ?? null,
-      })
-    : null;
+  const gitCwd =
+    activeProject && !runDestination
+      ? projectScriptCwd({
+          project: { cwd: activeProject.workspaceRoot },
+          worktreePath: activeThread?.worktreePath ?? null,
+        })
+      : null;
   const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
@@ -4272,7 +4286,8 @@ export default function ChatView(props: ChatViewProps) {
       rememberCheckoutIsRepo(environmentId, gitStatusCwd, liveIsGitRepo);
     }
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
-  const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
+  const isGitRepo =
+    !runDestination && (liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true);
   // When context is enabled, keep a hidden, off-flow strip mounted so the composer
   // can measure whether its relocated controls fit. The visible chrome remains
   // content-driven: Git/environment context or controls that actually fit.
@@ -4414,6 +4429,7 @@ export default function ChatView(props: ChatViewProps) {
     if (!target?.projectId) return;
     setDraftThreadContext(draftId, {
       projectRef: scopeProjectRef(target.environmentId, target.projectId),
+      runDestination: null,
       environmentSelection: "auto",
       loadBalancedEnvironmentId: target.environmentId,
     });
@@ -4504,11 +4520,16 @@ export default function ChatView(props: ChatViewProps) {
             deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
             projectRef,
             draftId,
-            { environmentSelection: "manual", loadBalancedEnvironmentId: null },
+            {
+              runDestination: null,
+              environmentSelection: "manual",
+              loadBalancedEnvironmentId: null,
+            },
           );
         } else {
           setDraftThreadContext(draftId, {
             projectRef,
+            runDestination: null,
             environmentSelection: "manual",
             loadBalancedEnvironmentId: null,
           });
@@ -4550,6 +4571,22 @@ export default function ChatView(props: ChatViewProps) {
       setDraftThreadContext,
       setLogicalProjectDraftThreadId,
     ],
+  );
+
+  const onCloudDestinationChange = useCallback(
+    (destination: CodexCloudDestination) => {
+      if (!draftId || envLocked || sendInFlightRef.current) return;
+      setDraftThreadContext(draftId, {
+        runDestination: destination,
+        environmentSelection: "manual",
+        loadBalancedEnvironmentId: null,
+        branch: null,
+        worktreePath: null,
+        envMode: "local",
+        startFromOrigin: false,
+      });
+    },
+    [draftId, envLocked, setDraftThreadContext],
   );
 
   const activeTerminalGroup =
@@ -4806,6 +4843,7 @@ export default function ChatView(props: ChatViewProps) {
     [activeThreadRef, storeSetTerminalOpen],
   );
   const toggleTerminalVisibility = useCallback(() => {
+    if (runDestination) return;
     if (!activeThreadRef) return;
     const nextOpen = !terminalUiState.terminalOpen;
     if (
@@ -4850,6 +4888,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     setTerminalOpen(nextOpen);
   }, [
+    runDestination,
     activeServerOrderedTerminalIds,
     activeProject,
     activeThreadId,
@@ -8965,6 +9004,23 @@ export default function ChatView(props: ChatViewProps) {
       interactionMode: sendInteractionMode,
       interactionModeEnabled: sendInteractionModeEnabled,
     } = sendCtx;
+    if (
+      runDestination &&
+      (ctxSelectedProvider !== "codex" ||
+        composerFiles.length > 0 ||
+        sendContextImages.length > 0 ||
+        composerTerminalContexts.length > 0 ||
+        composerReviewComments.length > 0 ||
+        sendContextPreviewAnnotations.length > 0 ||
+        composerThreadContexts.length > 0 ||
+        multipleModelSelections !== null)
+    ) {
+      setThreadError(
+        threadId,
+        "Codex Cloud needs one Codex model and a text message. Remove attachments and local context to send.",
+      );
+      return;
+    }
     const annotationImageAlreadyAttached =
       directAnnotation?.image !== undefined &&
       sendContextImages.some((image) => image.id === directAnnotation.image?.id);
@@ -9999,8 +10055,9 @@ export default function ChatView(props: ChatViewProps) {
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
                       interactionMode: sendInteractionMode,
-                      branch: activeThreadBranch,
-                      worktreePath: activeThread.worktreePath,
+                      branch: runDestination ? null : activeThreadBranch,
+                      worktreePath: runDestination ? null : activeThread.worktreePath,
+                      ...(runDestination ? { runDestination } : {}),
                       createdAt: activeThread.createdAt,
                     },
                   }
@@ -11309,6 +11366,9 @@ export default function ChatView(props: ChatViewProps) {
     isGitRepo,
     envLocked,
     availableEnvironments: logicalProjectEnvironments,
+    cloudDestinations,
+    runDestination,
+    onCloudDestinationChange,
     autoEnvironmentLabel,
     onAutoEnvironment:
       draftId &&
@@ -11339,7 +11399,7 @@ export default function ChatView(props: ChatViewProps) {
     onDeleteProjectScript: deleteProjectScript,
   };
   const panelToggleControlProps = {
-    terminalAvailable: activeProject !== null,
+    terminalAvailable: activeProject !== null && !runDestination,
     terminalOpen: terminalUiState.terminalOpen,
     terminalShortcutLabel: shortcutLabelForCommand(keybindings, "terminal.toggle"),
     threadPanelOpen,
@@ -11982,7 +12042,10 @@ export default function ChatView(props: ChatViewProps) {
                                 {...(canCheckoutPullRequestIntoThread
                                   ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                                   : {})}
-                                {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                                onEnvironmentChange={onEnvironmentChange}
+                                cloudDestinations={cloudDestinations}
+                                runDestination={runDestination}
+                                onCloudDestinationChange={onCloudDestinationChange}
                                 autoEnvironmentLabel={autoEnvironmentLabel}
                                 onAutoEnvironment={
                                   draftId &&

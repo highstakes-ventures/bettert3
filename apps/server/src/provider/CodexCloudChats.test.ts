@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { FetchHttpClient } from "effect/http";
 import { beforeEach, vi } from "vite-plus/test";
 import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -101,6 +102,7 @@ const page = {
 };
 
 beforeEach(() => {
+  vi.unstubAllGlobals();
   wire.account = "account-a";
   wire.authMethod = "chatgpt";
   wire.closed = 0;
@@ -374,4 +376,87 @@ it.effect("returns a connection error and releases the socket on a disconnect", 
       expect(wire.closed).toBe(1);
     }),
   ),
+);
+
+it.effect("validates the chosen Cloud workspace and account before opening execution", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(
+              JSON.stringify({
+                data: [{ id: "workspace", name: "Actual Cloud" }],
+                next_cursor: null,
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            ),
+        ),
+      );
+      const destination = {
+        kind: "codexCloud" as const,
+        accountId: "account-a",
+        environmentConfigId: "deleted-workspace",
+        name: "Spoofed",
+        cwd: "/workspace",
+      };
+      const invalid = yield* service
+        .openClient(destination, ProviderInstanceId.make("codex"))
+        .pipe(Effect.scoped, Effect.result);
+      expect(invalid).toMatchObject({ _tag: "Failure", failure: { reason: "protocol" } });
+      const wrongAccount = yield* service
+        .openClient({ ...destination, accountId: "account-b" }, ProviderInstanceId.make("codex"))
+        .pipe(Effect.scoped, Effect.result);
+      expect(wrongAccount).toMatchObject({
+        _tag: "Failure",
+        failure: { reason: "accountChanged" },
+      });
+      expect(wire.opened).toBe(0);
+    }),
+    {
+      providerInstances: {
+        [ProviderInstanceId.make("codex")]: {
+          driver: ProviderDriverKind.make("codex"),
+          config: {},
+        },
+      },
+    },
+  ),
+);
+
+it.effect.each(["codex", "missing-codex"])(
+  "resolves the %s destination account with default settings",
+  (instanceId) =>
+    provide(
+      Effect.gen(function* () {
+        const fetch = vi.fn(
+          async (request) =>
+            new Response(
+              JSON.stringify({
+                data: String(request).includes("scope=user")
+                  ? [{ id: "workspace", name: "Cloud" }]
+                  : [],
+                next_cursor: null,
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            ),
+        );
+        const service = yield* CodexCloudChats.CodexCloudChats;
+        const result = yield* service
+          .destinations(ProviderInstanceId.make(instanceId))
+          .pipe(Effect.provideService(FetchHttpClient.Fetch, fetch), Effect.result);
+        if (instanceId === "codex") {
+          expect(result).toMatchObject({
+            _tag: "Success",
+            success: [{ accountId: "account-a", environmentConfigId: "workspace" }],
+          });
+          expect(wire.authInputs).toHaveLength(1);
+        } else {
+          expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "authentication" } });
+          expect(wire.authInputs).toHaveLength(0);
+        }
+      }),
+    ),
 );

@@ -2931,3 +2931,79 @@ it.effect.each(
       }).pipe(Effect.provide(Layer.merge(harness.layer, layerService)));
     }),
 );
+
+const cloudDestination = {
+  kind: "codexCloud" as const,
+  accountId: "account",
+  environmentConfigId: "workspace",
+  name: "Cloud workspace",
+  cwd: "/workspace",
+};
+
+it.effect(
+  "saves a Cloud launch as a normal thread without local preparation or checkpoints",
+  () => {
+    const harness = makeHarness({
+      managedFolders: Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        namedProjectsRoot: "/projects",
+        folderForThread: () => Effect.die("Cloud must not provision a local folder"),
+      }),
+    });
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const input = {
+        ...launchInput({
+          command: "command:cloud-launch",
+          thread: "thread:cloud-launch",
+          message: "Hello Cloud",
+        }),
+        runDestination: cloudDestination,
+      };
+      const launched = yield* launches.launch(input);
+      const projection = yield* threads.getThreadProjection(launched.threadId);
+      assert.deepEqual(projection.thread.runDestination, cloudDestination);
+      assert.deepEqual(
+        projection.messages.map((message) => message.text),
+        ["Hello Cloud"],
+      );
+      assert.equal(projection.runs[0]?.status, "starting");
+      assert.equal(projection.nodes[0]?.checkpointScopeId, null);
+      assert.deepEqual(projection.checkpointScopes, []);
+      assert.deepEqual(
+        (yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:initial-message`))).map(
+          (effect) => effect.request.type,
+        ),
+        ["provider-turn.start"],
+      );
+      assert.equal(harness.createWorktree.mock.calls.length, 0);
+      assert.equal(harness.runSetup.mock.calls.length, 0);
+      const shell = yield* threads.getThreadShell(launched.threadId);
+      assert.deepEqual(shell?.runDestination, cloudDestination);
+      yield* threads.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("command:cloud-follow-up"),
+        threadId: launched.threadId,
+        messageId: MessageId.make("message:cloud-follow-up"),
+        text: "Follow up",
+        attachments: [],
+        createdBy: "user",
+        creationSource: "web",
+        dispatchMode: { type: "queue_after_active" },
+      });
+      const queued = yield* threads.getThreadProjection(launched.threadId);
+      assert.deepEqual(queued.checkpointScopes, []);
+      assert.equal(queued.runs[1]?.status, "queued");
+      const rejected = yield* threads
+        .dispatch({
+          type: "thread.metadata.update",
+          commandId: CommandId.make("command:cloud-local-worktree"),
+          threadId: launched.threadId,
+          worktreePath: "/workspace/local",
+        })
+        .pipe(Effect.result);
+      assert.equal(rejected._tag, "Failure");
+    }).pipe(Effect.provide(harness.layer));
+  },
+);

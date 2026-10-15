@@ -1,3 +1,9 @@
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
+import type { CodexCloudDestination, ProviderInstanceId } from "@t3tools/contracts";
+import type * as CodexClient from "effect-codex-app-server/client";
+import type * as CodexError from "effect-codex-app-server/errors";
+import type * as Scope from "effect/Scope";
+import * as CodexCloudTransport from "./CodexCloudTransport.ts";
 import { NodeWS } from "@effect/platform-node/NodeSocket";
 import {
   CloudChatError,
@@ -194,6 +200,14 @@ const connect = (token: string, accountId: string) =>
 export class CodexCloudChats extends Context.Service<
   CodexCloudChats,
   {
+    readonly destinations: (
+      instanceId: ProviderInstanceId,
+    ) => Effect.Effect<ReadonlyArray<CodexCloudDestination>, CloudChatError>;
+    readonly openClient: (
+      destination: CodexCloudDestination,
+      instanceId: ProviderInstanceId,
+      onTermination?: (error: CodexError.CodexAppServerError) => Effect.Effect<void>,
+    ) => Effect.Effect<CodexClient.CodexAppServerClient["Service"], CloudChatError, Scope.Scope>;
     readonly list: () => Effect.Effect<
       { accountId: string; chats: ReadonlyArray<CloudChatSummary>; hasMore: boolean },
       CloudChatError
@@ -208,22 +222,28 @@ const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const cwd = yield* HostProcess.WorkingDirectory;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const withCloud = <A>(
+  const http = yield* HttpClient.HttpClient;
+  const authenticate = Effect.fn("CodexCloudChats.authenticate")(function* (
     expectedAccount: string | null,
-    operation: (request: CloudRequest, accountId: string) => Effect.Effect<A, CloudChatError>,
-  ) =>
-    Effect.scoped(
+    instanceId?: ProviderInstanceId,
+  ) {
+    return yield* Effect.scoped(
       Effect.gen(function* () {
         const current = yield* settings.getSettings.pipe(
           Effect.mapError(() => new CloudChatError({ reason: "authentication" })),
         );
-        const configured = Object.values(current.providerInstances).filter(
-          (p) => p.driver === "codex",
-        );
-        const instance = configured.find(resolveProviderInstanceEnabled);
+        const configured = Object.entries(current.providerInstances)
+          .filter(([, p]) => p.driver === "codex")
+          .map(([id, config]) => ({ ...config, id }));
+        const instance =
+          instanceId === undefined
+            ? configured.find(resolveProviderInstanceEnabled)
+            : instanceId === "codex" && current.providerInstances[instanceId] === undefined
+              ? { id: instanceId, config: {}, environment: undefined }
+              : configured.find((p) => p.id === instanceId && resolveProviderInstanceEnabled(p));
         // An unconfigured T3 uses its default CLI login. Explicit account settings must
         // never fall through to that login when every configured instance is disabled.
-        if (configured.length > 0 && !instance)
+        if ((configured.length > 0 || instanceId !== undefined) && !instance)
           return yield* new CloudChatError({ reason: "authentication" });
         const config = yield* decodeConfig(instance?.config ?? {}).pipe(
           Effect.mapError(() => new CloudChatError({ reason: "authentication" })),
@@ -257,6 +277,72 @@ const make = Effect.gen(function* () {
         const accountId = parsedClaims["https://api.openai.com/auth"].chatgpt_account_id;
         if (expectedAccount !== null && accountId !== expectedAccount)
           return yield* new CloudChatError({ reason: "accountChanged" });
+        return { token, accountId };
+      }),
+    );
+  });
+  const catalog = Effect.fn("CodexCloudChats.catalog")(function* (auth: {
+    token: string;
+    accountId: string;
+  }) {
+    const destinations: Array<CodexCloudDestination> = [];
+    for (const scope of ["user", "workspace"]) {
+      let cursor: string | null = null;
+      do {
+        const query = new URLSearchParams({
+          scope,
+          limit: "100",
+          omitDraft: "true",
+          view: "picker",
+          ...(cursor ? { cursor } : {}),
+        });
+        const response = yield* http
+          .execute(
+            HttpClientRequest.get(
+              `https://codex-cloud-backend.chatgpt.com/v1/environment-configs?${query}`,
+            ).pipe(
+              HttpClientRequest.bearerToken(auth.token),
+              HttpClientRequest.setHeader("ChatGPT-Account-Id", auth.accountId),
+              HttpClientRequest.setHeader("X-OpenAI-Product-Sku", "codex"),
+            ),
+          )
+          .pipe(
+            Effect.timeout("20 seconds"),
+            Effect.mapError(() => new CloudChatError({ reason: "connection" })),
+          );
+        if (response.status !== 200) return yield* new CloudChatError({ reason: "connection" });
+        const page = yield* response.json.pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(
+              Schema.Struct({
+                data: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+                next_cursor: Schema.NullOr(Schema.String),
+              }),
+            ),
+          ),
+          Effect.mapError(() => new CloudChatError({ reason: "protocol" })),
+        );
+        destinations.push(
+          ...page.data.map((config) => ({
+            kind: "codexCloud" as const,
+            accountId: auth.accountId,
+            environmentConfigId: config.id,
+            name: config.name,
+            cwd: "/workspace",
+          })),
+        );
+        cursor = page.next_cursor;
+      } while (cursor !== null);
+    }
+    return destinations;
+  });
+  const withCloud = <A>(
+    expectedAccount: string | null,
+    operation: (request: CloudRequest, accountId: string) => Effect.Effect<A, CloudChatError>,
+  ) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { token, accountId } = yield* authenticate(expectedAccount);
         const connection = yield* connect(token, accountId);
         yield* connection.request("initialize", {
           clientInfo: { name: "t3_cloud_chats", title: "T3 Cloud chats", version: "0.0.45" },
@@ -293,6 +379,22 @@ const make = Effect.gen(function* () {
     { title: string; provenance: ReturnType<typeof cloudChatOrigin> }
   >();
   return CodexCloudChats.of({
+    destinations: (instanceId) => authenticate(null, instanceId).pipe(Effect.flatMap(catalog)),
+    openClient: (destination, instanceId, onTermination) =>
+      Effect.gen(function* () {
+        const auth = yield* authenticate(destination.accountId, instanceId);
+        const choices = yield* catalog(auth);
+        const verified = choices.find(
+          (choice) => choice.environmentConfigId === destination.environmentConfigId,
+        );
+        if (!verified || destination.cwd !== verified.cwd)
+          return yield* new CloudChatError({ reason: "protocol" });
+        return yield* CodexCloudTransport.open({
+          token: auth.token,
+          destination: verified,
+          onTermination,
+        }).pipe(Effect.mapError(() => new CloudChatError({ reason: "connection" })));
+      }),
     list: () =>
       withCloud(null, (request, accountId) =>
         Effect.gen(function* () {
@@ -400,4 +502,4 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(CodexCloudChats, make);
+export const layer = Layer.effect(CodexCloudChats, make).pipe(Layer.provide(FetchHttpClient.layer));

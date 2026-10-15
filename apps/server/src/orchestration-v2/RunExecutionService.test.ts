@@ -3816,6 +3816,7 @@ it.effect("keeps completed runs completed when pull request refresh fails", () =
 
 function captureRootRunTermination(input: {
   readonly key: string;
+  readonly cloud?: boolean;
   readonly shouldFinalizeRun: () => Effect.Effect<boolean, ProjectionStore.ProjectionStoreV2Error>;
   readonly rejectTerminalWrite?: boolean;
   readonly hasUnpairedRunInterruptRequest?: () => Effect.Effect<boolean, never>;
@@ -3861,7 +3862,10 @@ function captureRootRunTermination(input: {
       Layer.provide(
         Layer.mergeAll(
           McpAppModelContext.layerEmpty,
-          Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
+          Layer.mock(CheckpointService.CheckpointServiceV2)({
+            captureBaseline: () =>
+              input.cloud ? Effect.die("Cloud must not capture local files") : Effect.void,
+          }),
           Layer.mock(EventSink.EventSinkV2)({
             write: (payload) =>
               Effect.gen(function* () {
@@ -3911,7 +3915,20 @@ function captureRootRunTermination(input: {
       const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
       yield* runExecution.startRootRun({
         commandId: CommandId.make(`command:${input.key}`),
-        appThread: { id: ids.threadId } as OrchestrationV2AppThread,
+        appThread: {
+          id: ids.threadId,
+          ...(input.cloud
+            ? {
+                runDestination: {
+                  kind: "codexCloud",
+                  accountId: "account",
+                  environmentConfigId: "workspace",
+                  name: "Cloud",
+                  cwd: "/workspace",
+                },
+              }
+            : {}),
+        } as OrchestrationV2AppThread,
         providerSessionId: ProviderSessionId.make(`session:${input.key}`),
         session: {
           events: Stream.empty,
@@ -3956,9 +3973,11 @@ function captureRootRunTermination(input: {
           id: ids.rootNodeId,
           providerTurnId: ids.rootProviderTurnId,
         } as OrchestrationV2ExecutionNode,
-        checkpointScope: {
-          id: CheckpointScopeId.make(`checkpoint-scope:${input.key}`),
-        } as OrchestrationV2CheckpointScope,
+        checkpointScope: input.cloud
+          ? null
+          : ({
+              id: CheckpointScopeId.make(`checkpoint-scope:${input.key}`),
+            } as OrchestrationV2CheckpointScope),
         providerThread: {
           id: ids.providerThreadId,
           driver,
@@ -4477,5 +4496,18 @@ it.effect("releases ingestion after idle subagent rows and items settle", () =>
       "turn_item:idle",
       "root-finalized",
     ]);
+  }),
+);
+
+it.effect("completes a Cloud turn without a local checkpoint or workspace refresh", () =>
+  Effect.gen(function* () {
+    const result = yield* captureRootRunTermination({
+      key: "cloud-completed",
+      cloud: true,
+      shouldFinalizeRun: () => Effect.succeed(true),
+      events: (ids) => Stream.fromIterable([rootTerminalEvent(ids, "completed")]),
+    });
+    assert.deepEqual(result.observed, ["run:completed"]);
+    assert.deepEqual(result.submittedEffects, []);
   }),
 );

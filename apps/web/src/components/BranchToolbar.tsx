@@ -1,3 +1,4 @@
+import type { CodexCloudDestination } from "@t3tools/contracts";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -5,6 +6,7 @@ import { ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
+  CloudIcon,
   ChevronDownIcon,
   FolderGit2Icon,
   FolderGitIcon,
@@ -77,6 +79,10 @@ export interface BranchToolbarHandle {
 }
 
 interface BranchToolbarProps {
+  cloudDestinations?: readonly CodexCloudDestination[] | undefined;
+  runDestination?: CodexCloudDestination | null | undefined;
+  onCloudDestinationChange?: ((destination: CodexCloudDestination) => void) | undefined;
+
   layout?: "composer" | "panel";
   panelSection?: "all" | "workspace" | "branch";
   forceNewWorktree?: boolean;
@@ -139,6 +145,10 @@ function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string)
 }
 
 interface RunContextSelectorProps {
+  cloudDestinations?: readonly CodexCloudDestination[] | undefined;
+  runDestination?: CodexCloudDestination | null | undefined;
+  onCloudDestinationChange?: ((destination: CodexCloudDestination) => void) | undefined;
+
   displayMode?: "toolbar" | "panel";
   workspaceRoot?: string;
   forceNewWorktree: boolean;
@@ -169,6 +179,9 @@ const RunContextSelector = memo(function RunContextSelector({
   envModeLocked,
   environmentId,
   availableEnvironments,
+  cloudDestinations,
+  runDestination,
+  onCloudDestinationChange,
   showEnvironmentPicker,
   showEnvironmentIndicator,
   onEnvironmentChange,
@@ -234,7 +247,12 @@ const RunContextSelector = memo(function RunContextSelector({
     <span className="inline-flex shrink-0 items-center gap-0.5">
       <Tooltip>
         <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
-          {autoEnvironmentLabel ? (
+          {runDestination ? (
+            <CloudIcon
+              className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
+              aria-hidden="true"
+            />
+          ) : autoEnvironmentLabel ? (
             <ScaleIcon
               className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
               aria-hidden="true"
@@ -246,9 +264,13 @@ const RunContextSelector = memo(function RunContextSelector({
             />
           )}
         </TooltipTrigger>
-        <TooltipPopup>{autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"}</TooltipPopup>
+        <TooltipPopup>
+          {runDestination
+            ? `Codex Cloud · ${runDestination.name}`
+            : (autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on")}
+        </TooltipPopup>
       </Tooltip>
-      {workspaceIcon}
+      {!runDestination ? workspaceIcon : null}
     </span>
   ) : (
     workspaceIcon
@@ -257,8 +279,10 @@ const RunContextSelector = memo(function RunContextSelector({
     <>
       {icon}
       <ComposerContextLabel displayMode={displayMode}>
-        {autoEnvironmentLabel ??
-          (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
+        {runDestination
+          ? `Codex Cloud · ${runDestination.name}`
+          : (autoEnvironmentLabel ??
+            (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel))}
       </ComposerContextLabel>
     </>
   );
@@ -320,12 +344,21 @@ const RunContextSelector = memo(function RunContextSelector({
             <MenuGroup>
               <MenuGroupLabel>Run on</MenuGroupLabel>
               <MenuRadioGroup
-                value={autoEnvironmentLabel ? "auto" : environmentId}
-                onValueChange={(value) =>
-                  value === "auto"
-                    ? onAutoEnvironment?.()
-                    : onEnvironmentChange(value as EnvironmentId)
+                value={
+                  runDestination
+                    ? `cloud:${runDestination.environmentConfigId}`
+                    : autoEnvironmentLabel
+                      ? "auto"
+                      : environmentId
                 }
+                onValueChange={(value) => {
+                  const cloud = cloudDestinations?.find(
+                    (destination) => `cloud:${destination.environmentConfigId}` === value,
+                  );
+                  if (cloud) onCloudDestinationChange?.(cloud);
+                  else if (value === "auto") onAutoEnvironment?.();
+                  else onEnvironmentChange(value as EnvironmentId);
+                }}
               >
                 {onAutoEnvironment && (
                   <MenuRadioItem
@@ -357,46 +390,65 @@ const RunContextSelector = memo(function RunContextSelector({
                     </span>
                   </MenuRadioItem>
                 ))}
+                {cloudDestinations?.map((destination) => (
+                  <MenuRadioItem
+                    key={destination.environmentConfigId}
+                    value={`cloud:${destination.environmentConfigId}`}
+                    disabled={envLocked}
+                    closeOnClick
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <CloudIcon className="size-3" />
+                      <span className="min-w-0 truncate">Codex Cloud · {destination.name}</span>
+                    </span>
+                  </MenuRadioItem>
+                ))}
               </MenuRadioGroup>
             </MenuGroup>
             <MenuSeparator />
           </>
         ) : null}
-        <MenuGroup>
-          <MenuGroupLabel>Workspace</MenuGroupLabel>
-          <MenuRadioGroup
-            value={effectiveEnvMode}
-            onValueChange={(value) => {
-              if (value === "previous-worktree") {
-                onUsePreviousWorktree();
-                return;
-              }
-              onEnvModeChange(value as EnvMode);
-            }}
-          >
-            <MenuRadioItem disabled={envModeLocked || forceNewWorktree} value="local" closeOnClick>
-              <span className="flex min-w-0 items-center gap-1.5">
-                {activeWorktreePath ? (
-                  <FolderGitIcon className="size-3" />
-                ) : (
-                  <FolderIcon className="size-3" />
-                )}
-                <MiddleTruncate value={resolveCurrentWorkspaceLabel(activeWorktreePath)} />
-              </span>
-            </MenuRadioItem>
-            <MenuRadioItem disabled={envModeLocked} value="worktree" closeOnClick>
-              <span className="flex min-w-0 items-center gap-1.5">
-                <FolderGit2Icon className="size-3" />
-                <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
-              </span>
-            </MenuRadioItem>
-            {previousWorktreeLabel ? (
-              <MenuRadioItem disabled={envModeLocked} value="previous-worktree" closeOnClick>
-                <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
+        {!runDestination ? (
+          <MenuGroup>
+            <MenuGroupLabel>Workspace</MenuGroupLabel>
+            <MenuRadioGroup
+              value={effectiveEnvMode}
+              onValueChange={(value) => {
+                if (value === "previous-worktree") {
+                  onUsePreviousWorktree();
+                  return;
+                }
+                onEnvModeChange(value as EnvMode);
+              }}
+            >
+              <MenuRadioItem
+                disabled={envModeLocked || forceNewWorktree}
+                value="local"
+                closeOnClick
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {activeWorktreePath ? (
+                    <FolderGitIcon className="size-3" />
+                  ) : (
+                    <FolderIcon className="size-3" />
+                  )}
+                  <MiddleTruncate value={resolveCurrentWorkspaceLabel(activeWorktreePath)} />
+                </span>
               </MenuRadioItem>
-            ) : null}
-          </MenuRadioGroup>
-        </MenuGroup>
+              <MenuRadioItem disabled={envModeLocked} value="worktree" closeOnClick>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <FolderGit2Icon className="size-3" />
+                  <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
+                </span>
+              </MenuRadioItem>
+              {previousWorktreeLabel ? (
+                <MenuRadioItem disabled={envModeLocked} value="previous-worktree" closeOnClick>
+                  <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
+                </MenuRadioItem>
+              ) : null}
+            </MenuRadioGroup>
+          </MenuGroup>
+        ) : null}
       </MenuPopup>
     </Menu>
   );
@@ -613,6 +665,9 @@ export const BranchToolbar = memo(function BranchToolbar({
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
   availableEnvironments,
+  cloudDestinations,
+  runDestination,
+  onCloudDestinationChange,
   onEnvironmentChange,
   composerControlsHostRef,
   contextStripVisible = true,
@@ -695,14 +750,18 @@ export const BranchToolbar = memo(function BranchToolbar({
   );
 
   const showEnvironmentPicker = Boolean(
-    availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
+    availableEnvironments &&
+    (availableEnvironments.length > 1 || (cloudDestinations?.length ?? 0) > 0 || runDestination) &&
+    onEnvironmentChange,
   );
   const activeEnvironmentOption =
     availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null;
-  const showEnvironmentIndicator = shouldShowEnvironmentIndicator({
-    activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment: showEnvironmentPicker,
-  });
+  const showEnvironmentIndicator =
+    Boolean(runDestination) ||
+    shouldShowEnvironmentIndicator({
+      activeEnvironment: activeEnvironmentOption,
+      canPickEnvironment: showEnvironmentPicker,
+    });
   const [stripElement, setStripElement] = useState<HTMLDivElement | null>(null);
   const labelsOverflow = useLabelsOverflow(stripElement);
 
@@ -722,6 +781,9 @@ export const BranchToolbar = memo(function BranchToolbar({
             envModeLocked={envModeLocked}
             environmentId={environmentId}
             availableEnvironments={availableEnvironments}
+            cloudDestinations={cloudDestinations}
+            runDestination={runDestination}
+            onCloudDestinationChange={onCloudDestinationChange}
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={activeEnvironmentOption !== null}
             onEnvironmentChange={onEnvironmentChange}
@@ -733,7 +795,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             onUsePreviousWorktree={onUsePreviousWorktree}
           />
         ) : null}
-        {panelSection !== "workspace" ? (
+        {panelSection !== "workspace" && !runDestination ? (
           <BranchToolbarBranchSelector
             displayMode="panel"
             className="w-full"
@@ -776,6 +838,9 @@ export const BranchToolbar = memo(function BranchToolbar({
             envModeLocked={envModeLocked}
             environmentId={environmentId}
             availableEnvironments={availableEnvironments}
+            cloudDestinations={cloudDestinations}
+            runDestination={runDestination}
+            onCloudDestinationChange={onCloudDestinationChange}
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={showEnvironmentIndicator}
             onEnvironmentChange={onEnvironmentChange}
@@ -804,6 +869,9 @@ export const BranchToolbar = memo(function BranchToolbar({
                 envLocked={envLocked}
                 environmentId={environmentId}
                 availableEnvironments={availableEnvironments}
+                cloudDestinations={cloudDestinations}
+                runDestination={runDestination}
+                onCloudDestinationChange={onCloudDestinationChange}
                 {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
               />
               {showGitControls ? (

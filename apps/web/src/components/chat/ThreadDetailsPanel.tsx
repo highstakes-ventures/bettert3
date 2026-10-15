@@ -1,3 +1,4 @@
+import type { CodexCloudDestination } from "@t3tools/contracts";
 import type {
   EditorId,
   EnvironmentId,
@@ -28,6 +29,9 @@ export interface ThreadDetailsPanelProps extends Pick<
   ComponentProps<typeof ThreadDetailsCard>,
   "anchor" | "handle" | "onPresentationChange"
 > {
+  cloudDestinations?: readonly CodexCloudDestination[] | undefined;
+  runDestination?: CodexCloudDestination | null | undefined;
+  onCloudDestinationChange?: ((destination: CodexCloudDestination) => void) | undefined;
   forceNewWorktree?: boolean;
   environmentId: EnvironmentId;
   threadId: ThreadId;
@@ -114,6 +118,9 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   layout="panel"
                   panelSection="workspace"
                   availableEnvironments={props.availableEnvironments}
+                  cloudDestinations={props.cloudDestinations}
+                  runDestination={props.runDestination}
+                  onCloudDestinationChange={props.onCloudDestinationChange}
                   onEnvironmentChange={props.onEnvironmentChange}
                   autoEnvironmentLabel={props.autoEnvironmentLabel}
                   onAutoEnvironment={props.onAutoEnvironment}
