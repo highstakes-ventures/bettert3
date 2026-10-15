@@ -338,6 +338,7 @@ describe("V2 environment commands", () => {
         bootstrap: {
           createThread: {
             projectId: ProjectId.make("project-1"),
+            sectionId: "build",
             title: "Thread",
             modelSelection: v2Projection.thread.modelSelection,
             runtimeMode: "full-access",
@@ -351,6 +352,7 @@ describe("V2 environment commands", () => {
 
       expect(launches[0]).toMatchObject({
         threadId: v2ThreadId,
+        sectionId: "build",
         title: "Continue here",
         generateTitle: true,
         workspaceStrategy: {

@@ -92,6 +92,8 @@ export interface Preferences {
   readonly threadListSettledShelfExpanded?: boolean;
   readonly threadListSnoozedShelfExpanded?: boolean;
   readonly threadListWorkingShelfExpanded?: boolean;
+  readonly threadSectionGrouping?: boolean;
+  readonly collapsedThreadSections?: readonly string[];
   /** Home list filters, restored on the next launch. */
   readonly threadListFilters?: ThreadListFilters;
   readonly pullRequestListFilters?: PullRequestListPreferences;
@@ -161,6 +163,8 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     threadListSettledShelfExpanded?: boolean;
     threadListSnoozedShelfExpanded?: boolean;
     threadListWorkingShelfExpanded?: boolean;
+    threadSectionGrouping?: boolean;
+    collapsedThreadSections?: readonly string[];
     threadListFilters?: ThreadListFilters;
     pullRequestListFilters?: PullRequestListPreferences;
   } = {};
@@ -274,6 +278,12 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   if (typeof parsed.threadListSnoozedShelfExpanded === "boolean") {
     preferences.threadListSnoozedShelfExpanded = parsed.threadListSnoozedShelfExpanded;
   }
+  if (typeof parsed.threadSectionGrouping === "boolean")
+    preferences.threadSectionGrouping = parsed.threadSectionGrouping;
+  if (Array.isArray(parsed.collapsedThreadSections))
+    preferences.collapsedThreadSections = parsed.collapsedThreadSections.filter(
+      (key): key is string => typeof key === "string",
+    );
   if (typeof parsed.threadListWorkingShelfExpanded === "boolean") {
     preferences.threadListWorkingShelfExpanded = parsed.threadListWorkingShelfExpanded;
   }

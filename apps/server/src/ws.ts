@@ -1977,6 +1977,7 @@ const layerWsRpc = (
                 .enqueueCommand(
                   ThreadMessageIntake.launchThread({
                     commandId: input.commandId,
+                    ...(input.sectionId === undefined ? {} : { sectionId: input.sectionId }),
                     ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
                     ...(input.reuseExistingThread === undefined
                       ? {}

@@ -27,6 +27,7 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as DelegatedTaskQuestionReactor from "./DelegatedTaskQuestionReactor.ts";
 import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
+import * as ProjectStore from "./ProjectStore.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
@@ -44,6 +45,7 @@ const adapter = {
 const layerDatabase = SqlitePersistence.layerMemory;
 const layerTest = Layer.mergeAll(
   layerDatabase,
+  ProjectStore.layer.pipe(Layer.provide(layerDatabase)),
   ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
   ProviderReplayHarness.layerWithRegistry(
     { name: "control-reads" },
@@ -959,4 +961,115 @@ it.effect("wakes the parent once when its delegated task asks a question", () =>
       childThreadId: task.childThreadId!,
     });
   }).pipe(Effect.provide(DelegatedTaskQuestionReactor.layer.pipe(Layer.provideMerge(layerTest)))),
+);
+
+it.effect("validates section ownership and preserves assignment across lifecycle changes", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const projects = yield* ProjectStore.ProjectStoreV2;
+    const projectId = ProjectId.make("project:sections");
+    const now = "2026-10-15T12:00:00.000Z";
+    const section = { id: "build", name: "Build", color: "blue" as const };
+    yield* projects.apply({
+      sequence: 1,
+      eventId: EventId.make("project:sections:created"),
+      aggregateKind: "project",
+      aggregateId: projectId,
+      occurredAt: now,
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      type: "project.created",
+      payload: {
+        projectId,
+        title: "Sections",
+        workspaceRoot: "/tmp/sections",
+        defaultModelSelection: null,
+        scripts: [],
+        sections: [section],
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    const threadId = ThreadId.make("thread:sections");
+    const create = {
+      type: "thread.create" as const,
+      commandId: CommandId.make("sections:thread:create"),
+      threadId,
+      projectId,
+      sectionId: "build",
+      title: "Build",
+      modelSelection,
+      runtimeMode: "full-access" as const,
+      interactionMode: "default" as const,
+      branch: null,
+      worktreePath: null,
+      createdBy: "user" as const,
+      creationSource: "web" as const,
+    };
+    yield* orchestrator.dispatch(create);
+    assert.equal((yield* projections.getThreadShell(threadId))?.sectionId, "build");
+    for (const command of [
+      { type: "thread.pin" as const, commandId: CommandId.make("sections:pin"), threadId },
+      {
+        type: "thread.snooze" as const,
+        commandId: CommandId.make("sections:snooze"),
+        threadId,
+        snoozedUntil: "2099-01-01T00:00:00.000Z",
+      },
+      {
+        type: "thread.unsnooze" as const,
+        commandId: CommandId.make("sections:unsnooze"),
+        threadId,
+        reason: "user" as const,
+      },
+      { type: "thread.settle" as const, commandId: CommandId.make("sections:settle"), threadId },
+    ]) {
+      yield* orchestrator.dispatch(command);
+      assert.equal((yield* projections.getThreadShell(threadId))?.sectionId, "build");
+    }
+    const invalid = yield* Effect.exit(
+      orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("sections:invalid"),
+        threadId,
+        sectionId: "foreign",
+      }),
+    );
+    assert.equal(invalid._tag, "Failure");
+    assert.equal((yield* projections.getThreadShell(threadId))?.sectionId, "build");
+    const foreign = yield* Effect.exit(
+      orchestrator.dispatch({
+        ...create,
+        commandId: CommandId.make("sections:foreign-project"),
+        threadId: ThreadId.make("thread:foreign-section"),
+        projectId: ProjectId.make("project:other"),
+      }),
+    );
+    assert.equal(foreign._tag, "Failure");
+    assert.isNull(yield* projections.getThreadShell(ThreadId.make("thread:foreign-section")));
+    yield* projects.apply({
+      sequence: 2,
+      eventId: EventId.make("project:sections:deleted"),
+      aggregateKind: "project",
+      aggregateId: projectId,
+      occurredAt: now,
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      type: "project.meta-updated",
+      payload: { projectId, sections: [], updatedAt: now },
+    });
+    assert.equal((yield* projections.getThreadShell(threadId))?.sectionId, "build");
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("sections:clear"),
+      threadId,
+      sectionId: null,
+    });
+    assert.isNull((yield* projections.getThreadShell(threadId))?.sectionId);
+  }).pipe(Effect.provide(layerTest)),
 );

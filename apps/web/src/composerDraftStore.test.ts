@@ -3618,3 +3618,49 @@ describe("remembered run destination", () => {
     expect(useComposerDraftStore.getState().getDraftSession(third)?.runDestination).toBeNull();
   });
 });
+
+describe("section drafts", () => {
+  beforeEach(resetComposerDraftStore);
+  const projectRef = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("section-project"));
+  const draftId = DraftId.make("draft-section");
+  const threadId = ThreadId.make("thread-section");
+  it("keeps assignment and physical destination through persistence and hydration", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId, sectionId: "build" });
+    expect(store.getDraftSession(draftId)?.environmentSelection).toBe("manual");
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState());
+    const merged = useComposerDraftStore.persist.getOptions().merge!(
+      JSON.parse(JSON.stringify(persisted)),
+      useComposerDraftStore.getInitialState(),
+    );
+    expect(merged.draftThreadsByThreadKey[draftId]).toMatchObject({
+      sectionId: "build",
+      environmentSelection: "manual",
+      projectId: projectRef.projectId,
+      environmentId: projectRef.environmentId,
+    });
+  });
+  it("applies section-only logical remaps and pins reused automatic drafts", () => {
+    const store = useComposerDraftStore.getState();
+    const key = scopedProjectKey(projectRef);
+    store.setLogicalProjectDraftThreadId(key, projectRef, draftId, {
+      threadId,
+      environmentSelection: "auto",
+    });
+    store.setLogicalProjectDraftThreadId(key, projectRef, draftId, { sectionId: "build" });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)).toMatchObject({
+      sectionId: "build",
+      environmentSelection: "manual",
+    });
+    store.setLogicalProjectDraftThreadId(key, projectRef, draftId, { sectionId: "research" });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.sectionId).toBe("research");
+  });
+  it("clears assignment when a draft moves to another physical project", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId, sectionId: "build" });
+    store.setDraftThreadContext(draftId, {
+      projectRef: scopeProjectRef(OTHER_TEST_ENVIRONMENT_ID, projectRef.projectId),
+    });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.sectionId).toBeNull();
+  });
+});

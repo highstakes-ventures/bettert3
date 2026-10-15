@@ -1,3 +1,13 @@
+import {
+  groupThreadsBySection,
+  resolveThreadSection,
+  threadSectionKey,
+} from "@t3tools/client-runtime/state/thread-sections";
+import {
+  SectionViewMenu,
+  ThreadSectionHeading,
+  ThreadSectionPicker,
+} from "./sidebar/ThreadSections";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
@@ -260,7 +270,7 @@ import {
   ThreadSearchPullRequestNumber,
 } from "./ThreadStatusIndicators";
 import { resolveSnoozePresets, snoozeWakeLabel, type SnoozePreset } from "./Sidebar.snooze";
-import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
+import { ProjectFavicon } from "./ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
@@ -453,7 +463,7 @@ function SidebarThreadTooltip({
   terminalProcessCount,
 }: {
   thread: SidebarThreadSummary;
-  project: ProjectFaviconProject | null;
+  project: EnvironmentProject | null;
   projectDisplayName: string | null;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
@@ -853,7 +863,8 @@ function SidebarSectionHeader(props: {
 const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   draftId: DraftId;
   composer: ComposerThreadDraftState;
-  project: ProjectFaviconProject | null;
+  project: EnvironmentProject | null;
+  sectionId: string | null;
   projectDisplayName: string | null;
   isActive: boolean;
   onNavigate: (draftId: DraftId) => void;
@@ -942,6 +953,17 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
             <span className="min-w-0 flex-1 truncate text-xs font-medium text-secondary-label">
               {props.projectDisplayName}
             </span>
+            {props.project ? (
+              <ThreadSectionPicker
+                project={props.project}
+                section={
+                  props.project.sections?.find((section) => section.id === props.sectionId) ?? null
+                }
+                onChange={(sectionId) =>
+                  useComposerDraftStore.getState().setDraftThreadContext(draftId, { sectionId })
+                }
+              />
+            ) : null}
             <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
               <Tooltip>
                 <TooltipTrigger
@@ -983,6 +1005,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   projectByKey: ReadonlyMap<string, EnvironmentProject>;
   projectDisplayNameByKey: ReadonlyMap<string, string>;
   scopedProjectKeys: ReadonlySet<string> | null;
+  sectionFilter: string | null;
   routeDraftId: string | null;
   onNavigateToDraft: (draftId: DraftId) => void;
   onDraftContextMenu: (draftId: DraftId, position: { x: number; y: number }) => void;
@@ -1028,6 +1051,12 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
       ) {
         continue;
       }
+      if (props.sectionFilter !== null) {
+        const project = props.projectByKey.get(`${session.environmentId}:${session.projectId}`);
+        const section = project?.sections?.find((section) => section.id === session.sectionId);
+        if (!project || threadSectionKey(project, section?.id ?? null) !== props.sectionFilter)
+          continue;
+      }
       if (draftKey === props.routeDraftId) {
         // Open draft: render the frozen entry snapshot, or nothing for a
         // draft that has never been left. Gated on the LIVE session above so
@@ -1051,6 +1080,8 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
     frozenActive,
     props.routeDraftId,
     props.scopedProjectKeys,
+    props.sectionFilter,
+    props.projectByKey,
   ]);
   if (drafts.length === 0) {
     return null;
@@ -1063,6 +1094,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
           <SidebarDraftRow
             key={draftId}
             draftId={draftId}
+            sectionId={session.sectionId ?? null}
             composer={composer}
             project={props.projectByKey.get(projectKey) ?? null}
             projectDisplayName={props.projectDisplayNameByKey.get(projectKey) ?? null}
@@ -1165,6 +1197,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   scratchMachineLabel: string | null;
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
+  onSectionChange: (threadRef: ScopedThreadRef, sectionId: string | null) => void;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
@@ -1841,6 +1874,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             >
               {props.project ? <ProjectFavicon project={props.project} className="size-4" /> : null}
             </span>
+            {props.project ? (
+              <ThreadSectionPicker
+                project={props.project}
+                section={resolveThreadSection(props.project, thread)}
+                onChange={(id) => props.onSectionChange(threadRef, id)}
+              />
+            ) : null}
             {draftIndicator}
             {title}
             {pinIndicator}
@@ -2013,6 +2053,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <span className="flex-1" />
               )}
+              {props.project ? (
+                <ThreadSectionPicker
+                  project={props.project}
+                  section={resolveThreadSection(props.project, thread)}
+                  onChange={(id) => props.onSectionChange(threadRef, id)}
+                />
+              ) : null}
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping
@@ -2702,6 +2749,47 @@ export default function Sidebar() {
           ),
     [scopedProjectGroup],
   );
+  const sectionGrouping = useUiStateStore((state) => state.sidebarThreadGrouping);
+  const persistedSectionFilter = useUiStateStore((state) => state.sidebarSectionFilter);
+  const collapsedThreadSections = useUiStateStore((state) => state.collapsedThreadSections);
+  const sectionProjects = useMemo(
+    () =>
+      projects.filter(
+        (project) =>
+          scopedProjectKeys === null ||
+          scopedProjectKeys.has(`${project.environmentId}:${project.id}`),
+      ),
+    [projects, scopedProjectKeys],
+  );
+  const sectionFilter = useMemo(
+    () =>
+      projects.some((project) =>
+        (project.sections ?? []).some(
+          (section) => threadSectionKey(project, section.id) === persistedSectionFilter,
+        ),
+      )
+        ? persistedSectionFilter
+        : null,
+    [projects, persistedSectionFilter],
+  );
+  const assignThreadSection = useCallback(
+    (threadRef: ScopedThreadRef, sectionId: string | null) => {
+      void updateThreadMetadata({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId, sectionId },
+      }).then((result) => {
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: "Could not move chat",
+            description: error instanceof Error ? error.message : "Try again.",
+          });
+        }
+      });
+    },
+    [updateThreadMetadata],
+  );
   // Configs identify scratch projects, so both they and live project snapshots
   // must arrive before a persisted scope can be considered missing.
   const allProjectSnapshotsReady = useAllEnvironmentProjectSnapshotsReady();
@@ -2830,7 +2918,15 @@ export default function Sidebar() {
     const preciseNow = new Date().toISOString();
     // Subagent child threads live in the parent's Agents surface, not the
     // sidebar roster (v2 models them as real threads with lineage).
-    const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys);
+    const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys).filter((thread) => {
+      if (sectionFilter === null) return true;
+      const project = projectByKey.get(`${thread.environmentId}:${thread.projectId}`);
+      return (
+        project !== undefined &&
+        threadSectionKey(project, resolveThreadSection(project, thread)?.id ?? null) ===
+          sectionFilter
+      );
+    });
     inboxReturns.observe(workingShelfEnabled ? threads : null);
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
@@ -2932,6 +3028,8 @@ export default function Sidebar() {
     };
   }, [
     nowMinute,
+    sectionFilter,
+    projectByKey,
     optimisticDrop,
     scopedProjectKeys,
     serverConfigs,
@@ -3855,7 +3953,8 @@ export default function Sidebar() {
         workingThreads.length +
         snoozedThreads.length +
         settledThreads.length ===
-      0
+        0 &&
+      sectionGrouping !== "section"
     ) {
       return [];
     }
@@ -3880,6 +3979,7 @@ export default function Sidebar() {
     items.push(...settledRows);
     return items;
   }, [
+    sectionGrouping,
     activeThreads,
     pinnedThreads,
     renderedSettledThreads,
@@ -4681,39 +4781,89 @@ export default function Sidebar() {
           ) ?? null;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
-            buildThreadActionMenuItems({
-              canOperate: readEnvironmentScope(
-                threadRef.environmentId,
-                AuthOrchestrationOperateScope,
-              ),
-              branch: thread.branch ?? null,
-              projectFilter: threadProjectGroup
-                ? {
-                    label: threadProjectGroup.displayName,
-                    isActive: projectScopeKey === threadProjectGroup.projectKey,
-                  }
-                : null,
-              isPinned,
-              isSettled,
-              autoSettleEnabled: thread.autoSettleDisabledAt == null,
-              isSnoozed,
-              canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-              isRegeneratingTitle,
-              isRunning: !threadRuntimeCanArchive(thread.runtime),
-              supports: {
-                settlement: supportsSettlement,
-                autoSettleOptOut: supportsAutoSettleOptOut,
-                snooze: supportsSnooze,
-                pinning: supportsPinning,
-                titleRegeneration: supportsTitleRegeneration,
-              },
-              snoozePresets,
-            }),
+            [
+              ...(projectByKey.get(`${thread.environmentId}:${thread.projectId}`)?.sections ===
+              undefined
+                ? []
+                : [
+                    {
+                      id: "assign-section",
+                      label: "Section",
+                      disabled: !readEnvironmentScope(
+                        thread.environmentId,
+                        AuthOrchestrationOperateScope,
+                      ),
+                      children: [
+                        {
+                          id: "clear-section",
+                          label: "No section",
+                          checked:
+                            resolveThreadSection(
+                              projectByKey.get(`${thread.environmentId}:${thread.projectId}`),
+                              thread,
+                            ) === null,
+                        },
+                        ...(
+                          projectByKey.get(`${thread.environmentId}:${thread.projectId}`)
+                            ?.sections ?? []
+                        ).map((section) => ({
+                          id: `assign-section:${section.id}`,
+                          label: section.name,
+                          checked: section.id === thread.sectionId,
+                        })),
+                      ],
+                    },
+                  ]),
+              ...buildThreadActionMenuItems({
+                canOperate: readEnvironmentScope(
+                  threadRef.environmentId,
+                  AuthOrchestrationOperateScope,
+                ),
+                branch: thread.branch ?? null,
+                projectFilter: threadProjectGroup
+                  ? {
+                      label: threadProjectGroup.displayName,
+                      isActive: projectScopeKey === threadProjectGroup.projectKey,
+                    }
+                  : null,
+                isPinned,
+                isSettled,
+                autoSettleEnabled: thread.autoSettleDisabledAt == null,
+                isSnoozed,
+                canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+                isRegeneratingTitle,
+                isRunning: !threadRuntimeCanArchive(thread.runtime),
+                supports: {
+                  settlement: supportsSettlement,
+                  autoSettleOptOut: supportsAutoSettleOptOut,
+                  snooze: supportsSnooze,
+                  pinning: supportsPinning,
+                  titleRegeneration: supportsTitleRegeneration,
+                },
+                snoozePresets,
+              }),
+            ],
             position,
           ),
         );
         if (clicked._tag === "Failure" || clicked.value === null) return;
-        if (threadActionRequiresOperate(clicked.value) && !checkThreadOperations([thread])) return;
+        if (clicked.value === "clear-section" || clicked.value.startsWith("assign-section:")) {
+          if (!checkThreadOperations([thread])) return;
+          assignThreadSection(
+            threadRef,
+            clicked.value === "clear-section"
+              ? null
+              : clicked.value.slice("assign-section:".length),
+          );
+          return;
+        }
+        if (
+          threadActionRequiresOperate(
+            clicked.value as Parameters<typeof threadActionRequiresOperate>[0],
+          ) &&
+          !checkThreadOperations([thread])
+        )
+          return;
         if (clicked.value?.startsWith("snooze:")) {
           const preset =
             clicked.value === "snooze:custom"
@@ -5058,6 +5208,7 @@ export default function Sidebar() {
           // header and would otherwise paint across the search row's outline.
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
+              viewControl={<SectionViewMenu projects={sectionProjects} />}
               searchFieldRef={headerSearchRef}
               hasProjects={projectGroups.length > 0}
               projectScope={
@@ -5416,6 +5567,7 @@ export default function Sidebar() {
                               EMPTY_PROVIDER_ENTRIES
                             }
                             timestampFormat={timestampFormat}
+                            onSectionChange={assignThreadSection}
                             onThreadClick={handleThreadClick}
                             onThreadActivate={navigateToThread}
                             onStartRename={startThreadRename}
@@ -5454,6 +5606,7 @@ export default function Sidebar() {
                             contextDrag={isContextDrag}
                             environmentId={thread.environmentId}
                             disabled={
+                              sectionGrouping === "section" ||
                               renamingThreadKey === threadKey ||
                               section === "working" ||
                               !draggableThreadKeys.has(threadKey) ||
@@ -5471,6 +5624,7 @@ export default function Sidebar() {
                           projectByKey={projectByKey}
                           projectDisplayNameByKey={projectDisplayNameByKey}
                           scopedProjectKeys={scopedProjectKeys}
+                          sectionFilter={sectionFilter}
                           routeDraftId={routeDraftIdForRows}
                           onNavigateToDraft={navigateToDraft}
                           onDraftContextMenu={handleDraftContextMenu}
@@ -5478,6 +5632,7 @@ export default function Sidebar() {
                       ];
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
+                          if (sectionGrouping === "section" && item.section === "active") continue;
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
                           continue;
                         }
@@ -5505,6 +5660,46 @@ export default function Sidebar() {
                             );
                             break;
                           case "active-placeholder":
+                            if (sectionGrouping === "section") {
+                              for (const group of groupThreadsBySection(
+                                sectionProjects,
+                                activeThreads,
+                              )) {
+                                if (sectionFilter !== null && group.key !== sectionFilter) continue;
+                                if (
+                                  group.section === null &&
+                                  group.threads.length === 0 &&
+                                  (group.project.sections?.length ?? 0) > 0
+                                )
+                                  continue;
+                                items.push(
+                                  <ThreadSectionHeading
+                                    key={`heading:${group.key}`}
+                                    project={group.project}
+                                    section={group.section}
+                                    count={group.threads.length}
+                                    showProject={sectionProjects.length > 1}
+                                    onNewThread={() => {
+                                      void handleNewThreadRef.current(
+                                        scopeProjectRef(
+                                          group.project.environmentId,
+                                          group.project.id,
+                                        ),
+                                        { sectionId: group.section?.id ?? null },
+                                      );
+                                    }}
+                                  />,
+                                );
+                                if (!collapsedThreadSections.includes(group.key)) {
+                                  items.push(
+                                    ...group.threads.map((thread) =>
+                                      renderThreadRow(thread, "active"),
+                                    ),
+                                  );
+                                }
+                              }
+                              break;
+                            }
                             items.push(
                               <SidebarSectionPlaceholder
                                 key="active-placeholder"

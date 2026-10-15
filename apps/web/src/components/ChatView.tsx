@@ -9710,6 +9710,11 @@ export default function ChatView(props: ChatViewProps) {
                   interactionMode: target.interactionMode,
                   bootstrap: {
                     createThread: {
+                      sectionId: activeProject.sections?.some(
+                        (section) => section.id === draftThread?.sectionId,
+                      )
+                        ? (draftThread?.sectionId ?? null)
+                        : null,
                       projectId: activeProject.id,
                       title,
                       modelSelection: target.selection,
@@ -10050,6 +10055,11 @@ export default function ChatView(props: ChatViewProps) {
               ...(isLocalDraftThread
                 ? {
                     createThread: {
+                      sectionId: activeProject.sections?.some(
+                        (section) => section.id === draftThread?.sectionId,
+                      )
+                        ? (draftThread?.sectionId ?? null)
+                        : null,
                       projectId: activeProject.id,
                       title,
                       modelSelection: threadCreateModelSelection,

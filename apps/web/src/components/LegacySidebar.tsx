@@ -1,3 +1,5 @@
+import { resolveThreadSection } from "@t3tools/client-runtime/state/thread-sections";
+import { ThreadSectionPicker } from "./sidebar/ThreadSections";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { Spinner } from "~/components/ui/spinner";
@@ -88,6 +90,7 @@ import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import {
   readThreadShell,
+  useProject,
   useProjects,
   useThreadShells,
   useThreadShellsForProjectRefs,
@@ -404,6 +407,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     onFileDropThreads,
     thread,
   } = props;
+  const sectionProject = useProject(scopeProjectRef(thread.environmentId, thread.projectId));
+  const updateSection = useOrchestrationCommand(
+    threadEnvironment.updateMetadata,
+    "Could not move chat to section",
+  );
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   const canOperatePreview = useEnvironmentScope(thread.environmentId, AuthPreviewOperateScope);
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
@@ -826,6 +834,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {sectionProject ? (
+            <ThreadSectionPicker
+              project={sectionProject}
+              section={resolveThreadSection(sectionProject, thread)}
+              onChange={(sectionId) => {
+                void updateSection({
+                  environmentId: thread.environmentId,
+                  input: { threadId: thread.id, sectionId },
+                });
+              }}
+            />
+          ) : null}
           {canOperatePreview && discoveredPorts.length > 0 && (
             <Tooltip>
               <TooltipTrigger

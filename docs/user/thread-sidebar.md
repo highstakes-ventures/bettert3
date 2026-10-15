@@ -43,6 +43,27 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Organize threads with sections
+
+On web and desktop, open **View** beside the sidebar search and project filter.
+Choose **New section** for a project, then give it a name and color. Use a thread's
+section label or its **Section** menu to assign it, move it, or choose **No section**.
+
+**Chats** keeps the usual thread order and shows each thread's section color.
+**By section** groups active threads under collapsible headings. Use a heading's
+**+** to start a draft in that section. Its menu lets you edit, reorder, or delete
+the section. Deleting a section keeps its chats under **No section**.
+
+Pins stay above the grouped list. Working, snoozed, and settled shelves keep their
+usual behavior. Choose **Chats** to drag and reorder individual threads. The View
+menu also filters the list to one section, alongside search and the project filter.
+
+Sections and assignments sync through their project's environment. View, filter,
+and collapse choices stay on your device. On mobile, choose **By section** in the
+thread list and use a thread's **Section** menu to change its assignment. Manage
+section names, colors, and order on web or desktop. Sections use the current
+sidebar; the legacy sidebar keeps its existing project layout.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.
@@ -64,7 +85,7 @@ scroll position instead of following the thread to its new place in the list.
 
 Pinning does not prevent automatic settlement. Settling a thread removes its pin.
 
-On web and desktop, drag a thread between sections to change its state. Drag a thread up into
+On web and desktop in **Chats** view, drag a thread between sections to change its state. Drag a thread up into
 the pinned section to pin it at the spot you drop it; drag a pinned thread down into the active
 list to unpin it. Dragging a thread onto the **Settled** header settles it, and dragging a settled
 thread into the active list un-settles it. A snoozed thread can be dragged out of the snoozed

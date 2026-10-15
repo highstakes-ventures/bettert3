@@ -57,6 +57,7 @@ import { SidebarFilterButton } from "./sidebar-filter-button";
 import { createSidebarHeaderItems } from "./sidebar-native-header-items";
 import { SidebarNavigationShell } from "./sidebar-navigation-shell";
 import {
+  ThreadListV2SectionControl,
   ThreadListV2PendingRow,
   ThreadListV2Row,
   ThreadListV2SettledShelfHeader,
@@ -293,6 +294,8 @@ function ThreadNavigationSidebarPane(
   );
   const {
     loaded: shelfPreferencesLoaded,
+    sectionGrouping,
+    collapsedThreadSections,
     settledShelfExpanded,
     snoozedShelfExpanded,
     workingShelfEnabled,
@@ -440,6 +443,15 @@ function ThreadNavigationSidebarPane(
           pendingTask.title.toLocaleLowerCase().includes(v2SearchQuery)),
     );
     const items: SidebarListItem[] = buildThreadListV2ListItems({
+      sectionGrouping,
+      collapsedThreadSections,
+      sectionProjects: projects.filter(
+        (project) =>
+          (options.selectedEnvironmentId === null ||
+            project.environmentId === options.selectedEnvironmentId) &&
+          (selectedProjectRefs === null ||
+            selectedProjectRefs.has(scopedProjectKey(project.environmentId, project.id))),
+      ),
       items: threadListV2Layout.items,
       pendingTasks: v2PendingTasks,
       workingCount: threadListV2Layout.workingCount,
@@ -478,6 +490,9 @@ function ThreadNavigationSidebarPane(
     snoozedShelfExpanded,
     snoozeEnvironmentIds,
     threadListV2Layout,
+    projects,
+    sectionGrouping,
+    collapsedThreadSections,
     workingShelfExpanded,
   ]);
   const listMenuActions = useMemo<MenuAction[]>(
@@ -656,6 +671,9 @@ function ThreadNavigationSidebarPane(
   const renderListItem = useCallback(
     ({ item }: { readonly item: SidebarListItem }) => {
       switch (item.type) {
+        case "v2-section":
+        case "v2-section-view":
+          return <ThreadListV2SectionControl item={item} />;
         case "v2-pending": {
           const pendingScopeKey = scopedProjectKey(
             item.pendingTask.environmentId,

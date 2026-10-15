@@ -6,6 +6,7 @@ import {
   type ProjectIconOverride,
   ProjectId,
   type ProjectScript,
+  type ProjectSectionChange,
   SCRIPT_RUN_COMMAND_PATTERN,
   type ThreadEnvMode,
 } from "@t3tools/contracts";
@@ -26,6 +27,7 @@ export interface ProjectCreateCommand {
 }
 
 export interface ProjectMetaUpdateCommand {
+  readonly sectionChange?: ProjectSectionChange;
   readonly type: "project.meta.update";
   readonly commandId: CommandId;
   readonly projectId: ProjectId;
@@ -202,6 +204,41 @@ export function planProjectCommand(input: {
           }
         }
       }
+      let sections = project.sections ?? [];
+      if (command.sectionChange !== undefined) {
+        const change = command.sectionChange;
+        if (change.type === "upsert") {
+          if (
+            sections.some(
+              (section) =>
+                section.id !== change.section.id &&
+                section.name.toLowerCase() === change.section.name.toLowerCase(),
+            )
+          ) {
+            return invariant("A section with this name already exists.");
+          }
+          const exists = sections.some((section) => section.id === change.section.id);
+          if (!exists && sections.length >= 64)
+            return invariant("A project can have at most 64 sections.");
+          sections = exists
+            ? sections.map((section) =>
+                section.id === change.section.id ? change.section : section,
+              )
+            : [...sections, change.section];
+        } else if (change.type === "delete") {
+          sections = sections.filter((section) => section.id !== change.sectionId);
+        } else {
+          if (
+            change.sectionIds.length !== sections.length ||
+            new Set(change.sectionIds).size !== sections.length ||
+            change.sectionIds.some((id) => !sections.some((section) => section.id === id))
+          ) {
+            return invariant("Section order must contain every section exactly once.");
+          }
+          const byId = new Map(sections.map((section) => [section.id, section]));
+          sections = change.sectionIds.map((id) => byId.get(id)!);
+        }
+      }
       if (command.workspaceRoot !== undefined) {
         const conflict = requireWorkspaceAvailable(command.workspaceRoot);
         if (conflict !== undefined) return Result.fail(conflict);
@@ -223,6 +260,7 @@ export function planProjectCommand(input: {
           ...(command.faviconPath === undefined ? {} : { faviconPath: command.faviconPath }),
           ...(command.projectIcon === undefined ? {} : { projectIcon: command.projectIcon }),
           ...(command.scripts === undefined ? {} : { scripts: command.scripts }),
+          ...(command.sectionChange === undefined ? {} : { sections }),
           updatedAt: occurredAt,
         },
       });

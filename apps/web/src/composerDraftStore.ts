@@ -318,6 +318,7 @@ type LegacyPersistedComposerDraftStoreState = PersistedComposerDraftStoreState &
   LegacyV2StoreFields;
 
 const PersistedDraftThreadState = Schema.Struct({
+  sectionId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   threadId: ThreadId,
   environmentId: Schema.String,
   projectId: ProjectId,
@@ -460,6 +461,7 @@ export function composerDraftHasUserContent(
  * environment/worktree configuration before the first send.
  */
 export interface DraftSessionState {
+  sectionId?: string | null;
   threadId: ThreadId;
   environmentId: EnvironmentId;
   projectId: ProjectId;
@@ -553,6 +555,7 @@ interface ComposerDraftStoreState {
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      sectionId?: string | null;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
@@ -571,6 +574,7 @@ interface ComposerDraftStoreState {
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      sectionId?: string | null;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
@@ -588,6 +592,7 @@ interface ComposerDraftStoreState {
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      sectionId?: string | null;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
@@ -1609,6 +1614,7 @@ function createDraftThreadState(
     createdAt?: string;
     envMode?: DraftThreadEnvMode;
     startFromOrigin?: boolean;
+    sectionId?: string | null;
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
     environmentSelection?: "auto" | "manual";
@@ -1641,7 +1647,8 @@ function createDraftThreadState(
       ? (existingThread?.startFromOrigin ?? false)
       : options.startFromOrigin;
   const environmentSelection =
-    options?.environmentSelection ?? existingThread?.environmentSelection;
+    options?.environmentSelection ??
+    (options?.sectionId != null ? "manual" : existingThread?.environmentSelection);
   return {
     threadId,
     environmentId: projectRef.environmentId,
@@ -1670,6 +1677,12 @@ function createDraftThreadState(
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
+    sectionId:
+      options?.sectionId === undefined
+        ? projectChanged
+          ? null
+          : (existingThread?.sectionId ?? null)
+        : options.sectionId,
     promotedTo: null,
   };
 }
@@ -1694,6 +1707,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.threadId === right.threadId &&
     left.environmentId === right.environmentId &&
     left.projectId === right.projectId &&
+    left.sectionId === right.sectionId &&
     left.logicalProjectKey === right.logicalProjectKey &&
     Equal.equals(left.runDestination, right.runDestination) &&
     left.environmentSelection === right.environmentSelection &&
@@ -1830,6 +1844,10 @@ function normalizePersistedDraftThreads(
         threadId,
         environmentId: normalizedEnvironmentId,
         projectId: projectId as ProjectId,
+        sectionId:
+          typeof candidateDraftThread.sectionId === "string"
+            ? candidateDraftThread.sectionId
+            : null,
         logicalProjectKey:
           typeof candidateDraftThread.logicalProjectKey === "string" &&
           candidateDraftThread.logicalProjectKey.length > 0
@@ -2626,6 +2644,7 @@ function toHydratedDraftThreadState(
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
     startFromOrigin: persistedDraftThread.startFromOrigin,
+    sectionId: persistedDraftThread.sectionId ?? null,
     ...(persistedDraftThread.environmentSelection
       ? { environmentSelection: persistedDraftThread.environmentSelection }
       : {}),
@@ -2938,7 +2957,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 : options.startFromOrigin;
             const environmentSelection =
               options.environmentSelection ??
-              (options.branch != null || options.worktreePath != null
+              (options.branch != null || options.worktreePath != null || options.sectionId != null
                 ? "manual"
                 : existing.environmentSelection);
             const nextDraftThread: DraftThreadState = {
@@ -2968,11 +2987,18 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
+              sectionId:
+                options.sectionId === undefined
+                  ? projectChanged
+                    ? null
+                    : (existing.sectionId ?? null)
+                  : options.sectionId,
               promotedTo: existing.promotedTo ?? null,
             };
             const isUnchanged =
               nextDraftThread.environmentId === existing.environmentId &&
               nextDraftThread.projectId === existing.projectId &&
+              nextDraftThread.sectionId === existing.sectionId &&
               nextDraftThread.logicalProjectKey === existing.logicalProjectKey &&
               Equal.equals(nextDraftThread.runDestination, existing.runDestination) &&
               nextDraftThread.environmentSelection === existing.environmentSelection &&

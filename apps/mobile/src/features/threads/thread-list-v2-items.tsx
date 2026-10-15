@@ -1,3 +1,9 @@
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { resolveThreadSection } from "@t3tools/client-runtime/state/thread-sections";
+import { useAtomValue, useAtomSet } from "@effect/atom-react";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { threadEnvironment } from "../../state/threads";
+import { projectIconColorClassNames } from "../../lib/projectIcon";
 import type { ThreadRowProviderInstance } from "./thread-provider-instance";
 import {
   THREAD_LIST_V2_MONO_FONT as MONO_FONT,
@@ -602,6 +608,36 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     onSetThreadAutoSettle,
     onMoveThread,
   } = props;
+  const section = resolveThreadSection(props.project, thread);
+  const updateSection = useAtomCommand(threadEnvironment.updateMetadata, "Could not move chat");
+  const canChangeSection = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
+  const sectionMenuItems = useMemo<MenuAction[]>(
+    () =>
+      props.project?.sections === undefined
+        ? []
+        : [
+            {
+              id: "section",
+              title: `Section: ${section?.name ?? "No section"}`,
+              image: "tag",
+              subactions: [
+                {
+                  id: "clear-section",
+                  title: "No section",
+                  state: section === null ? "on" : "off",
+                  attributes: { disabled: !canChangeSection },
+                },
+                ...props.project.sections.map((candidate) => ({
+                  id: `section:${candidate.id}`,
+                  title: candidate.name,
+                  state: candidate.id === section?.id ? ("on" as const) : ("off" as const),
+                  attributes: { disabled: !canChangeSection },
+                })),
+              ],
+            },
+          ],
+    [props.project, section, canChangeSection],
+  );
   const snoozedRow = props.snoozed === true;
   const pinnedRow = props.pinned === true;
   const dormant = useSwipeRowDormant(props.activationKey);
@@ -802,20 +838,28 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       },
       ...arrangementMenuItems,
       ...titleMenuItems,
+      ...sectionMenuItems,
       ...autoSettleMenuItems,
       { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
     ],
-    [arrangementMenuItems, autoSettleMenuItems, snoozePresetActions, titleMenuItems],
+    [
+      arrangementMenuItems,
+      autoSettleMenuItems,
+      snoozePresetActions,
+      titleMenuItems,
+      sectionMenuItems,
+    ],
   );
   const cardMenuActions = useMemo<MenuAction[]>(
     () => [
       CARD_MENU_ACTIONS[0]!,
       ...arrangementMenuItems,
       ...titleMenuItems,
+      ...sectionMenuItems,
       ...autoSettleMenuItems,
       ...CARD_MENU_ACTIONS.slice(1),
     ],
-    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems],
+    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems, sectionMenuItems],
   );
   // Settled and snoozed rows keep the setting too, matching web where every
   // row shares one menu builder.
@@ -826,31 +870,49 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         (action) => action.id !== "move-up" && action.id !== "move-down",
       ),
       ...titleMenuItems,
+      ...sectionMenuItems,
       ...autoSettleMenuItems,
       SLIM_MENU_ACTIONS[1]!,
     ],
-    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems],
+    [arrangementMenuItems, autoSettleMenuItems, titleMenuItems, sectionMenuItems],
   );
   const snoozedMenuActions = useMemo<MenuAction[]>(
     () => [
       SNOOZED_MENU_ACTIONS[0]!,
       ...titleMenuItems,
+      ...sectionMenuItems,
       ...autoSettleMenuItems,
       SNOOZED_MENU_ACTIONS[1]!,
     ],
-    [autoSettleMenuItems, titleMenuItems],
+    [autoSettleMenuItems, titleMenuItems, sectionMenuItems],
   );
   const legacyMenuActions = useMemo<MenuAction[]>(
     () => [
       LEGACY_MENU_ACTIONS[0]!,
       ...arrangementMenuItems,
       ...titleMenuItems,
+      ...sectionMenuItems,
       LEGACY_MENU_ACTIONS[1]!,
     ],
-    [arrangementMenuItems, titleMenuItems],
+    [arrangementMenuItems, titleMenuItems, sectionMenuItems],
   );
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
+      if (
+        (nativeEvent.event === "clear-section" || nativeEvent.event.startsWith("section:")) &&
+        canChangeSection
+      ) {
+        const selected =
+          nativeEvent.event === "clear-section"
+            ? null
+            : props.project?.sections?.find((section) => section.id === nativeEvent.event.slice(8));
+        if (selected !== undefined)
+          void updateSection({
+            environmentId: thread.environmentId,
+            input: { threadId: thread.id, sectionId: selected?.id ?? null },
+          });
+        return;
+      }
       if (nativeEvent.event === "new-thread-on-branch") onNewThreadOnBranch(thread);
       if (nativeEvent.event === "settle") handleSettle();
       if (nativeEvent.event === "unsettle") handleUnsettle();
@@ -886,6 +948,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     },
     [
       onNewThreadOnBranch,
+      updateSection,
+      canChangeSection,
+      props.project,
       thread,
       handleArchive,
       handleDelete,
@@ -993,6 +1058,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         >
           {props.projectTitle ?? props.project?.title ?? ""}
         </Text>
+        {section ? (
+          <Text
+            numberOfLines={1}
+            className={cn("max-w-24 text-xs", projectIconColorClassNames(section.color).text)}
+          >
+            {section.name}
+          </Text>
+        ) : null}
         {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
         {pinnedRow ? (
           <SymbolView
@@ -1272,6 +1345,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             >
               {thread.title}
             </Text>
+            {section ? (
+              <Text
+                numberOfLines={1}
+                className={cn("text-xs", projectIconColorClassNames(section.color).text)}
+              >
+                {section.name}
+              </Text>
+            ) : null}
             {props.searchMatch ? (
               <ThreadSearchMatchExcerpt
                 sidebar={sidebarPane}
@@ -1281,6 +1362,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               />
             ) : null}
           </View>
+
           {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
           <Text
             className={cn(
@@ -1361,3 +1443,75 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     </View>
   );
 });
+
+export function ThreadListV2SectionControl({
+  item,
+}: {
+  item: Extract<
+    import("./threadListV2").ThreadListV2ListItem,
+    { type: "v2-section" | "v2-section-view" }
+  >;
+}) {
+  const save = useAtomSet(updateMobilePreferencesAtom);
+  const preferences = useAtomValue(mobilePreferencesAtom);
+  if (item.type === "v2-section-view")
+    return (
+      <ControlPillMenu
+        actions={[
+          { id: "chats", title: "Chats", state: item.grouped ? "off" : "on" },
+          { id: "section", title: "By section", state: item.grouped ? "on" : "off" },
+        ]}
+        onPressAction={({ nativeEvent }) =>
+          save({ threadSectionGrouping: nativeEvent.event === "section" })
+        }
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Thread view"
+          className="min-h-11 flex-row items-center gap-2 px-4"
+        >
+          <Text className="text-xs text-foreground-muted">
+            {item.grouped ? "By section" : "Chats"}
+          </Text>
+          <SymbolView name="chevron.down" size={10} tintColorClassName="accent-foreground-muted" />
+        </Pressable>
+      </ControlPillMenu>
+    );
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ expanded: !item.collapsed }}
+      className="min-h-11 flex-row items-center gap-2 px-4"
+      onPress={() => {
+        const keys =
+          preferences._tag === "Success" ? (preferences.value.collapsedThreadSections ?? []) : [];
+        save({
+          collapsedThreadSections: keys.includes(item.key)
+            ? keys.filter((key) => key !== item.key)
+            : [...keys, item.key],
+        });
+      }}
+    >
+      <SymbolView
+        name={item.collapsed ? "chevron.right" : "chevron.down"}
+        size={10}
+        tintColorClassName="accent-foreground-muted"
+      />
+      <Text
+        numberOfLines={1}
+        className={cn(
+          "text-xs font-t3-medium",
+          item.section
+            ? projectIconColorClassNames(item.section.color).text
+            : "text-foreground-muted",
+        )}
+      >
+        {item.section?.name ?? "No section"}
+      </Text>
+      <Text numberOfLines={1} className="flex-1 text-xs text-foreground-muted">
+        {item.project.title}
+      </Text>
+      <Text className="text-xs text-foreground-muted">{item.count}</Text>
+    </Pressable>
+  );
+}

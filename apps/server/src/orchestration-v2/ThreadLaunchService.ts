@@ -76,6 +76,7 @@ export interface ThreadLaunchInitialMessage {
 
 export interface ThreadLaunchInput {
   readonly runDestination?: CodexCloudDestination;
+  readonly sectionId?: string | null;
   readonly commandId: CommandId;
   readonly threadId?: ThreadId;
   readonly reuseExistingThread?: boolean;
@@ -904,6 +905,7 @@ const make = Effect.gen(function* () {
                 threadId: candidateThreadId,
                 projectId: input.projectId,
                 title: input.title,
+                sectionId: input.sectionId ?? null,
                 modelSelection: input.modelSelection,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,

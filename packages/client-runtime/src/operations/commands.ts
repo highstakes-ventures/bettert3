@@ -18,6 +18,7 @@ import {
   type ProjectId,
   type ProjectIconOverride,
   type ProjectScript,
+  type ProjectSectionChange,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
   type ProviderUserInputAnswers,
@@ -52,6 +53,7 @@ export interface CreateProjectInput extends CommandMetadata {
 }
 
 export interface UpdateProjectInput extends CommandMetadata {
+  readonly sectionChange?: ProjectSectionChange;
   readonly projectId: ProjectId;
   readonly title?: string;
   readonly workspaceRoot?: string;
@@ -69,6 +71,7 @@ export interface DeleteProjectInput extends CommandMetadata {
 }
 
 export interface CreateThreadInput extends CommandMetadata {
+  readonly sectionId?: string | null;
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
   readonly title: string;
@@ -124,6 +127,7 @@ export interface VisitThreadInput extends ThreadCommandInput {
 export type MarkThreadUnreadInput = ThreadCommandInput;
 
 export interface UpdateThreadMetadataInput extends ThreadCommandInput {
+  readonly sectionId?: string | null;
   readonly limitRecovery?: import("@t3tools/contracts").OrchestrationV2LimitRecoveryUpdate | null;
   readonly title?: string;
   readonly modelSelection?: ModelSelection;
@@ -148,6 +152,7 @@ export interface SetThreadInteractionModeInput extends ThreadCommandInput {
 interface StartThreadBootstrap {
   readonly createThread?: {
     readonly runDestination?: CodexCloudDestination;
+    readonly sectionId?: string | null;
     readonly projectId: ProjectId;
     readonly title: string;
     readonly modelSelection: ModelSelection;
@@ -327,6 +332,7 @@ const mutateProject = Effect.fn("EnvironmentCommands.mutateProject")(function* (
       }
     | {
         readonly type: "project.update";
+        readonly sectionChange?: ProjectSectionChange;
         readonly commandId: CommandId;
         readonly projectId: ProjectId;
         readonly title?: string;
@@ -368,6 +374,7 @@ export const updateProject = Effect.fn("EnvironmentCommands.updateProject")(func
 ) {
   return yield* mutateProject({
     type: "project.update",
+    ...(input.sectionChange === undefined ? {} : { sectionChange: input.sectionChange }),
     commandId: yield* allocateCommandId(input),
     projectId: input.projectId,
     ...(input.title === undefined ? {} : { title: input.title }),
@@ -401,6 +408,7 @@ export const createThread = Effect.fn("EnvironmentCommands.createThread")(functi
 ) {
   return yield* dispatch({
     type: "thread.create",
+    ...(input.sectionId === undefined ? {} : { sectionId: input.sectionId }),
     commandId: yield* allocateCommandId(input),
     createdBy: "user",
     creationSource: input.creationSource ?? "web",
@@ -568,6 +576,7 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
     const commandId = yield* allocateCommandId(input);
     let result = null;
     if (
+      input.sectionId !== undefined ||
       input.title !== undefined ||
       input.branch !== undefined ||
       input.worktreePath !== undefined ||
@@ -577,6 +586,7 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
     ) {
       result = yield* dispatch({
         type: "thread.metadata.update",
+        ...(input.sectionId === undefined ? {} : { sectionId: input.sectionId }),
         ...(input.limitRecovery === undefined ? {} : { limitRecovery: input.limitRecovery }),
         commandId,
         threadId: input.threadId,
@@ -681,6 +691,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       ...(bootstrap?.runDestination === undefined
         ? {}
         : { runDestination: bootstrap.runDestination }),
+      ...(bootstrap?.sectionId === undefined ? {} : { sectionId: bootstrap.sectionId }),
       title: input.titleSeed ?? thread.title,
       generateTitle: input.titleSeed !== undefined,
       modelSelection: input.modelSelection ?? thread.modelSelection,

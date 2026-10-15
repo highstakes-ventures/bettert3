@@ -28,6 +28,9 @@ export interface PersistedUiState {
   projectOrderCwds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   sidebarProjectScopeKey?: string | null;
+  sidebarThreadGrouping?: string;
+  sidebarSectionFilter?: string | null;
+  collapsedThreadSections?: string[];
   threadChangedFilesExpansionVersion?: number;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   pullRequestMergeMethod?: string;
@@ -40,6 +43,9 @@ export interface UiProjectState {
   // projects". Lives here so routes that unmount the sidebar (Settings)
   // cannot reset the filter.
   sidebarProjectScopeKey: string | null;
+  sidebarThreadGrouping: "chats" | "section";
+  sidebarSectionFilter: string | null;
+  collapsedThreadSections: string[];
 }
 
 export interface UiThreadState {
@@ -62,6 +68,9 @@ const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
   sidebarProjectScopeKey: null,
+  sidebarThreadGrouping: "chats",
+  sidebarSectionFilter: null,
+  collapsedThreadSections: [],
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
@@ -155,6 +164,9 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
         : {},
     defaultAdvertisedEndpointKey: sanitizeOptionalKey(parsed.defaultAdvertisedEndpointKey),
     sidebarProjectScopeKey: sanitizeOptionalKey(parsed.sidebarProjectScopeKey),
+    sidebarThreadGrouping: parsed.sidebarThreadGrouping === "section" ? "section" : "chats",
+    sidebarSectionFilter: sanitizeOptionalKey(parsed.sidebarSectionFilter),
+    collapsedThreadSections: sanitizeStringArray(parsed.collapsedThreadSections),
     pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
       ? parsed.pullRequestMergeMethod
       : initialState.pullRequestMergeMethod,
@@ -229,6 +241,9 @@ export function persistState(state: UiState): void {
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+        sidebarThreadGrouping: state.sidebarThreadGrouping,
+        sidebarSectionFilter: state.sidebarSectionFilter,
+        collapsedThreadSections: state.collapsedThreadSections,
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
         pullRequestMergeMethod: state.pullRequestMergeMethod,
@@ -429,6 +444,9 @@ interface UiStateStore extends UiState {
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   setSidebarProjectScopeKey: (projectKey: string | null) => void;
+  setSidebarThreadGrouping: (grouping: "chats" | "section") => void;
+  setSidebarSectionFilter: (filter: string | null) => void;
+  toggleThreadSection: (key: string) => void;
   setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
@@ -450,6 +468,14 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
   setSidebarProjectScopeKey: (projectKey) =>
     set((state) => setSidebarProjectScopeKey(state, projectKey)),
+  setSidebarThreadGrouping: (sidebarThreadGrouping) => set({ sidebarThreadGrouping }),
+  setSidebarSectionFilter: (sidebarSectionFilter) => set({ sidebarSectionFilter }),
+  toggleThreadSection: (key) =>
+    set((state) => ({
+      collapsedThreadSections: state.collapsedThreadSections.includes(key)
+        ? state.collapsedThreadSections.filter((entry) => entry !== key)
+        : [...state.collapsedThreadSections, key],
+    })),
   setPullRequestMergeMethod: (method) => set((state) => setPullRequestMergeMethod(state, method)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),

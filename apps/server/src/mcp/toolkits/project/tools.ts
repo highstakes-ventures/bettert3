@@ -114,6 +114,9 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
       }),
     ),
     title: TrimmedNonEmptyString,
+    sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).annotate({
+      description: "Section id belonging to the destination project. Omit for No section.",
+    }),
     modelSelection: Schema.optional(ModelSelection),
     runtimeMode: Schema.optional(RuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),

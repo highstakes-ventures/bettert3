@@ -23,6 +23,7 @@ import {
   isProviderNativeSubagentThread,
   MessageId,
   type NodeId,
+  type ProjectId,
   type ModelSelection,
   OrchestrationV2Command,
   type OrchestrationV2InternalCommand,
@@ -2240,6 +2241,25 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       { concurrency: 1, discard: true },
     );
 
+  const validateSection = Effect.fn("orchestrationV2.validateSection")(function* (
+    command: OrchestrationV2Command,
+    projectId: ProjectId,
+    sectionId: string | null | undefined,
+  ) {
+    if (sectionId == null) return;
+    const project = yield* projects.get(projectId).pipe(mapDispatchError(command));
+    if (
+      Option.isNone(project) ||
+      !project.value.sections?.some((section) => section.id === sectionId)
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "The section does not belong to this thread's project.",
+      });
+    }
+  });
+
   const dispatchThreadCreate = Effect.fn("orchestrationV2.dispatch.threadCreate")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "thread.create" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -2263,11 +2283,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
+    yield* validateSection(command, command.projectId, command.sectionId);
     const thread: OrchestrationV2AppThread = {
       createdBy: command.createdBy,
       creationSource: command.creationSource,
       id: command.threadId,
       projectId: command.projectId,
+      sectionId: command.sectionId ?? null,
       title: command.title,
       providerInstanceId: command.modelSelection.instanceId,
       modelSelection: command.modelSelection,
@@ -2550,6 +2572,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Thread ${command.threadId} was stopped.`,
         });
       }
+    }
+    if (command.type === "thread.metadata.update" && command.sectionId !== undefined) {
+      yield* validateSection(command, thread.projectId, command.sectionId);
     }
     if (
       command.type === "thread.metadata.update" &&
@@ -3029,6 +3054,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return {
             ...thread,
             ...(command.title === undefined ? {} : { title: command.title }),
+            ...(command.sectionId === undefined ? {} : { sectionId: command.sectionId }),
             ...(command.limitRecovery === undefined ? {} : { limitRecovery }),
             ...(command.limitRecovery !== undefined &&
             limitRecovery?.snooze === true &&

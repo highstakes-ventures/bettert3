@@ -47,6 +47,7 @@ interface NewThreadWorkspaceOptions {
   worktreePath?: string | null;
   envMode?: DraftThreadEnvMode;
   startFromOrigin?: boolean;
+  sectionId?: string | null;
 }
 
 // The workspace options the caller passed explicitly, shaped for the draft
@@ -54,6 +55,7 @@ interface NewThreadWorkspaceOptions {
 // state. Every reuse path applies exactly this set.
 function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undefined) {
   return {
+    ...(options?.sectionId !== undefined ? { sectionId: options.sectionId } : {}),
     ...(options?.branch !== undefined ? { branch: options.branch } : {}),
     ...(options?.worktreePath !== undefined ? { worktreePath: options.worktreePath } : {}),
     ...(options?.envMode !== undefined ? { envMode: options.envMode } : {}),
@@ -78,6 +80,7 @@ export function useNewThreadHandler() {
         worktreePath?: string | null;
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
+        sectionId?: string | null;
         replace?: boolean;
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
@@ -224,6 +227,7 @@ export function useNewThreadHandler() {
             currentRouteTarget?.kind === "draft" &&
             currentRouteTarget.draftId === emptyStoredDraftThread.draftId;
           const hasExplicitWorkspaceOption =
+            options?.sectionId !== undefined ||
             hasBranchOption ||
             hasWorktreePathOption ||
             hasEnvModeOption ||
@@ -356,6 +360,7 @@ export function useNewThreadHandler() {
         !composerDraftHasUserContent(getComposerDraft(currentRouteTarget.draftId))
       ) {
         if (
+          options?.sectionId !== undefined ||
           hasBranchOption ||
           hasWorktreePathOption ||
           hasEnvModeOption ||
@@ -423,6 +428,7 @@ export function useNewThreadHandler() {
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
           threadId,
           createdAt,
+          ...(options?.sectionId === undefined ? {} : { sectionId: options.sectionId }),
           branch: options?.branch ?? null,
           worktreePath: options?.worktreePath ?? null,
           envMode: initialEnvMode,

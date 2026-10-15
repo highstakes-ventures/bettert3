@@ -367,6 +367,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
   projectId: ProjectId,
+  sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   title: TrimmedNonEmptyString,
   providerInstanceId: ProviderInstanceId,
   modelSelection: ModelSelection,
@@ -1944,6 +1945,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
   projectId: ProjectId,
+  sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   title: Schema.String,
   providerInstanceId: ProviderInstanceId,
   modelSelection: ModelSelection,
@@ -2725,6 +2727,7 @@ export const OrchestrationV2Command = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thread.create"),
     runDestination: Schema.optional(CodexCloudDestination),
+    sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
     threadId: ThreadId,
@@ -2852,6 +2855,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("thread.metadata.update"),
+    sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     commandId: CommandId,
     threadId: ThreadId,
     title: Schema.optional(TrimmedNonEmptyString),
@@ -3318,6 +3322,7 @@ export type OrchestrationV2ArchivedShellStreamItem =
 
 export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   runDestination: Schema.optional(CodexCloudDestination),
+  sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   commandId: CommandId,
   creationSource: Schema.optional(OrchestrationV2CreationSource),
   threadId: Schema.optional(ThreadId),

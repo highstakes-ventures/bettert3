@@ -162,6 +162,23 @@ export const ReceivedProjectIcon = ForwardCompatibleUnion(projectIconMembers, "k
   ),
 );
 
+export const ProjectSection = Schema.Struct({
+  id: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  color: ProjectIconColor,
+});
+export type ProjectSection = typeof ProjectSection.Type;
+
+export const ProjectSectionChange = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("upsert"), section: ProjectSection }),
+  Schema.Struct({ type: Schema.Literal("delete"), sectionId: TrimmedNonEmptyString }),
+  Schema.Struct({
+    type: Schema.Literal("reorder"),
+    sectionIds: Schema.Array(TrimmedNonEmptyString),
+  }),
+]);
+export type ProjectSectionChange = typeof ProjectSectionChange.Type;
+
 export const Project = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -174,6 +191,7 @@ export const Project = Schema.Struct({
   // Opt-in because background sync performs network I/O and may move the checkout.
   autoPull: Schema.optional(Schema.Boolean),
   scripts: Schema.Array(ProjectScript),
+  sections: Schema.optional(Schema.Array(ProjectSection)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -206,6 +224,7 @@ export const ProjectCreatePayload = Schema.Struct({
 export type ProjectCreatePayload = typeof ProjectCreatePayload.Type;
 
 export const ProjectUpdatePayload = Schema.Struct({
+  sectionChange: Schema.optional(ProjectSectionChange),
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),

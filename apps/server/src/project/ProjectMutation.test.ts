@@ -49,6 +49,7 @@ it.effect("preserves every project mutation field", () =>
       type: "project.update",
       commandId: CommandId.make("command:update"),
       projectId,
+      sectionChange: { type: "upsert", section: { id: "build", name: "Build", color: "blue" } },
       title: "Updated",
       workspaceRoot: "/work/updated",
       defaultModelSelection: null,
@@ -78,6 +79,7 @@ it.effect("preserves every project mutation field", () =>
       {
         commandId: "command:update",
         projectId,
+        sectionChange: { type: "upsert", section: { id: "build", name: "Build", color: "blue" } },
         title: "Updated",
         workspaceRoot: "/work/updated",
         defaultModelSelection: null,

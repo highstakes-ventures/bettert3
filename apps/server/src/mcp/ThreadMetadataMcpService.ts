@@ -73,6 +73,13 @@ function metadataCommand(input: {
   readonly update: ThreadMetadataMcpUpdateInput;
 }): Extract<OrchestrationV2Command, { readonly type: "thread.metadata.update" }> {
   switch (input.update.action) {
+    case "set_section":
+      return {
+        type: "thread.metadata.update",
+        commandId: input.commandId,
+        threadId: input.threadId,
+        sectionId: input.update.sectionId!,
+      };
     case "rename":
       return {
         type: "thread.metadata.update",
@@ -127,6 +134,7 @@ function resultFromThread(input: {
             startedAt: DateTime.formatIso(input.thread.titleRegeneration.startedAt),
           },
     linkedPullRequest: input.thread.linkedPullRequest ?? null,
+    sectionId: input.thread.sectionId ?? null,
     updatedAt: DateTime.formatIso(input.thread.updatedAt),
   };
 }

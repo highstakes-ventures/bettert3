@@ -50,6 +50,7 @@ import { threadListEnvironmentsAtom } from "../../state/server";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import {
+  ThreadListV2SectionControl,
   ThreadListV2PendingRow,
   ThreadListV2Row,
   ThreadListV2SettledShelfHeader,
@@ -521,6 +522,8 @@ export function HomeScreen(props: HomeScreenProps) {
   );
   const {
     loaded: shelfPreferencesLoaded,
+    sectionGrouping,
+    collapsedThreadSections,
     settledShelfExpanded,
     snoozedShelfExpanded,
     workingShelfEnabled,
@@ -676,6 +679,15 @@ export function HomeScreen(props: HomeScreenProps) {
   const threadListV2Items = useMemo(
     () =>
       buildThreadListV2ListItems({
+        sectionGrouping,
+        collapsedThreadSections,
+        sectionProjects: props.projects.filter(
+          (project) =>
+            (props.selectedEnvironmentId === null ||
+              project.environmentId === props.selectedEnvironmentId) &&
+            (v2ScopedProjectKeys === null ||
+              v2ScopedProjectKeys.has(scopedProjectKey(project.environmentId, project.id))),
+        ),
         items: threadListV2Layout.items,
         pendingTasks: v2PendingTasks,
         workingCount: threadListV2Layout.workingCount,
@@ -702,6 +714,11 @@ export function HomeScreen(props: HomeScreenProps) {
       snoozedShelfExpanded,
       snoozeEnvironmentIds,
       threadListV2Layout,
+      props.projects,
+      props.selectedEnvironmentId,
+      v2ScopedProjectKeys,
+      sectionGrouping,
+      collapsedThreadSections,
       v2PendingTasks,
       workingShelfExpanded,
     ],
@@ -714,6 +731,8 @@ export function HomeScreen(props: HomeScreenProps) {
 
   const renderV2Item = useCallback(
     ({ item }: { readonly item: ThreadListV2ListItem }) => {
+      if (item.type === "v2-section" || item.type === "v2-section-view")
+        return <ThreadListV2SectionControl item={item} />;
       if (item.type === "v2-pending") {
         const pendingScopeKey = scopedProjectKey(
           item.pendingTask.environmentId,

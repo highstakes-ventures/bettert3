@@ -49,6 +49,8 @@ export function useThreadListV2ShelfPreferences() {
 
   return {
     loaded,
+    sectionGrouping: loaded && preferencesResult.value.threadSectionGrouping === true,
+    collapsedThreadSections: loaded ? (preferencesResult.value.collapsedThreadSections ?? []) : [],
     settledShelfExpanded,
     snoozedShelfExpanded,
     workingShelfEnabled,

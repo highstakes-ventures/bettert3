@@ -1,3 +1,6 @@
+import { groupThreadsBySection } from "@t3tools/client-runtime/state/thread-sections";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
+import type { ProjectSection } from "@t3tools/contracts";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import {
   canSnooze,
@@ -381,7 +384,17 @@ export interface ThreadListV2SettledShelfListItem {
   readonly disabled: boolean;
 }
 
+export interface ThreadListV2SectionItem {
+  readonly type: "v2-section";
+  readonly key: string;
+  readonly project: EnvironmentProject;
+  readonly section: ProjectSection | null;
+  readonly count: number;
+  readonly collapsed: boolean;
+}
 export type ThreadListV2ListItem =
+  | ThreadListV2SectionItem
+  | { readonly type: "v2-section-view"; readonly key: string; readonly grouped: boolean }
   | ThreadListV2ThreadListItem
   | ThreadListV2PendingListItem
   | ThreadListV2WorkingShelfListItem
@@ -394,6 +407,8 @@ export function isThreadListV2ListItem(value: {
   readonly type: string;
 }): value is ThreadListV2ListItem {
   return (
+    value.type === "v2-section" ||
+    value.type === "v2-section-view" ||
     value.type === "v2-thread" ||
     value.type === "v2-pending" ||
     value.type === "v2-working-shelf" ||
@@ -414,6 +429,17 @@ export function threadListV2ListItemsAreEqual(
   item: ThreadListV2ListItem,
 ): boolean {
   switch (item.type) {
+    case "v2-section-view":
+      return previous.type === item.type && previous.grouped === item.grouped;
+    case "v2-section":
+      return (
+        previous.type === item.type &&
+        previous.key === item.key &&
+        previous.project === item.project &&
+        previous.section === item.section &&
+        previous.count === item.count &&
+        previous.collapsed === item.collapsed
+      );
     case "v2-thread":
       return (
         previous.type === "v2-thread" &&
@@ -491,6 +517,9 @@ function resolveThreadListV2ItemTimeLabel(
  * inbox or settled history.
  */
 export function buildThreadListV2ListItems(input: {
+  readonly sectionProjects?: readonly EnvironmentProject[];
+  readonly sectionGrouping?: boolean;
+  readonly collapsedThreadSections?: readonly string[];
   readonly items: ReadonlyArray<ThreadListV2Item>;
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
   readonly workingCount?: number;
@@ -573,7 +602,53 @@ export function buildThreadListV2ListItems(input: {
   const snoozedEnd = settledShelfHeaderIndex ?? threadItems.length;
   const workingEnd = snoozedShelfHeaderIndex ?? snoozedEnd;
   const activeEnd = workingShelfHeaderIndex ?? workingEnd;
-  const result: ThreadListV2ListItem[] = [...threadItems.slice(0, activeEnd), ...pendingItems];
+  const activeItems = threadItems.slice(0, activeEnd);
+  const result: ThreadListV2ListItem[] = [];
+  if (input.sectionProjects?.some((project) => project.sections !== undefined)) {
+    result.push({
+      type: "v2-section-view",
+      key: "v2-section-view",
+      grouped: input.sectionGrouping === true,
+    });
+  }
+  if (input.sectionGrouping && input.sectionProjects) {
+    const activeRows = activeItems.filter(
+      (entry): entry is ThreadListV2ThreadListItem =>
+        entry.type === "v2-thread" && !entry.item.pinned,
+    );
+    const rowByThread = new Map(activeRows.map((entry) => [entry.item.thread, entry]));
+    result.push(...activeItems.filter((entry) => entry.type !== "v2-thread" || entry.item.pinned));
+    for (const group of groupThreadsBySection(
+      input.sectionProjects,
+      activeRows.map((entry) => entry.item.thread),
+    )) {
+      if (group.section === null && group.threads.length === 0) continue;
+      const collapsed = input.collapsedThreadSections?.includes(group.key) === true;
+      result.push({
+        type: "v2-section",
+        key: group.key,
+        project: group.project,
+        section: group.section,
+        count: group.threads.length,
+        collapsed,
+      });
+      if (!collapsed)
+        for (const thread of group.threads) {
+          const entry = rowByThread.get(thread);
+          if (entry) result.push({ ...entry, canMoveUp: false, canMoveDown: false });
+        }
+    }
+    const knownProjects = new Set(
+      input.sectionProjects.map((project) => `${project.environmentId}:${project.id}`),
+    );
+    result.push(
+      ...activeRows.filter(
+        (entry) =>
+          !knownProjects.has(`${entry.item.thread.environmentId}:${entry.item.thread.projectId}`),
+      ),
+    );
+  } else result.push(...activeItems);
+  result.push(...pendingItems);
   const shelfDisabled = input.shelfPreferencesLoading === true;
   if (workingShelfHeaderIndex !== null && workingCount > 0) {
     result.push({

@@ -37,6 +37,22 @@ describe("ThreadMetadataMcpUpdateInput", () => {
     });
   });
 
+  it("requires an explicit project section or null for assignment", () => {
+    assert.deepEqual(decodeUpdate({ action: "set_section", sectionId: "build" }), {
+      action: "set_section",
+      sectionId: "build",
+    });
+    assert.deepEqual(decodeUpdate({ action: "set_section", sectionId: null }), {
+      action: "set_section",
+      sectionId: null,
+    });
+    assert.throws(() => decodeUpdate({ action: "set_section" }));
+    assert.throws(() =>
+      decodeUpdate({ action: "set_section", sectionId: "build", title: "Other" }),
+    );
+    assert.throws(() => decodeUpdate({ action: "rename", title: "Other", sectionId: "build" }));
+  });
+
   it("rejects missing action data and fields from another action", () => {
     assert.throws(() => decodeUpdate({ action: "rename" }));
     assert.throws(() => decodeUpdate({ action: "regenerate_title", title: "Not allowed" }));

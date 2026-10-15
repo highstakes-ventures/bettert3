@@ -63,9 +63,10 @@ export const ThreadMetadataMcpAction = Schema.Literals([
   "regenerate_title",
   "link_pull_request",
   "unlink_pull_request",
+  "set_section",
 ]).annotate({
   description:
-    "Metadata mutation: rename, regenerate_title, link_pull_request, or unlink_pull_request.",
+    "Metadata mutation: rename, regenerate_title, link_pull_request, unlink_pull_request, or set_section.",
 });
 export type ThreadMetadataMcpAction = typeof ThreadMetadataMcpAction.Type;
 
@@ -83,6 +84,9 @@ export const ThreadMetadataMcpUpdateInput = Schema.Struct({
     description: "Thread to update. Omit to update the calling thread.",
   }),
   action: ThreadMetadataMcpAction,
+  sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).annotate({
+    description: "Project section id for set_section. Pass null to remove the assignment.",
+  }),
   title: Schema.optional(ThreadMetadataTitle),
   pullRequest: Schema.optional(ThreadMetadataMcpPullRequest).annotate({
     description: "Pull request to link. Required only when action is link_pull_request.",
@@ -90,7 +94,16 @@ export const ThreadMetadataMcpUpdateInput = Schema.Struct({
   clientRequestId: Schema.optional(ThreadMetadataClientRequestId),
 }).check(
   Schema.makeFilter((input) => {
+    if (input.action !== "set_section" && input.sectionId !== undefined) {
+      return `${input.action} does not accept sectionId.`;
+    }
     switch (input.action) {
+      case "set_section":
+        return input.sectionId !== undefined &&
+          input.title === undefined &&
+          input.pullRequest === undefined
+          ? true
+          : "set_section requires sectionId and does not accept title or pullRequest.";
       case "rename":
         return input.title !== undefined && input.pullRequest === undefined
           ? true
@@ -117,6 +130,7 @@ export const ThreadMetadataMcpUpdateResult = Schema.Struct({
   title: Schema.String,
   titleRegeneration: Schema.NullOr(ThreadTitleRegeneration),
   linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
+  sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   updatedAt: IsoDateTime,
 });
 export type ThreadMetadataMcpUpdateResult = typeof ThreadMetadataMcpUpdateResult.Type;

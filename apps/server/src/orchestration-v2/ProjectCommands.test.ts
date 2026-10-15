@@ -253,3 +253,53 @@ describe("planProjectCommand", () => {
     assert.deepEqual(event.payload, { projectId, deletedAt: "2026-01-01T00:00:00.000Z" });
   });
 });
+
+describe("project sections", () => {
+  const build = { id: "build", name: "Build", color: "blue" as const };
+  const research = { id: "research", name: "Research", color: "violet" as const };
+  const change = (
+    sectionChange: NonNullable<
+      Extract<ProjectCommand, { type: "project.meta.update" }>["sectionChange"]
+    >,
+    sections = [build, research],
+  ) =>
+    plan(
+      {
+        type: "project.meta.update",
+        commandId: CommandId.make("section-change"),
+        projectId,
+        sectionChange,
+      },
+      { project: row({ sections }) },
+    );
+  it("adds and edits a section against the latest definitions", () => {
+    assert.deepEqual(payloadOf(change({ type: "upsert", section: build }, [])).sections, [build]);
+    assert.deepEqual(
+      payloadOf(change({ type: "upsert", section: { ...build, name: "Delivery", color: "red" } }))
+        .sections,
+      [{ ...build, name: "Delivery", color: "red" }, research],
+    );
+  });
+  it("rejects duplicate names and incomplete or repeated orderings", () => {
+    assert.equal(
+      failureOf(change({ type: "upsert", section: { ...build, id: "new", name: "BUILD" } }))._tag,
+      "ProjectCommandInvariantError",
+    );
+    for (const sectionIds of [["build"], ["build", "build"], ["research", "missing"]]) {
+      assert.equal(
+        failureOf(change({ type: "reorder", sectionIds }))._tag,
+        "ProjectCommandInvariantError",
+      );
+    }
+  });
+  it("reorders and deletes definitions without issuing thread events", () => {
+    assert.deepEqual(
+      payloadOf(change({ type: "reorder", sectionIds: ["research", "build"] })).sections,
+      [research, build],
+    );
+    assert.deepEqual(payloadOf(change({ type: "delete", sectionId: "build" })).sections, [
+      research,
+    ]);
+    assert.isFalse("sections" in payloadOf(update({ title: "Renamed" })));
+  });
+});

@@ -231,6 +231,20 @@ describe.each([
     },
   );
 
+  it("keeps the chosen section when opening a new or reusable draft", async () => {
+    testState.reset(draft);
+    const projectRef = { environmentId: "environment-ssh", projectId: "project-remote" } as never;
+    const pending = useNewThreadHandler()(projectRef, { sectionId: "research" });
+    testState.completeProjectFileRead(null);
+    const opened = await pending;
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      projectRef,
+      opened!.draftId,
+      expect.objectContaining({ sectionId: "research" }),
+    );
+  });
+
   it("abandons a delayed draft open when the user navigates elsewhere", async () => {
     testState.reset(draft);
     const openThread = useNewThreadHandler();

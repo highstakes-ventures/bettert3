@@ -801,3 +801,57 @@ it.effect("rejects an update that waited on the lock while its project was delet
     );
   }).pipe(Effect.provide(layerProjectServiceDependencies)),
 );
+
+it.effect("persists section operations and merges concurrent additions into the shell", () =>
+  Effect.gen(function* () {
+    const service = yield* ProjectService.ProjectService;
+    const projectId = ProjectId.make("project:sections");
+    const created = yield* service.create({
+      commandId: CommandId.make("sections:create"),
+      projectId,
+      title: "Sections",
+      workspaceRoot: "/work/sections",
+    });
+    assert.deepEqual(created.sections, []);
+    const sections = [
+      { id: "build", name: "Build", color: "blue" as const },
+      { id: "research", name: "Research", color: "violet" as const },
+    ] as const;
+    yield* Effect.forEach(
+      sections,
+      (section) =>
+        service.update({
+          commandId: CommandId.make(`sections:add:${section.id}`),
+          projectId,
+          sectionChange: { type: "upsert", section },
+        }),
+      { concurrency: "unbounded" },
+    );
+    const saved = Option.getOrThrow(yield* service.getById(projectId));
+    assert.deepEqual(saved.sections?.map((section) => section.id).toSorted(), [
+      "build",
+      "research",
+    ]);
+    yield* service.update({
+      commandId: CommandId.make("sections:reorder"),
+      projectId,
+      sectionChange: { type: "reorder", sectionIds: ["research", "build"] },
+    });
+    assert.deepEqual(Option.getOrThrow(yield* service.getById(projectId)).sections, [
+      sections[1],
+      sections[0],
+    ]);
+    yield* service.update({
+      commandId: CommandId.make("sections:rename-project"),
+      projectId,
+      title: "Renamed",
+    });
+    assert.equal(Option.getOrThrow(yield* service.getById(projectId)).sections?.length, 2);
+    yield* service.update({
+      commandId: CommandId.make("sections:delete"),
+      projectId,
+      sectionChange: { type: "delete", sectionId: "research" },
+    });
+    assert.deepEqual(Option.getOrThrow(yield* service.getById(projectId)).sections, [sections[0]]);
+  }).pipe(Effect.provide(layerTest)),
+);

@@ -2437,3 +2437,93 @@ describe("Working section beta", () => {
     ]);
   });
 });
+
+describe("project section grouping", () => {
+  const project = {
+    environmentId,
+    id: ProjectId.make("project-test"),
+    title: "Platform",
+    workspaceRoot: "/platform",
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: NOW,
+    updatedAt: NOW,
+    sections: [
+      { id: "research", name: "Research", color: "violet" as const },
+      { id: "build", name: "Build", color: "blue" as const },
+    ],
+  };
+  const thread = (
+    id: string,
+    sectionId: string | null,
+    extra: Partial<EnvironmentThreadShell> = {},
+  ) => makeThread({ id: ThreadId.make(id), title: id, projectId: project.id, sectionId, ...extra });
+  const threads = [
+    thread("build-first", "build"),
+    thread("research", "research"),
+    thread("build-second", "build"),
+    thread("removed", "deleted-section"),
+    thread("pinned", "build", { pinnedAt: NOW }),
+    thread("snoozed", "build", { snoozedAt: NOW, snoozedUntil: "2026-06-03T00:00:00.000Z" }),
+    thread("settled", "research", { settledOverride: "settled", settledAt: NOW }),
+  ];
+  const layout = buildThreadListV2Items({
+    threads,
+    environmentId: null,
+    searchQuery: "",
+    now: NOW,
+    snoozedShelfExpanded: true,
+    settledShelfExpanded: true,
+  });
+  const build = (collapsedThreadSections: readonly string[] = []) =>
+    buildThreadListV2ListItems({
+      ...layout,
+      sectionProjects: [project],
+      sectionGrouping: true,
+      collapsedThreadSections,
+      pendingTasks: [makePendingTask("queued")],
+      snoozedShelfExpanded: true,
+      settledShelfExpanded: true,
+    });
+  const labels = (items: ThreadListV2ListItem[]) =>
+    items.map((item) =>
+      item.type === "v2-thread"
+        ? item.item.thread.id
+        : item.type === "v2-section"
+          ? `section:${item.section?.id ?? "none"}`
+          : item.type,
+    );
+
+  it("groups the active rows and leaves pins and parked shelves outside sections", () => {
+    const items = build();
+    expect(labels(items)).toEqual([
+      "v2-section-view",
+      "pinned",
+      "section:research",
+      "research",
+      "section:build",
+      "build-first",
+      "build-second",
+      "section:none",
+      "removed",
+      "v2-pending",
+      "v2-snoozed-shelf",
+      "snoozed",
+      "v2-settled-shelf",
+      "settled",
+    ]);
+    expect(items.filter((item) => item.type === "v2-thread")).toHaveLength(threads.length);
+  });
+
+  it("collapses only the selected project's section and keeps its count", () => {
+    const items = build([JSON.stringify([environmentId, project.id, "build"])]);
+    expect(labels(items)).not.toContain("build-first");
+    expect(labels(items)).not.toContain("build-second");
+    expect(labels(items)).toContain("pinned");
+    expect(labels(items)).toContain("snoozed");
+    expect(labels(items)).toContain("settled");
+    expect(
+      items.find((item) => item.type === "v2-section" && item.section?.id === "build"),
+    ).toMatchObject({ count: 2, collapsed: true });
+  });
+});
