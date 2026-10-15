@@ -4,6 +4,16 @@ import { Atom } from "effect/reactivity";
 import { createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 
 export function createCloudChatAtoms<R, E>(runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>) {
+  const history = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:cloud-chats:read",
+    tag: WS_METHODS.cloudChatsRead,
+    staleTimeMs: 3_000,
+    idleTtlMs: 30_000,
+  });
+  // Keep recent pages, but dispose each polling timer as soon as its view closes.
+  const pollingHistory = Atom.family((atom: ReturnType<typeof history>) =>
+    atom.pipe(Atom.withRefresh(5_000), Atom.setIdleTTL(0)),
+  );
   return {
     destinations: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:cloud-chats:destinations",
@@ -19,12 +29,6 @@ export function createCloudChatAtoms<R, E>(runtime: Atom.AtomRuntime<Environment
       staleTimeMs: 30_000,
       idleTtlMs: 0,
     }),
-    read: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:cloud-chats:read",
-      tag: WS_METHODS.cloudChatsRead,
-      refreshIntervalMs: 5_000,
-      staleTimeMs: 3_000,
-      idleTtlMs: 0,
-    }),
+    read: (target: Parameters<typeof history>[0]) => pollingHistory(history(target)),
   };
 }

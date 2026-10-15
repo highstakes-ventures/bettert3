@@ -168,6 +168,31 @@ it.effect(
     ),
 );
 
+it.effect("lists named user chats without loading each conversation's turns", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      wire.response = (method) =>
+        method === "thread/list"
+          ? {
+              data: Array.from({ length: 100 }, (_, index) => ({
+                ...thread,
+                id: `user-${index}`,
+                name: `User chat ${index}`,
+              })),
+              nextCursor: null,
+            }
+          : page;
+      const result = yield* service.list();
+      expect(result.chats).toHaveLength(100);
+      expect(result.chats[0]).toMatchObject({ title: "User chat 0", origin: "user" });
+      expect(
+        wire.requests.filter((request) => request.method === "thread/turns/list"),
+      ).toHaveLength(0);
+    }),
+  ),
+);
+
 it.effect("reads a history page in order and excludes tool items", () =>
   provide(
     Effect.gen(function* () {

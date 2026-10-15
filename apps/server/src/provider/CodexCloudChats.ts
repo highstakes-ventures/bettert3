@@ -424,7 +424,13 @@ const make = Effect.gen(function* () {
             visible,
             (thread) =>
               Effect.gen(function* () {
-                let summary = summaries.get(thread.id);
+                let summary =
+                  thread.threadSource === "user" && thread.name?.trim()
+                    ? {
+                        title: thread.name.trim(),
+                        provenance: cloudChatOrigin(thread.threadSource, ""),
+                      }
+                    : summaries.get(thread.id);
                 if (!summary) {
                   const history = yield* turns(request, thread.id, 1).pipe(Effect.result);
                   const first =
