@@ -16,8 +16,10 @@ import {
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as RcMap from "effect/RcMap";
 import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { decodeJwt } from "jose";
@@ -78,6 +80,8 @@ const decodeClaims = Schema.decodeUnknownEffect(Claims);
 const decodeTurns = Schema.decodeUnknownEffect(Turns);
 const decodeThreads = Schema.decodeUnknownEffect(ThreadList);
 const isCloudChatError = Schema.is(CloudChatError);
+class CloudIdentity extends Data.Class<{ readonly token: string; readonly accountId: string }> {}
+
 type TurnsPage = typeof Turns.Type;
 type CloudRequest = (method: string, params: unknown) => Effect.Effect<unknown, CloudChatError>;
 
@@ -115,19 +119,20 @@ const connect = (token: string, accountId: string) =>
               { resolve: (value: unknown) => void; reject: (error: CloudChatError) => void }
             >();
             let nextId = 1;
-            const fail = () => {
-              const error = new CloudChatError({ reason: "connection" });
-              reject(error);
-              for (const request of pending.values()) request.reject(error);
+            let failure: CloudChatError | undefined;
+            const fail = (reason: "connection" | "protocol" = "connection") => {
+              if (failure) return;
+              failure = new CloudChatError({ reason });
+              signal.removeEventListener("abort", abort);
+              reject(failure);
+              for (const request of pending.values()) request.reject(failure);
               pending.clear();
-            };
-            const abort = () => {
-              fail();
               socket.terminate();
             };
+            const abort = () => fail();
             signal.addEventListener("abort", abort, { once: true });
-            socket.on("error", fail);
-            socket.on("close", fail);
+            socket.on("error", () => fail());
+            socket.on("close", () => fail());
             socket.on("message", (bytes) => {
               try {
                 const reply = decodeReply(JSON.parse(bytes.toString()));
@@ -139,16 +144,20 @@ const connect = (token: string, accountId: string) =>
                   request.reject(new CloudChatError({ reason: "protocol" }));
                 else request.resolve(reply.result);
               } catch {
-                fail();
-                socket.terminate();
+                fail("protocol");
               }
             });
-            socket.once("open", () =>
+            socket.once("open", () => {
+              signal.removeEventListener("abort", abort);
               resolve({
                 request: (method, params) =>
                   Effect.tryPromise({
                     try: (requestSignal) =>
                       new Promise<unknown>((done, failed) => {
+                        if (failure || socket.readyState !== NodeWS.WebSocket.OPEN) {
+                          failed(failure ?? new CloudChatError({ reason: "connection" }));
+                          return;
+                        }
                         const id = nextId++;
                         const cleanup = () => {
                           pending.delete(id);
@@ -169,7 +178,16 @@ const connect = (token: string, accountId: string) =>
                             failed(error);
                           },
                         });
-                        socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+                        try {
+                          socket.send(
+                            JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+                            (error) => {
+                              if (error) fail();
+                            },
+                          );
+                        } catch {
+                          fail();
+                        }
                       }),
                     catch: (error) =>
                       isCloudChatError(error)
@@ -183,18 +201,15 @@ const connect = (token: string, accountId: string) =>
                   ),
                 notify: () =>
                   socket.send(JSON.stringify({ jsonrpc: "2.0", method: "initialized" })),
-                close: () => {
-                  signal.removeEventListener("abort", abort);
-                  socket.terminate();
-                  fail();
-                },
-              }),
-            );
+                close: () => fail(),
+              });
+            });
           },
         ),
       catch: () => new CloudChatError({ reason: "connection" }),
     }),
     (connection) => Effect.sync(connection.close),
+    { interruptible: true },
   );
 
 export class CodexCloudChats extends Context.Service<
@@ -336,22 +351,57 @@ const make = Effect.gen(function* () {
     }
     return destinations;
   });
-  const withCloud = <A>(
-    expectedAccount: string | null,
-    operation: (request: CloudRequest, accountId: string) => Effect.Effect<A, CloudChatError>,
-  ) =>
-    Effect.scoped(
+  const connections = yield* RcMap.make({
+    idleTimeToLive: "30 seconds",
+    lookup: (auth: CloudIdentity) =>
       Effect.gen(function* () {
-        const { token, accountId } = yield* authenticate(expectedAccount);
-        const connection = yield* connect(token, accountId);
+        const connection = yield* connect(auth.token, auth.accountId);
         yield* connection.request("initialize", {
           clientInfo: { name: "t3_cloud_chats", title: "T3 Cloud chats", version: "0.0.45" },
           capabilities: { experimentalApi: true },
         });
-        connection.notify();
-        return yield* operation(connection.request, accountId);
-      }),
-    ).pipe(
+        yield* Effect.try({
+          try: connection.notify,
+          catch: () => new CloudChatError({ reason: "connection" }),
+        });
+        return connection;
+      }).pipe(
+        Effect.result,
+        // Share acquisition failures too, so concurrent borrowers invalidate the
+        // failed entry once without discarding a newer replacement.
+        Effect.map((result) => ({ result, invalidated: false })),
+      ),
+  });
+  const withCloud = <A>(
+    expectedAccount: string | null,
+    operation: (request: CloudRequest, accountId: string) => Effect.Effect<A, CloudChatError>,
+  ) =>
+    Effect.gen(function* () {
+      const auth = new CloudIdentity(yield* authenticate(expectedAccount));
+      const attempt = Effect.scoped(
+        Effect.gen(function* () {
+          const entry = yield* RcMap.get(connections, auth);
+          return yield* Effect.gen(function* () {
+            if (entry.result._tag === "Failure") return yield* entry.result.failure;
+            return yield* operation(entry.result.success.request, auth.accountId);
+          }).pipe(
+            Effect.tapError(() =>
+              Effect.suspend(() => {
+                if (entry.invalidated) return Effect.void;
+                entry.invalidated = true;
+                return RcMap.invalidate(connections, auth);
+              }).pipe(Effect.uninterruptible),
+            ),
+          );
+        }),
+      );
+      return yield* attempt.pipe(
+        Effect.catchIf(
+          (error) => error.reason === "connection",
+          () => attempt,
+        ),
+      );
+    }).pipe(
       Effect.timeout("60 seconds"),
       Effect.catchTags({ TimeoutError: () => new CloudChatError({ reason: "connection" }) }),
     );

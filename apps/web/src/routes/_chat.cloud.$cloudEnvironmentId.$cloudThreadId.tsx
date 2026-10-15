@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { CloudIcon, ExternalLinkIcon, RefreshCwIcon, WorkflowIcon } from "lucide-react";
 import { EnvironmentId, MessageId, type CloudChatListResult } from "@t3tools/contracts";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { MessagesTimeline } from "../components/chat/MessagesTimeline";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
@@ -10,9 +10,11 @@ import { Button } from "../components/ui/button";
 import { Spinner } from "../components/ui/spinner";
 import { useClientSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
+import { cloudChatVisitKey } from "../lib/cloudChatVisits";
 import type { TimelineEntry } from "../session-logic";
 import { cloudChats } from "../state/cloudChats";
 import { useEnvironmentQuery, type EnvironmentQueryView } from "../state/query";
+import { useUiStateStore } from "../uiStateStore";
 
 export const Route = createFileRoute("/_chat/cloud/$cloudEnvironmentId/$cloudThreadId")({
   component: CloudChatView,
@@ -56,6 +58,18 @@ function CloudChatHistory({
   const history = useEnvironmentQuery(query(cursor));
   const liveHistory = useEnvironmentQuery(cursor ? query() : null);
   const latestHistory = cursor ? liveHistory : history;
+  const accountId = list.error ? undefined : list.data?.accountId;
+  const visitKey = accountId ? cloudChatVisitKey(environmentId, accountId, threadId) : undefined;
+  const visitedAt = useUiStateStore((state) =>
+    visitKey ? state.threadLastVisitedAtById[visitKey] : undefined,
+  );
+  const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
+  useEffect(() => {
+    if (!visitKey || visitedAt || !history.isSuccess || history.data?.threadId !== threadId) {
+      return;
+    }
+    markThreadVisited(visitKey, new Date().toISOString());
+  }, [history.data?.threadId, history.isSuccess, markThreadVisited, threadId, visitKey, visitedAt]);
   const latestTurn = latestHistory.data?.latestTurn;
   const refreshError = list.error ?? history.error ?? liveHistory.error;
   const isWorking =
