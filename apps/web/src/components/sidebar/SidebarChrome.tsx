@@ -240,10 +240,14 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
 });
 
-export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+export const SidebarChromeFooter = memo(function SidebarChromeFooter({
+  showUndoNotice,
+}: {
+  showUndoNotice: boolean;
+}) {
   return (
     <SidebarFooter>
-      <SidebarThreadUndoNotice />
+      {showUndoNotice ? <SidebarThreadUndoNotice /> : null}
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <SidebarUtilityMenu />

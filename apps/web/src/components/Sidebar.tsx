@@ -2,6 +2,7 @@ import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { AutomaticChatsSection } from "./sidebar/AutomaticChatsSection";
+import { SidebarThreadUndoNotice } from "./sidebar/SidebarThreadUndoNotice";
 import {
   setThreadChangeRequestSnapshot,
   ThreadTerminalStatusButton,
@@ -5613,6 +5614,9 @@ export default function Sidebar() {
                         </button>
                       </li>
                     ) : null}
+                    <li className="list-none empty:hidden">
+                      <SidebarThreadUndoNotice />
+                    </li>
                     <AutomaticChatsSection
                       expanded={automaticShelfOpen}
                       onToggle={toggleAutomaticShelf}
@@ -5653,7 +5657,7 @@ export default function Sidebar() {
           ) : null}
         </SidebarGroup>
       </SidebarContent>
-      <SidebarChromeFooter />
+      <SidebarChromeFooter showUndoNotice={isSearchingThreads} />
     </>
   );
 }
