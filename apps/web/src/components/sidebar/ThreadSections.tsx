@@ -305,6 +305,7 @@ export function ThreadSectionHeading({
   onNewThread,
   dropEnabled = false,
   expandForDrop = false,
+  isDropTarget = false,
 }: {
   project: EnvironmentProject;
   section: ProjectSection | null;
@@ -313,6 +314,7 @@ export function ThreadSectionHeading({
   onNewThread: () => void;
   dropEnabled?: boolean;
   expandForDrop?: boolean;
+  isDropTarget?: boolean;
 }) {
   const key = threadSectionKey(project, section?.id ?? null);
   const { setNodeRef } = useDroppable({
@@ -344,7 +346,7 @@ export function ThreadSectionHeading({
           section ? projectIconColorClassName(section.color) : "text-sidebar-muted-foreground",
         )}
       >
-        {expandForDrop ? (
+        {isDropTarget ? (
           <span
             aria-hidden
             data-category-drop-indicator

@@ -5,6 +5,7 @@ import {
   createSidebarCollisionDetection,
   createSidebarSortingStrategy,
   restrictBelowSidebarLabel,
+  resolveSidebarCategoryTarget,
 } from "./Sidebar.drag";
 import {
   resolveSidebarDropTarget,
@@ -25,6 +26,44 @@ const pinnedHeader = marker("pinned-header");
 const divider = marker("pinned-divider");
 const settledHeader = marker("settled-header");
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
+
+describe("category drop areas", () => {
+  const headings = [
+    { key: "build", top: 100 },
+    { key: "research", top: 141 },
+    { key: "other-project", top: 280 },
+  ];
+  const bounds = { left: 8, right: 247, top: 80, bottom: 400 };
+
+  it.each([
+    [110, "build"],
+    [138, "build"], // Margin below an empty category, outside its heading rectangle.
+    [141, "research"],
+    [270, "research"],
+    [280, "other-project"], // Do not fall back to an earlier writable project.
+    [399, "other-project"],
+    [400, null], // Lifecycle shelves are outside category drop areas.
+    [90, null], // Pinned rows are above the first category.
+  ])("resolves y=%s to %s", (y, expected) => {
+    expect(resolveSidebarCategoryTarget({ x: 100, y }, headings, bounds)).toBe(expected);
+  });
+
+  it("uses current heading positions after expansion or scrolling", () => {
+    const point = { x: 100, y: 270 };
+    const expanded = headings.map((heading) =>
+      heading.key === "other-project" ? { ...heading, top: 240 } : heading,
+    );
+    expect(resolveSidebarCategoryTarget(point, headings, bounds)).toBe("research");
+    expect(resolveSidebarCategoryTarget(point, expanded, bounds)).toBe("other-project");
+    expect(resolveSidebarCategoryTarget({ x: 100, y: 70 }, headings, bounds)).toBeNull();
+  });
+
+  it("rejects horizontal exits and empty category lists", () => {
+    expect(resolveSidebarCategoryTarget({ x: 7, y: 110 }, headings, bounds)).toBeNull();
+    expect(resolveSidebarCategoryTarget({ x: 248, y: 110 }, headings, bounds)).toBeNull();
+    expect(resolveSidebarCategoryTarget({ x: 100, y: 110 }, [], bounds)).toBeNull();
+  });
+});
 
 function layout(
   items: readonly SidebarListItem[],

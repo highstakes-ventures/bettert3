@@ -19,6 +19,22 @@ const isShelfHeader = (item: SidebarListItem | undefined) =>
     item.marker === "snoozed-header" ||
     item.marker === "settled-header");
 
+/** A category owns the space below its heading up to the next heading or shelf. */
+export function resolveSidebarCategoryTarget(
+  point: { x: number; y: number },
+  headings: readonly { key: string; top: number }[],
+  bounds: { left: number; right: number; top: number; bottom: number },
+) {
+  if (
+    point.x < bounds.left ||
+    point.x > bounds.right ||
+    point.y < bounds.top ||
+    point.y >= bounds.bottom
+  )
+    return null;
+  return headings.findLast((heading) => point.y >= heading.top)?.key ?? null;
+}
+
 /** Keep the lifted card below the Pins label, including when Pins is empty.
  * The container rect follows scrolling; the offset is measured once at pickup. */
 export function restrictBelowSidebarLabel(
