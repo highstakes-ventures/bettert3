@@ -1,6 +1,7 @@
 import {
   groupThreadsBySection,
   resolveThreadSection,
+  resolveThreadSectionDrop,
   threadSectionKey,
 } from "@t3tools/client-runtime/state/thread-sections";
 import {
@@ -32,6 +33,7 @@ import { replaceComposerContextReferences } from "@t3tools/shared/composerContex
 import * as Schema from "effect/Schema";
 import {
   DndContext,
+  pointerWithin,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -3626,7 +3628,8 @@ export default function Sidebar() {
     readonly contextDrag: boolean;
   } | null>(null);
   const isContextDrag = dragState?.contextDrag === true;
-  const dragTargetSection = isContextDrag ? null : (dragState?.targetSection ?? null);
+  const dragTargetSection =
+    isContextDrag || sectionGrouping === "section" ? null : (dragState?.targetSection ?? null);
   const dragSensorRef = useRef<SidebarPointerSensor | null>(null);
   const contextDragKeyRef = useRef<string | null>(null);
   const finishThreadDrag = useCallback((started: boolean) => {
@@ -4008,9 +4011,13 @@ export default function Sidebar() {
   const sidebarListOrderKey = useMemo(
     () =>
       sidebarListItems
-        .map((item) => (item.kind === "thread" ? `${item.key}:${item.section}` : item.marker))
+        .map((item) =>
+          item.kind === "thread"
+            ? `${item.key}:${item.section}:${sectionGrouping === "section" ? (threadByKey.get(item.key)?.sectionId ?? "") : ""}`
+            : item.marker,
+        )
         .join("\0"),
-    [sidebarListItems],
+    [sectionGrouping, sidebarListItems, threadByKey],
   );
   const sidebarListHasRows = sidebarListItems.length + visibleDraftSessionCount > 0;
   useLayoutEffect(() => {
@@ -4029,6 +4036,7 @@ export default function Sidebar() {
   ]);
   const handleThreadDragOver = useCallback(
     (event: DragOverEvent) => {
+      if (sectionGrouping === "section") return;
       const target = event.over
         ? resolveSidebarDropTarget(sidebarListItems, String(event.active.id), String(event.over.id))
         : null;
@@ -4038,7 +4046,7 @@ export default function Sidebar() {
           : { ...current, targetSection: target?.section ?? null },
       );
     },
-    [sidebarListItems],
+    [sectionGrouping, sidebarListItems],
   );
   const sortableIds = useMemo(() => sidebarListItems.map(sidebarListItemId), [sidebarListItems]);
   const draggedSettledOrder = useMemo(() => {
@@ -4070,7 +4078,7 @@ export default function Sidebar() {
     () =>
       createSidebarSortingStrategy({
         items: sidebarListItems,
-        enabled: !isContextDrag,
+        enabled: !isContextDrag && sectionGrouping !== "section",
         boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
         settledOrder: draggedSettledOrder,
         ...(draggedActiveOrder === undefined ? {} : { activeOrder: draggedActiveOrder }),
@@ -4083,6 +4091,7 @@ export default function Sidebar() {
       draggedActiveOrder,
       draggedSettledOrder,
       isContextDrag,
+      sectionGrouping,
       routeThreadKey,
       settledShelfExpanded,
       settledVisibleCount,
@@ -4109,6 +4118,20 @@ export default function Sidebar() {
     }),
     [threads],
   );
+  const categoryGroups = useMemo(
+    () => groupThreadsBySection(sectionProjects, activeThreads, { includeEmpty: true }),
+    [sectionProjects, activeThreads],
+  );
+  const categoryTargets = useMemo(() => {
+    const targets = new Map<string, (typeof categoryGroups)[number]>();
+    for (const group of categoryGroups) {
+      targets.set(`category:${group.key}`, group);
+      for (const thread of group.threads)
+        targets.set(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)), group);
+    }
+    return targets;
+  }, [categoryGroups]);
+  const categoryDrag = sectionGrouping === "section" && dragState !== null && !isContextDrag;
   const draggedThreadKey = dragState?.activeKey;
   const draggedFromSection = dragState?.activeSection;
   const dragActivationY = dragState?.activationY;
@@ -4117,6 +4140,18 @@ export default function Sidebar() {
       return createSidebarCollisionDetection(() => true);
     const source = threadByKey.get(draggedThreadKey);
     if (source === undefined) return createSidebarCollisionDetection(() => false);
+    if (sectionGrouping === "section")
+      return (args: Parameters<typeof pointerWithin>[0]) =>
+        pointerWithin({
+          ...args,
+          droppableContainers: args.droppableContainers.filter((container) => {
+            const target = categoryTargets.get(String(container.id));
+            return (
+              target !== undefined &&
+              resolveThreadSectionDrop(source, target.project, target.section?.id ?? null) !== null
+            );
+          }),
+        });
     return createSidebarCollisionDetection(
       (id) => {
         const target = resolveSidebarDropTarget(sidebarListItems, draggedThreadKey, id);
@@ -4147,6 +4182,8 @@ export default function Sidebar() {
       },
     );
   }, [
+    sectionGrouping,
+    categoryTargets,
     activeKeysById,
     pinnedKeysById,
     serverConfigs,
@@ -4164,6 +4201,22 @@ export default function Sidebar() {
   const handleThreadDragEnd = useCallback(
     (event: DragEndEvent) => {
       const activeKey = String(event.active.id);
+      if (sectionGrouping === "section") {
+        const source = threadByKey.get(activeKey);
+        const target = event.over ? categoryTargets.get(String(event.over.id)) : undefined;
+        if (!source || !target || !checkThreadOperations([source])) return;
+        const assignment = resolveThreadSectionDrop(
+          source,
+          target.project,
+          target.section?.id ?? null,
+        );
+        if (assignment)
+          assignThreadSection(
+            scopeThreadRef(source.environmentId, source.id),
+            assignment.sectionId,
+          );
+        return;
+      }
       const activeSection = sectionByThreadKey.get(activeKey);
       const target =
         event.over === null
@@ -4314,6 +4367,9 @@ export default function Sidebar() {
       })();
     },
     [
+      sectionGrouping,
+      categoryTargets,
+      assignThreadSection,
       activeKeysById,
       pinnedKeysById,
       serverConfigs,
@@ -4788,7 +4844,7 @@ export default function Sidebar() {
                 : [
                     {
                       id: "assign-section",
-                      label: "Section",
+                      label: "Category",
                       disabled: !readEnvironmentScope(
                         thread.environmentId,
                         AuthOrchestrationOperateScope,
@@ -4796,7 +4852,7 @@ export default function Sidebar() {
                       children: [
                         {
                           id: "clear-section",
-                          label: "No section",
+                          label: "Uncategorized",
                           checked:
                             resolveThreadSection(
                               projectByKey.get(`${thread.environmentId}:${thread.projectId}`),
@@ -5606,7 +5662,6 @@ export default function Sidebar() {
                             contextDrag={isContextDrag}
                             environmentId={thread.environmentId}
                             disabled={
-                              sectionGrouping === "section" ||
                               renamingThreadKey === threadKey ||
                               section === "working" ||
                               !draggableThreadKeys.has(threadKey) ||
@@ -5617,7 +5672,10 @@ export default function Sidebar() {
                           </SortableThreadRow>
                         );
                       };
-                      const from = isContextDrag ? null : (dragState?.activeSection ?? null);
+                      const from =
+                        isContextDrag || sectionGrouping === "section"
+                          ? null
+                          : (dragState?.activeSection ?? null);
                       const items: ReactNode[] = [
                         <SidebarDraftBlock
                           key="draft-sessions"
@@ -5661,15 +5719,24 @@ export default function Sidebar() {
                             break;
                           case "active-placeholder":
                             if (sectionGrouping === "section") {
-                              for (const group of groupThreadsBySection(
-                                sectionProjects,
-                                activeThreads,
-                              )) {
-                                if (sectionFilter !== null && group.key !== sectionFilter) continue;
+                              for (const group of categoryGroups) {
+                                const source = dragState
+                                  ? threadByKey.get(dragState.activeKey)
+                                  : undefined;
+                                const sameProject =
+                                  categoryDrag &&
+                                  source?.environmentId === group.project.environmentId &&
+                                  source.projectId === group.project.id;
                                 if (
                                   group.section === null &&
                                   group.threads.length === 0 &&
-                                  (group.project.sections?.length ?? 0) > 0
+                                  !sameProject
+                                )
+                                  continue;
+                                if (
+                                  !categoryDrag &&
+                                  sectionFilter !== null &&
+                                  group.key !== sectionFilter
                                 )
                                   continue;
                                 items.push(
@@ -5678,6 +5745,7 @@ export default function Sidebar() {
                                     project={group.project}
                                     section={group.section}
                                     count={group.threads.length}
+                                    dropEnabled={sameProject}
                                     showProject={sectionProjects.length > 1}
                                     onNewThread={() => {
                                       void handleNewThreadRef.current(

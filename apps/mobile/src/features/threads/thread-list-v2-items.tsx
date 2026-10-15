@@ -618,12 +618,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         : [
             {
               id: "section",
-              title: `Section: ${section?.name ?? "No section"}`,
+              title: `Category: ${section?.name ?? "Uncategorized"}`,
               image: "tag",
               subactions: [
                 {
                   id: "clear-section",
-                  title: "No section",
+                  title: "Uncategorized",
                   state: section === null ? "on" : "off",
                   attributes: { disabled: !canChangeSection },
                 },
@@ -1459,7 +1459,7 @@ export function ThreadListV2SectionControl({
       <ControlPillMenu
         actions={[
           { id: "chats", title: "Chats", state: item.grouped ? "off" : "on" },
-          { id: "section", title: "By section", state: item.grouped ? "on" : "off" },
+          { id: "section", title: "By category", state: item.grouped ? "on" : "off" },
         ]}
         onPressAction={({ nativeEvent }) =>
           save({ threadSectionGrouping: nativeEvent.event === "section" })
@@ -1471,7 +1471,7 @@ export function ThreadListV2SectionControl({
           className="min-h-11 flex-row items-center gap-2 px-4"
         >
           <Text className="text-xs text-foreground-muted">
-            {item.grouped ? "By section" : "Chats"}
+            {item.grouped ? "By category" : "Chats"}
           </Text>
           <SymbolView name="chevron.down" size={10} tintColorClassName="accent-foreground-muted" />
         </Pressable>
@@ -1506,11 +1506,17 @@ export function ThreadListV2SectionControl({
             : "text-foreground-muted",
         )}
       >
-        {item.section?.name ?? "No section"}
+        {item.section?.name ?? "Uncategorized"}
       </Text>
-      <Text numberOfLines={1} className="flex-1 text-xs text-foreground-muted">
+      <Text numberOfLines={1} className="max-w-24 text-xs text-foreground-muted">
         {item.project.title}
       </Text>
+      <View
+        className={cn(
+          "h-px flex-1",
+          item.section ? projectIconColorClassNames(item.section.color).background : "bg-border",
+        )}
+      />
       <Text className="text-xs text-foreground-muted">{item.count}</Text>
     </Pressable>
   );

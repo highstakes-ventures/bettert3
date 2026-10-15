@@ -410,7 +410,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const sectionProject = useProject(scopeProjectRef(thread.environmentId, thread.projectId));
   const updateSection = useOrchestrationCommand(
     threadEnvironment.updateMetadata,
-    "Could not move chat to section",
+    "Could not move chat to category",
   );
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   const canOperatePreview = useEnvironmentScope(thread.environmentId, AuthPreviewOperateScope);

@@ -43,25 +43,30 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
-## Organize threads with sections
+## Organize threads with categories
 
 On web and desktop, open **View** beside the sidebar search and project filter.
-Choose **New section** for a project, then give it a name and color. Use a thread's
-section label or its **Section** menu to assign it, move it, or choose **No section**.
+Choose **New category** for a project, then give it a name and color. Use a thread's
+tag icon or category label to select a category, create one and move the chat into
+it, or choose **Uncategorized**. The thread's **Category** menu also changes its
+assignment.
 
-**Chats** keeps the usual thread order and shows each thread's section color.
-**By section** groups active threads under collapsible headings. Use a heading's
-**+** to start a draft in that section. Its menu lets you edit, reorder, or delete
-the section. Deleting a section keeps its chats under **No section**.
+**Chats** keeps the usual thread order and shows each thread's category color.
+**By category** groups active threads under collapsible headings. Use a heading's
+**+** to start a draft in that category. Named categories remain visible when
+empty. **Uncategorized** appears when it has chats or while dragging a chat.
+Drag onto a category heading or one of its chats to assign it. Its menu lets you
+edit, reorder, or delete the category. Deleting a category keeps its chats under
+**Uncategorized**.
 
 Pins stay above the grouped list. Working, snoozed, and settled shelves keep their
 usual behavior. Choose **Chats** to drag and reorder individual threads. The View
-menu also filters the list to one section, alongside search and the project filter.
+menu also filters the list to one category, alongside search and the project filter.
 
-Sections and assignments sync through their project's environment. View, filter,
-and collapse choices stay on your device. On mobile, choose **By section** in the
-thread list and use a thread's **Section** menu to change its assignment. Manage
-section names, colors, and order on web or desktop. Sections use the current
+Categories and assignments sync through their project's environment. View, filter,
+and collapse choices stay on your device. On mobile, choose **By category** in the
+thread list and use a thread's **Category** menu to change its assignment. Manage
+category names, colors, and order on web or desktop. Categories use the current
 sidebar; the legacy sidebar keeps its existing project layout.
 
 ## Pin and reorder threads

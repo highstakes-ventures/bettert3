@@ -11,7 +11,7 @@ interface SectionThread {
   readonly sectionId?: string | null | undefined;
 }
 
-/** Unknown or deleted definitions display as No section without rewriting chats. */
+/** Unknown or deleted definitions display as Uncategorized without rewriting chats. */
 export function resolveThreadSection(
   project: SectionProject | null | undefined,
   thread: SectionThread,
@@ -29,6 +29,7 @@ export function threadSectionKey(project: SectionProject, sectionId: string | nu
 export function groupThreadsBySection<P extends SectionProject, T extends SectionThread>(
   projects: readonly P[],
   threads: readonly T[],
+  options: { includeEmpty?: boolean } = {},
 ) {
   const groups = projects.flatMap((project) =>
     [...(project.sections ?? []), null].map((section) => ({
@@ -48,5 +49,24 @@ export function groupThreadsBySection<P extends SectionProject, T extends Sectio
     const section = resolveThreadSection(project, thread);
     byKey.get(threadSectionKey(project, section?.id ?? null))?.threads.push(thread);
   }
-  return groups;
+  return options.includeEmpty
+    ? groups
+    : groups.filter((group) => group.section !== null || group.threads.length > 0);
+}
+
+/** Category drops change assignment within the chat's physical project only. */
+export function resolveThreadSectionDrop(
+  thread: SectionThread,
+  project: SectionProject,
+  sectionId: string | null,
+) {
+  if (
+    thread.environmentId !== project.environmentId ||
+    thread.projectId !== project.id ||
+    project.sections === undefined ||
+    (sectionId !== null && !project.sections.some((section) => section.id === sectionId)) ||
+    (resolveThreadSection(project, thread)?.id ?? null) === sectionId
+  )
+    return null;
+  return { sectionId };
 }

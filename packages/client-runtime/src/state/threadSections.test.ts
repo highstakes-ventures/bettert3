@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { groupThreadsBySection, resolveThreadSection, threadSectionKey } from "./threadSections.ts";
+import {
+  groupThreadsBySection,
+  resolveThreadSection,
+  resolveThreadSectionDrop,
+  threadSectionKey,
+} from "./threadSections.ts";
 
 const build = { id: "build", name: "Build", color: "blue" as const };
 const research = { id: "research", name: "Research", color: "violet" as const };
@@ -24,7 +29,7 @@ describe("thread sections", () => {
     ]);
     expect(groups.flatMap((group) => group.threads)).toHaveLength(chats.length);
   });
-  it("resolves removed definitions and old unassigned chats as No section", () => {
+  it("resolves removed definitions and old unassigned chats as Uncategorized", () => {
     const deleted = { ...project, sections: [research] };
     expect(resolveThreadSection(deleted, chat("a", "build"))).toBeNull();
     expect(groupThreadsBySection([deleted], [chat("a", "build")]).at(-1)?.threads[0]?.id).toBe("a");
@@ -47,9 +52,43 @@ describe("thread sections", () => {
     expect(resolveThreadSection(project, chat("b", "build", "remote"))).toBeNull();
     expect(threadSectionKey(project, "build")).not.toBe(threadSectionKey(remote, "build"));
   });
-  it("keeps empty sections available for starting a chat", () => {
+  it("keeps empty named categories and hides empty Uncategorized except during dragging", () => {
+    expect(groupThreadsBySection([project], []).map((group) => group.section?.name)).toEqual([
+      "Research",
+      "Build",
+    ]);
+    expect(groupThreadsBySection([{ ...project, sections: [] }], [])).toEqual([]);
     expect(
-      groupThreadsBySection([project], []).map((group) => group.section?.name ?? "No section"),
-    ).toEqual(["Research", "Build", "No section"]);
+      groupThreadsBySection([project], [], { includeEmpty: true }).map(
+        (group) => group.section?.name ?? "Uncategorized",
+      ),
+    ).toEqual(["Research", "Build", "Uncategorized"]);
+  });
+});
+
+describe("category assignment by dragging", () => {
+  it("assigns an existing or uncategorized destination and ignores unchanged assignments", () => {
+    expect(resolveThreadSectionDrop(chat("a", "build"), project, "research")).toEqual({
+      sectionId: "research",
+    });
+    expect(resolveThreadSectionDrop(chat("a", "build"), project, null)).toEqual({
+      sectionId: null,
+    });
+    expect(resolveThreadSectionDrop(chat("a", "build"), project, "build")).toBeNull();
+  });
+  it("rejects cross-project, cross-environment, deleted, and unsupported destinations", () => {
+    const source = chat("a", "build");
+    expect(resolveThreadSectionDrop(source, { ...project, id: "other" }, "research")).toBeNull();
+    expect(
+      resolveThreadSectionDrop(source, { ...project, environmentId: "remote" }, "research"),
+    ).toBeNull();
+    expect(resolveThreadSectionDrop(source, project, "deleted")).toBeNull();
+    expect(
+      resolveThreadSectionDrop(
+        source,
+        { id: project.id, environmentId: project.environmentId },
+        null,
+      ),
+    ).toBeNull();
   });
 });

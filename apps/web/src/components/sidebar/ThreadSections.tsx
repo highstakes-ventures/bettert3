@@ -1,3 +1,4 @@
+import { useDroppable } from "@dnd-kit/core";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useEnvironmentScope } from "../../state/session";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
@@ -47,7 +48,7 @@ function SectionDot({ section }: { section: ProjectSection | null }) {
 }
 
 function useSectionChange(project: EnvironmentProject) {
-  const update = useOrchestrationCommand(projectEnvironment.update, "Could not update section");
+  const update = useOrchestrationCommand(projectEnvironment.update, "Could not update category");
   return (sectionChange: ProjectSectionChange) =>
     update({
       environmentId: project.environmentId,
@@ -59,10 +60,12 @@ function SectionEditor({
   project,
   section,
   onClose,
+  onSaved,
 }: {
   project: EnvironmentProject;
   section?: ProjectSection;
   onClose: () => void;
+  onSaved?: (sectionId: string) => void;
 }) {
   const [name, setName] = useState(section?.name ?? "");
   const [color, setColor] = useState(section?.color ?? "blue");
@@ -84,21 +87,24 @@ function SectionEditor({
             event.preventDefault();
             if (!name.trim() || saving || !canChange) return;
             setSaving(true);
+            const sectionId = section?.id ?? randomUUID();
             void change({
               type: "upsert",
-              section: { id: section?.id ?? randomUUID(), name: name.trim(), color },
+              section: { id: sectionId, name: name.trim(), color },
             }).then((result) => {
               setSaving(false);
-              if (result._tag === "Success") onClose();
-              else
+              if (result._tag === "Success") {
+                onSaved?.(sectionId);
+                onClose();
+              } else
                 setError(
-                  "Could not save this section. Check the name and connection, then try again.",
+                  "Could not save this category. Check the name and connection, then try again.",
                 );
             });
           }}
         >
           <DialogHeader>
-            <DialogTitle>{section ? "Edit section" : "New section"}</DialogTitle>
+            <DialogTitle>{section ? "Edit category" : "New category"}</DialogTitle>
             <DialogDescription>Organize chats in {project.title}.</DialogDescription>
           </DialogHeader>
           <DialogPanel>
@@ -164,7 +170,7 @@ function NewSectionItem({
   return (
     <MenuItem disabled={!canChange || project.sections === undefined} onClick={onCreate}>
       <PlusIcon />
-      New section in {project.title}
+      New category in {project.title}
     </MenuItem>
   );
 }
@@ -181,7 +187,7 @@ export function SectionViewMenu({ projects }: { projects: readonly EnvironmentPr
         <MenuTrigger
           render={
             <SidebarHeaderIconButton
-              label={`View: ${grouping === "section" ? "By section" : "Chats"}${filter ? ", filtered" : ""}`}
+              label={`View: ${grouping === "section" ? "By category" : "Chats"}${filter ? ", filtered" : ""}`}
             />
           }
         >
@@ -194,12 +200,12 @@ export function SectionViewMenu({ projects }: { projects: readonly EnvironmentPr
           </MenuItem>
           <MenuItem onClick={() => setGrouping("section")}>
             <CheckIcon className={grouping === "section" ? "opacity-100" : "opacity-0"} />
-            By section
+            By category
           </MenuItem>
           <MenuSeparator />
           <MenuItem onClick={() => setFilter(null)}>
             <CheckIcon className={filter === null ? "opacity-100" : "opacity-0"} />
-            All sections
+            All categories
           </MenuItem>
           {projects.flatMap((project) =>
             (project.sections ?? []).map((section) => (
@@ -241,6 +247,7 @@ export function ThreadSectionPicker({
   onChange: (sectionId: string | null) => void;
 }) {
   const canChange = useEnvironmentScope(project.environmentId, AuthOrchestrationOperateScope);
+  const [creating, setCreating] = useState(false);
   return (
     <span
       onClick={(event) => event.stopPropagation()}
@@ -253,7 +260,7 @@ export function ThreadSectionPicker({
             <button
               type="button"
               disabled={!canChange || project.sections === undefined}
-              aria-label={`Section: ${section?.name ?? "No section"}`}
+              aria-label={`Category: ${section?.name ?? "Uncategorized"}`}
               className="flex h-5 max-w-24 items-center gap-1 rounded px-1 text-3xs text-muted-foreground hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-ring"
             />
           }
@@ -267,7 +274,7 @@ export function ThreadSectionPicker({
         </MenuTrigger>
         <MenuPopup align="start">
           <MenuItem onClick={() => onChange(null)}>
-            No section{section === null ? <CheckIcon /> : null}
+            Uncategorized{section === null ? <CheckIcon /> : null}
           </MenuItem>
           {(project.sections ?? []).map((candidate) => (
             <MenuItem key={candidate.id} onClick={() => onChange(candidate.id)}>
@@ -276,8 +283,16 @@ export function ThreadSectionPicker({
               {section?.id === candidate.id ? <CheckIcon /> : null}
             </MenuItem>
           ))}
+          <MenuSeparator />
+          <MenuItem onClick={() => setCreating(true)}>
+            <PlusIcon />
+            New category
+          </MenuItem>
         </MenuPopup>
       </Menu>
+      {creating ? (
+        <SectionEditor project={project} onSaved={onChange} onClose={() => setCreating(false)} />
+      ) : null}
     </span>
   );
 }
@@ -288,19 +303,24 @@ export function ThreadSectionHeading({
   count,
   showProject,
   onNewThread,
+  dropEnabled = false,
 }: {
   project: EnvironmentProject;
   section: ProjectSection | null;
   count: number;
   showProject: boolean;
   onNewThread: () => void;
+  dropEnabled?: boolean;
 }) {
   const key = threadSectionKey(project, section?.id ?? null);
+  const { setNodeRef, isOver } = useDroppable({
+    id: `category:${key}`,
+    disabled: !dropEnabled,
+  });
   const collapsed = useUiStateStore((state) => state.collapsedThreadSections.includes(key));
   const toggle = useUiStateStore((state) => state.toggleThreadSection);
   const [editing, setEditing] = useState(false);
   const change = useSectionChange(project);
-  const canChange = useEnvironmentScope(project.environmentId, AuthOrchestrationOperateScope);
   const sections = project.sections ?? [];
   const index = sections.findIndex((candidate) => candidate.id === section?.id);
   const move = (offset: number) => {
@@ -310,32 +330,42 @@ export function ThreadSectionHeading({
     [ids[index], ids[target]] = [ids[target]!, ids[index]!];
     void change({ type: "reorder", sectionIds: ids });
   };
+  const canChange = useEnvironmentScope(project.environmentId, AuthOrchestrationOperateScope);
   return (
     <>
-      <li className="mt-3 flex min-w-0 items-center gap-1 px-2 text-xs text-sidebar-muted-foreground">
+      <li
+        ref={setNodeRef}
+        data-category-key={key}
+        className={cn(
+          "group/category mt-3 flex min-w-0 items-center gap-1 rounded px-2 text-xs",
+          section ? projectIconColorClassName(section.color) : "text-sidebar-muted-foreground",
+          isOver && "bg-sidebar-row-hover outline outline-1 outline-sidebar-border",
+        )}
+      >
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left focus-visible:outline-2 focus-visible:outline-ring"
+          className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring"
+          aria-label={`Category ${section?.name ?? "Uncategorized"} in ${project.title}`}
           aria-expanded={!collapsed}
           onClick={() => toggle(key)}
         >
+          <span className="max-w-1/2 truncate font-medium">{section?.name ?? "Uncategorized"}</span>
+          {showProject ? (
+            <span className="truncate text-3xs opacity-60">{project.title}</span>
+          ) : null}
+          <span aria-hidden className="h-px min-w-3 flex-1 bg-current opacity-25" />
+          <span className="text-3xs tabular-nums text-sidebar-muted-foreground">{count}</span>
           {collapsed ? (
             <ChevronRightIcon className="size-3" />
           ) : (
             <ChevronDownIcon className="size-3" />
           )}
-          <SectionDot section={section} />
-          <span className="truncate font-medium">{section?.name ?? "No section"}</span>
-          {showProject ? (
-            <span className="truncate text-3xs opacity-60">{project.title}</span>
-          ) : null}
-          <span className="ml-auto tabular-nums opacity-50">{count}</span>
         </button>
         <Button
           size="icon-micro"
           variant="ghost-muted"
           disabled={!canChange || project.sections === undefined}
-          aria-label={`New chat in ${section?.name ?? "No section"}`}
+          aria-label={`New chat in ${section?.name ?? "Uncategorized"}`}
           onClick={onNewThread}
         >
           <PlusIcon />
@@ -355,21 +385,27 @@ export function ThreadSectionHeading({
               <EllipsisIcon />
             </MenuTrigger>
             <MenuPopup align="end">
-              <MenuItem onClick={() => setEditing(true)}>Edit section</MenuItem>
-              <MenuItem disabled={index <= 0} onClick={() => move(-1)}>
+              <MenuItem disabled={!canChange} onClick={() => setEditing(true)}>
+                Edit category
+              </MenuItem>
+              <MenuItem disabled={!canChange || index <= 0} onClick={() => move(-1)}>
                 Move up
               </MenuItem>
-              <MenuItem disabled={index === sections.length - 1} onClick={() => move(1)}>
+              <MenuItem
+                disabled={!canChange || index === sections.length - 1}
+                onClick={() => move(1)}
+              >
                 Move down
               </MenuItem>
               <MenuSeparator />
               <MenuItem
                 variant="destructive"
+                disabled={!canChange}
                 onClick={() => {
                   void change({ type: "delete", sectionId: section.id });
                 }}
               >
-                Delete section. Keep chats
+                Delete category. Keep chats
               </MenuItem>
             </MenuPopup>
           </Menu>
