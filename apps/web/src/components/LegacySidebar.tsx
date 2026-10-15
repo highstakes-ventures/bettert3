@@ -3914,7 +3914,7 @@ export default function LegacySidebar() {
         attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
         projectsLength={projects.length}
       />
-      <SidebarChromeFooter />
+      <SidebarChromeFooter showUndoNotice={true} />
     </>
   );
 }
