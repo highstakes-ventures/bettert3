@@ -34,6 +34,7 @@ import * as Schema from "effect/Schema";
 import {
   DndContext,
   pointerWithin,
+  useDndContext,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -781,6 +782,16 @@ type SidebarSweepAction = "settle" | "unsettle" | "unsnooze";
 // Zero-height markers reserve no label space at rest. During a drag the
 // sorting strategy opens 24px for a 16px label with 4px clearance on each side.
 const SIDEBAR_DRAG_LABEL_HEIGHT = 24;
+
+function CategoryDropMeasurements({ previewKey }: { previewKey: string | null }) {
+  const { measureDroppableContainers } = useDndContext();
+  useLayoutEffect(() => {
+    // Moving a row changes heading positions without resizing their nodes.
+    void previewKey;
+    measureDroppableContainers([]);
+  }, [measureDroppableContainers, previewKey]);
+  return null;
+}
 
 function SidebarDragBoundary(props: {
   marker: "pinned-header" | "pinned-divider";
@@ -3625,6 +3636,7 @@ export default function Sidebar() {
     readonly occurredAt: string;
     readonly activationY: number | null;
     readonly targetSection: SidebarSection | null;
+    readonly targetCategoryKey: string | null;
     readonly contextDrag: boolean;
   } | null>(null);
   const isContextDrag = dragState?.contextDrag === true;
@@ -3668,7 +3680,7 @@ export default function Sidebar() {
       setDragState((current) =>
         current === null || current.contextDrag === contextDrag
           ? current
-          : { ...current, contextDrag },
+          : { ...current, contextDrag, ...(contextDrag ? { targetCategoryKey: null } : {}) },
       );
       if (!contextDrag) {
         endThreadContextDrag();
@@ -3931,6 +3943,7 @@ export default function Sidebar() {
         activeKey,
         activeSection,
         targetSection: activeSection,
+        targetCategoryKey: null,
         contextDrag: false,
         occurredAt: new Date().toISOString(),
         activationY:
@@ -4034,20 +4047,6 @@ export default function Sidebar() {
     sidebarListOrderKey,
     visibleDraftSessionCount,
   ]);
-  const handleThreadDragOver = useCallback(
-    (event: DragOverEvent) => {
-      if (sectionGrouping === "section") return;
-      const target = event.over
-        ? resolveSidebarDropTarget(sidebarListItems, String(event.active.id), String(event.over.id))
-        : null;
-      setDragState((current) =>
-        current === null || current.activeKey !== String(event.active.id)
-          ? current
-          : { ...current, targetSection: target?.section ?? null },
-      );
-    },
-    [sectionGrouping, sidebarListItems],
-  );
   const sortableIds = useMemo(() => sidebarListItems.map(sidebarListItemId), [sidebarListItems]);
   const draggedSettledOrder = useMemo(() => {
     const thread = dragState === null ? undefined : threadByKey.get(dragState.activeKey);
@@ -4118,10 +4117,30 @@ export default function Sidebar() {
     }),
     [threads],
   );
-  const categoryGroups = useMemo(
+  const categoryDrag = sectionGrouping === "section" && dragState !== null && !isContextDrag;
+  const storedCategoryGroups = useMemo(
     () => groupThreadsBySection(sectionProjects, activeThreads, { includeEmpty: true }),
     [sectionProjects, activeThreads],
   );
+  const categoryPreview = useMemo(() => {
+    if (!categoryDrag || dragState.targetCategoryKey === null) return null;
+    const source = threadByKey.get(dragState.activeKey);
+    const target = storedCategoryGroups.find((group) => group.key === dragState.targetCategoryKey);
+    if (!source || !target) return null;
+    const assignment = resolveThreadSectionDrop(source, target.project, target.section?.id ?? null);
+    return assignment ? { source, target, thread: { ...source, ...assignment } } : null;
+  }, [categoryDrag, dragState, storedCategoryGroups, threadByKey]);
+  // Preview membership only. Persisted shells and lifecycle shelves change on drop.
+  const categoryGroups = useMemo(() => {
+    if (!categoryPreview) return storedCategoryGroups;
+    return storedCategoryGroups.map((group) => ({
+      ...group,
+      threads: [
+        ...(group.key === categoryPreview.target.key ? [categoryPreview.thread] : []),
+        ...group.threads.filter((thread) => thread !== categoryPreview.source),
+      ],
+    }));
+  }, [categoryPreview, storedCategoryGroups]);
   const categoryTargets = useMemo(() => {
     const targets = new Map<string, (typeof categoryGroups)[number]>();
     for (const group of categoryGroups) {
@@ -4131,7 +4150,30 @@ export default function Sidebar() {
     }
     return targets;
   }, [categoryGroups]);
-  const categoryDrag = sectionGrouping === "section" && dragState !== null && !isContextDrag;
+  const handleThreadDragOver = useCallback(
+    (event: DragOverEvent) => {
+      if (sectionGrouping === "section") {
+        const target = event.over ? categoryTargets.get(String(event.over.id)) : undefined;
+        setDragState((current) => {
+          if (current === null || current.activeKey !== String(event.active.id)) return current;
+          const targetCategoryKey = target?.key ?? null;
+          return current.targetCategoryKey === targetCategoryKey
+            ? current
+            : { ...current, targetCategoryKey };
+        });
+        return;
+      }
+      const target = event.over
+        ? resolveSidebarDropTarget(sidebarListItems, String(event.active.id), String(event.over.id))
+        : null;
+      setDragState((current) =>
+        current === null || current.activeKey !== String(event.active.id)
+          ? current
+          : { ...current, targetSection: target?.section ?? null },
+      );
+    },
+    [categoryTargets, sectionGrouping, sidebarListItems],
+  );
   const draggedThreadKey = dragState?.activeKey;
   const draggedFromSection = dragState?.activeSection;
   const dragActivationY = dragState?.activationY;
@@ -5510,6 +5552,7 @@ export default function Sidebar() {
                 onDragEnd={handleThreadDragEnd}
               >
                 <SidebarDragLifecycle onUnmount={cancelThreadDrag} />
+                <CategoryDropMeasurements previewKey={categoryPreview?.target.key ?? null} />
                 <SortableContext items={sortableIds} strategy={sidebarSortingStrategy}>
                   <ul
                     ref={attachListMotionRef}
@@ -5690,7 +5733,12 @@ export default function Sidebar() {
                       ];
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
-                          if (sectionGrouping === "section" && item.section === "active") continue;
+                          if (
+                            sectionGrouping === "section" &&
+                            (item.section === "active" ||
+                              (categoryPreview !== null && item.key === dragState?.activeKey))
+                          )
+                            continue;
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
                           continue;
                         }
@@ -5746,6 +5794,7 @@ export default function Sidebar() {
                                     section={group.section}
                                     count={group.threads.length}
                                     dropEnabled={sameProject}
+                                    expandForDrop={categoryPreview?.target.key === group.key}
                                     showProject={sectionProjects.length > 1}
                                     onNewThread={() => {
                                       void handleNewThreadRef.current(
@@ -5758,10 +5807,18 @@ export default function Sidebar() {
                                     }}
                                   />,
                                 );
-                                if (!collapsedThreadSections.includes(group.key)) {
+                                if (
+                                  !collapsedThreadSections.includes(group.key) ||
+                                  categoryPreview?.target.key === group.key
+                                ) {
                                   items.push(
                                     ...group.threads.map((thread) =>
-                                      renderThreadRow(thread, "active"),
+                                      renderThreadRow(
+                                        thread,
+                                        categoryPreview?.thread === thread
+                                          ? (dragState?.activeSection ?? "active")
+                                          : "active",
+                                      ),
                                     ),
                                   );
                                 }

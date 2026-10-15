@@ -55,7 +55,8 @@ assignment.
 **By category** groups active threads under collapsible headings. Use a heading's
 **+** to start a draft in that category. Named categories remain visible when
 empty. **Uncategorized** appears when it has chats or while dragging a chat.
-Drag onto a category heading or one of its chats to assign it. Its menu lets you
+Drag over a category heading or one of its chats to preview the chat in that
+category. Drop to save the assignment, or press Escape to cancel. Its menu lets you
 edit, reorder, or delete the category. Deleting a category keeps its chats under
 **Uncategorized**.
 

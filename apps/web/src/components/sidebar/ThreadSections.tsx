@@ -304,6 +304,7 @@ export function ThreadSectionHeading({
   showProject,
   onNewThread,
   dropEnabled = false,
+  expandForDrop = false,
 }: {
   project: EnvironmentProject;
   section: ProjectSection | null;
@@ -311,13 +312,15 @@ export function ThreadSectionHeading({
   showProject: boolean;
   onNewThread: () => void;
   dropEnabled?: boolean;
+  expandForDrop?: boolean;
 }) {
   const key = threadSectionKey(project, section?.id ?? null);
   const { setNodeRef, isOver } = useDroppable({
     id: `category:${key}`,
     disabled: !dropEnabled,
   });
-  const collapsed = useUiStateStore((state) => state.collapsedThreadSections.includes(key));
+  const collapsed =
+    useUiStateStore((state) => state.collapsedThreadSections.includes(key)) && !expandForDrop;
   const toggle = useUiStateStore((state) => state.toggleThreadSection);
   const [editing, setEditing] = useState(false);
   const change = useSectionChange(project);
