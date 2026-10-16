@@ -3266,7 +3266,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               text: codexSkillMentionText(turnInput.message.text),
               attachments: turnInput.message.attachments,
               resolveAttachmentPath: (attachment) =>
-                resolveAttachmentPath({ attachmentsDir: serverConfig.attachmentsDir, attachment }),
+                input.runtimePolicy.runDestination
+                  ? null
+                  : resolveAttachmentPath({
+                      attachmentsDir: serverConfig.attachmentsDir,
+                      attachment,
+                    }),
             });
             if (text.length > 0) {
               inputItems.push({

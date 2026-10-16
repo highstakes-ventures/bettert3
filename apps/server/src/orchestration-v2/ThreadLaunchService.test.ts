@@ -2941,6 +2941,115 @@ const cloudDestination = {
 };
 
 it.effect(
+  "accepts Cloud images on launch and follow-up while rejecting local context and files",
+  () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const image = {
+        type: "image" as const,
+        id: ChatAttachmentId.make("cloud-image"),
+        name: "screenshot.png",
+        mimeType: "image/png",
+        sizeBytes: 128,
+      };
+      const context = {
+        version: 1 as const,
+        records: [
+          {
+            version: 1 as const,
+            kind: "image" as const,
+            contextId: ComposerContextId.make("image_cloud"),
+            label: image.name,
+            attachmentId: image.id,
+            name: image.name,
+            mimeType: image.mimeType,
+            sizeBytes: image.sizeBytes,
+          },
+        ],
+      };
+      const launched = yield* launches.launch({
+        ...launchInput({ command: "cloud-images", thread: "cloud-images" }),
+        runDestination: cloudDestination,
+        initialMessage: {
+          messageId: MessageId.make("cloud-image-initial"),
+          text: "Compare these screenshots",
+          attachments: [image, { ...image, id: ChatAttachmentId.make("cloud-image-second") }],
+          context,
+        },
+      });
+      const followUp = {
+        type: "message.dispatch" as const,
+        commandId: CommandId.make("cloud-image-follow-up"),
+        threadId: launched.threadId,
+        messageId: MessageId.make("cloud-image-follow-up"),
+        text: "",
+        attachments: [image],
+        context,
+        createdBy: "user" as const,
+        creationSource: "web" as const,
+        dispatchMode: { type: "queue_after_active" as const },
+      };
+      yield* threads.dispatch(followUp);
+      const projection = yield* threads.getThreadProjection(launched.threadId);
+      assert.deepEqual(
+        projection.messages.map((message) => message.attachments.length),
+        [2, 1],
+      );
+      assert.deepEqual(projection.messages[1]?.context, context);
+      assert.deepEqual(projection.checkpointScopes, []);
+      assert.equal(harness.createWorktree.mock.calls.length, 0);
+      assert.equal(harness.runSetup.mock.calls.length, 0);
+      for (const [key, unsupported] of [
+        [
+          "file",
+          {
+            attachments: [
+              { ...image, type: "file" as const, name: "notes.txt", mimeType: "text/plain" },
+            ],
+          },
+        ],
+        ["unsupported-image", { attachments: [{ ...image, mimeType: "image/svg+xml" }] }],
+        ["unbound-image-context", { attachments: [] }],
+        [
+          "local-context",
+          {
+            context: {
+              version: 1 as const,
+              records: [
+                {
+                  version: 1 as const,
+                  kind: "terminal" as const,
+                  contextId: ComposerContextId.make("terminal_local"),
+                  label: "Terminal",
+                  terminalId: "terminal-local",
+                  terminalLabel: "Local shell",
+                  lineStart: 0,
+                  lineEnd: 1,
+                  text: "Local command output",
+                },
+              ],
+            },
+          },
+        ],
+      ] as const) {
+        const rejected = yield* threads
+          .dispatch({
+            ...followUp,
+            ...unsupported,
+            commandId: CommandId.make(`cloud-rejected-${key}`),
+            messageId: MessageId.make(`cloud-rejected-${key}`),
+          })
+          .pipe(Effect.result);
+        assert.equal(rejected._tag, "Failure");
+      }
+      assert.lengthOf((yield* threads.getThreadProjection(launched.threadId)).messages, 2);
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
+
+it.effect(
   "saves a Cloud launch as a normal thread without local preparation or checkpoints",
   () => {
     const harness = makeHarness({

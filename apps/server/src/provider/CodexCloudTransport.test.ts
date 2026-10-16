@@ -100,8 +100,17 @@ effectIt.effect("delivers replies and streaming notifications and releases its s
         yield* client.handleUnknownServerNotification((_method, params) =>
           Deferred.succeed(arrived, (params as { text: string }).text),
         );
-        const response = yield* client.raw.request("cloud/test", {});
+        const imageInput = [
+          { type: "text", text: "Compare these screenshots" },
+          { type: "image", url: "data:image/png;base64,aW1hZ2U=" },
+          { type: "image", url: "data:image/jpeg;base64,c2Vjb25k" },
+        ];
+        const response = yield* client.raw.request("turn/start", {
+          threadId: "cloud",
+          input: imageInput,
+        });
         expect(response).toEqual({ ok: true });
+        expect(wire.sent[0]?.params).toEqual({ threadId: "cloud", input: imageInput });
         expect(yield* Deferred.await(arrived)).toBe("streamed");
       }),
     );

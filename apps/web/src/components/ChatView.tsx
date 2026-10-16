@@ -9008,16 +9008,16 @@ export default function ChatView(props: ChatViewProps) {
       runDestination &&
       (ctxSelectedProvider !== "codex" ||
         composerFiles.length > 0 ||
-        sendContextImages.length > 0 ||
         composerTerminalContexts.length > 0 ||
         composerReviewComments.length > 0 ||
         sendContextPreviewAnnotations.length > 0 ||
         composerThreadContexts.length > 0 ||
+        Boolean(directAnnotation) ||
         multipleModelSelections !== null)
     ) {
       setThreadError(
         threadId,
-        "Codex Cloud needs one Codex model and a text message. Remove attachments and local context to send.",
+        "Codex Cloud supports one Codex model with text and images. Remove files and local context to send.",
       );
       return;
     }

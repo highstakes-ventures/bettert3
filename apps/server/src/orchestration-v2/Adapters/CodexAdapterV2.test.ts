@@ -9,6 +9,8 @@ import {
 } from "./ProviderTextDeltaCoalescer.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  type ChatAttachment,
+  ChatAttachmentId,
   CommandId,
   CheckpointId,
   CodexSettings,
@@ -44,7 +46,7 @@ import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
 import * as FileSystem from "effect/FileSystem";
 import { MCP_APP_OUTPUT_KEY, readMcpAppReference } from "@t3tools/shared/mcpApp";
-import { resolveAttachmentPathById } from "../../attachmentStore.ts";
+import { resolveAttachmentPath, resolveAttachmentPathById } from "../../attachmentStore.ts";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -1577,6 +1579,7 @@ function makeCodexTestTurnInput(input: {
   readonly now: DateTime.Utc;
   readonly attemptId: RunAttemptId;
   readonly text: string;
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
 }): ProviderAdapter.ProviderAdapterV2TurnInput {
   return {
     appThread: makeCodexTestAppThread(input),
@@ -1592,7 +1595,7 @@ function makeCodexTestTurnInput(input: {
       creationSource: "web",
       messageId: MessageId.make(`message-${input.attemptId}`),
       text: input.text,
-      attachments: [],
+      attachments: input.attachments ?? [],
     },
     modelSelection: CODEX_TEST_MODEL_SELECTION,
     runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
@@ -1623,6 +1626,7 @@ function codexReplayPreamble(input: {
   readonly prompt: string;
   /** Text the adapter should send, when it differs from what the user typed. */
   readonly sentPrompt?: string;
+  readonly images?: ReadonlyArray<{ readonly type: "image"; readonly url: string }>;
 }): Array<CodexReplay.CodexAppServerReplayEntry> {
   return [
     {
@@ -1713,7 +1717,10 @@ function codexReplayPreamble(input: {
         method: "turn/start",
         params: {
           threadId: input.nativeThreadId,
-          input: [{ type: "text", text: input.sentPrompt ?? input.prompt }],
+          input: [
+            { type: "text", text: input.sentPrompt ?? input.prompt },
+            ...(input.images ?? []),
+          ],
           cwd: "/workspace",
           model: "gpt-5.4",
           approvalPolicy: "never",
@@ -2120,6 +2127,72 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         firstTerminal: Deferred.await(firstTerminal),
       };
     });
+
+  it.effect("sends Cloud image bytes without local attachment paths", () =>
+    Effect.gen(function* () {
+      const bytes = Buffer.from("cloud-image-bytes");
+      const attachment = {
+        type: "image" as const,
+        id: ChatAttachmentId.make("cloud-image"),
+        name: "screenshot.png",
+        mimeType: "image/png",
+        sizeBytes: bytes.length,
+      };
+      let sentInput: unknown;
+      const harness = yield* makeCodexReplayHarness(
+        makeCodexReplayTranscript({
+          scenario: "cloud-images",
+          entries: codexReplayPreamble({
+            nativeThreadId: "cloud-images",
+            nativeTurnId: "cloud-image-turn",
+            prompt: "Describe this screenshot",
+            images: [{ type: "image", url: `data:image/png;base64,${bytes.toString("base64")}` }],
+          }),
+        }),
+        () => Effect.void,
+        (method, params) =>
+          Effect.sync(() => {
+            if (method === "turn/start") sentInput = params;
+          }),
+        undefined,
+        {
+          destination: {
+            kind: "codexCloud",
+            accountId: "account",
+            environmentConfigId: "workspace",
+            name: "Cloud",
+            cwd: "/workspace",
+          },
+          disconnected: yield* Deferred.make<void>(),
+        },
+      );
+      const path = resolveAttachmentPath({
+        attachmentsDir: harness.serverConfig.attachmentsDir,
+        attachment,
+      });
+      assert.isNotNull(path);
+      yield* (yield* FileSystem.FileSystem).writeFile(path!, bytes);
+      yield* harness.runtime.startTurn(
+        makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("cloud-image-attempt"),
+          text: "Describe this screenshot",
+          attachments: [attachment],
+        }),
+      );
+      assert.deepEqual((sentInput as { input: unknown }).input, [
+        { type: "text", text: "Describe this screenshot" },
+        { type: "image", url: `data:image/png;base64,${bytes.toString("base64")}` },
+      ]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
 
   it.live("fails the Cloud event stream when disconnected after an accepted turn", () =>
     Effect.gen(function* () {

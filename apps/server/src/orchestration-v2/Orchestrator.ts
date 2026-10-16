@@ -63,6 +63,7 @@ import {
   type TurnItemId,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
+import { isProviderNativeImageAttachment } from "@t3tools/provider-core/server/attachmentPrompt";
 import {
   derivePendingBackgroundWork,
   pendingBackgroundTurnItems,
@@ -4643,14 +4644,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
       if (
         projection.thread.runDestination &&
-        (command.attachments.length > 0 ||
-          command.context ||
+        (command.attachments.some((attachment) => !isProviderNativeImageAttachment(attachment)) ||
+          command.context?.records.some(
+            (record) =>
+              record.kind !== "image" ||
+              !("attachmentId" in record) ||
+              !command.attachments.some((attachment) => attachment.id === record.attachmentId),
+          ) ||
           command.dispatchMode.type === "defer_start")
       ) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
-          cause: "Cloud threads currently accept text messages without local workspace context.",
+          cause: "Cloud threads accept text and images without files or local workspace context.",
         });
       }
       if (command.manualContinuationOfRunId !== undefined) {
