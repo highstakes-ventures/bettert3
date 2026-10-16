@@ -53,6 +53,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -1967,6 +1968,85 @@ describe("CodexAdapterV2 session initialize", () => {
     ),
   );
 });
+
+it.live("fails the local event stream when the app-server is killed", () =>
+  Effect.gen(function* () {
+    const exited = yield* Deferred.make<
+      ChildProcessSpawner.ExitCode,
+      PlatformError.PlatformError
+    >();
+    const handle = ChildProcessSpawner.makeHandle({
+      pid: ChildProcessSpawner.ProcessId(52),
+      exitCode: Deferred.await(exited),
+      isRunning: Effect.succeed(true),
+      kill: () => Effect.void,
+      stdin: Sink.drain,
+      stdout: Stream.fromEffect(
+        Deferred.await(exited).pipe(Effect.exit, Effect.as(new Uint8Array())),
+      ),
+      stderr: Stream.never,
+      all: Stream.never,
+      getInputFd: () => Sink.drain,
+      getOutputFd: () => Stream.never,
+      unref: Effect.succeed(Effect.void),
+    });
+    const factory = yield* CodexAdapterV2.CodexAppServerClientFactory.pipe(
+      Effect.provide(CodexAdapterV2.layerAppServerClientFactory),
+      Effect.provideService(CodexCloudChats.CodexCloudChats, unusedCloudChats),
+      Effect.provideService(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() => Effect.succeed(handle)),
+      ),
+      Effect.provideService(
+        ProviderEventLoggers.ProviderEventLoggers,
+        ProviderEventLoggers.NoOpProviderEventLoggers,
+      ),
+    );
+    const adapter = yield* CodexAdapterV2.makeCodexAdapterV2({
+      instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+      settings: DEFAULT_CODEX_SETTINGS,
+      environment: {},
+      clientFactory: factory,
+      crypto: yield* Crypto.Crypto,
+      fileSystem: yield* FileSystem.FileSystem,
+      idAllocator: yield* IdAllocator.IdAllocatorV2,
+      serverConfig: yield* makeReplayServerConfig("local-process-killed"),
+    });
+    const runtime = yield* adapter.openSession({
+      threadId: ThreadId.make("thread-local-process-killed"),
+      providerSessionId: ProviderSessionId.make("session-local-process-killed"),
+      modelSelection: CODEX_TEST_MODEL_SELECTION,
+      runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+    });
+    const eventStream = yield* runtime.events.pipe(
+      Stream.runDrain,
+      Effect.timeout("1 second"),
+      Effect.result,
+      Effect.forkScoped,
+    );
+    const cause = PlatformError.systemError({
+      _tag: "Unknown",
+      module: "ChildProcess",
+      method: "exitCode",
+      cause: new Error("Process interrupted due to receipt of signal: 'SIGKILL'"),
+    });
+    yield* Deferred.fail(exited, cause);
+    const result = yield* Fiber.join(eventStream);
+    assert.equal(result._tag, "Failure");
+    if (result._tag === "Failure") {
+      assert.equal(result.failure._tag, "ProviderAdapterEventStreamError");
+      if (result.failure._tag === "ProviderAdapterEventStreamError") {
+        assert.instanceOf(result.failure.cause, CodexError.CodexAppServerTransportError);
+        assert.strictEqual(result.failure.cause.cause, cause);
+      }
+    }
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+    ),
+  ),
+);
 
 describe("CodexAdapterV2 post-settle continuation", () => {
   const awaitUntil = (predicate: () => boolean, label: string): Effect.Effect<void> =>

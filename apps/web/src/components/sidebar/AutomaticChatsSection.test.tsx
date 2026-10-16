@@ -121,3 +121,19 @@ it("keeps the section toggle independent from its read action", async () => {
     ),
   ).toBe(true);
 });
+
+it("does not report zero running when an automatic chat's activity is unavailable", async () => {
+  state.chats = [{ ...chat("one"), status: "unknown" }];
+  await render();
+  expect(container.querySelector('[aria-label="Running count unavailable"]')).not.toBeNull();
+  expect(container.textContent).not.toContain("0 running");
+
+  state.chats.push(chat("running"));
+  await render();
+  expect(container.querySelector('[aria-label="At least 1 running"]')).not.toBeNull();
+
+  state.chats[0] = { ...chat("one"), status: "idle" };
+  await render();
+  expect(container.textContent).toContain("· 1 running");
+  expect(container.textContent).not.toContain("At least");
+});

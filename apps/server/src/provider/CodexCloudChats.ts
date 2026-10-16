@@ -411,13 +411,14 @@ const make = Effect.gen(function* () {
     limit: number,
     cursor?: string,
     sortDirection: "asc" | "desc" = "asc",
+    itemsView: "full" | "notLoaded" = "full",
   ) =>
     request("thread/turns/list", {
       threadId,
       limit,
       cursor: cursor ?? null,
       sortDirection,
-      itemsView: "full",
+      itemsView,
     }).pipe(
       Effect.flatMap((value) =>
         decodeTurns(value).pipe(Effect.mapError(() => new CloudChatError({ reason: "protocol" }))),
@@ -505,12 +506,36 @@ const make = Effect.gen(function* () {
                   if (text.trim().length > 0 && cachedAccount === accountSummaries)
                     summaries.set(thread.id, summary);
                 }
+                let status = thread.status.type;
+                if (summary.provenance.origin === "automatic") {
+                  // Cloud's list can say idle while a turn is running. Read only the
+                  // newest turn's metadata, without downloading its tool output.
+                  const latest = yield* turns(
+                    request,
+                    thread.id,
+                    1,
+                    undefined,
+                    "desc",
+                    "notLoaded",
+                  ).pipe(Effect.result);
+                  const turnStatus =
+                    latest._tag === "Success" ? latest.success.data[0]?.status : undefined;
+                  status =
+                    turnStatus === "inProgress"
+                      ? "active"
+                      : turnStatus === "completed" ||
+                          turnStatus === "interrupted" ||
+                          turnStatus === "failed" ||
+                          (latest._tag === "Success" && latest.success.data.length === 0)
+                        ? "idle"
+                        : "unknown";
+                }
                 return {
                   id: thread.id,
                   title: thread.name?.trim() || summary.title,
                   createdAt: thread.createdAt,
                   updatedAt: thread.updatedAt,
-                  status: thread.status.type,
+                  status,
                   origin: summary.provenance.origin,
                   repository: summary.provenance.repository,
                   githubRunUrl: summary.provenance.githubRunUrl,
