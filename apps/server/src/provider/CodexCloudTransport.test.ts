@@ -67,6 +67,16 @@ beforeEach(() => {
   wire.closed = 0;
 });
 
+it.each([undefined, "default", "priority"])("normalizes Cloud service tier %s", (serviceTier) => {
+  const result = Transport.cloudRequest(
+    { method: "turn/start", params: { threadId: "cloud", input: [], serviceTier } },
+    destination,
+  );
+  const params = JSON.parse(JSON.stringify(result.params));
+  if (serviceTier === "priority") expect(params.serviceTier).toBe("priority");
+  else expect(params).not.toHaveProperty("serviceTier");
+});
+
 it("binds the remote workspace and excludes local execution config and MCP credentials", () => {
   const local = {
     cwd: "/Users/local",

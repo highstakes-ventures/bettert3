@@ -62,7 +62,8 @@ export function cloudRequest(message: unknown, destination: CodexCloudDestinatio
         model,
         effort,
         summary,
-        serviceTier,
+        // Cloud rejects the local CLI's "default" sentinel. Omission selects its default tier.
+        ...(serviceTier === "default" ? {} : { serviceTier }),
         ...(collaborationMode ? { collaborationMode } : {}),
       },
     };
