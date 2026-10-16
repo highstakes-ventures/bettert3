@@ -1593,14 +1593,18 @@ export const layerAppServerClientFactory: Layer.Layer<
             threadId: input.threadId,
             providerSessionId: input.providerSessionId,
           });
-          const clientOptions: CodexClient.CodexAppServerClientOptions =
-            protocolLogger === undefined
+          const clientOptions: CodexClient.CodexAppServerClientOptions = {
+            ...(input.onTransportError === undefined
+              ? {}
+              : { onTermination: input.onTransportError }),
+            ...(protocolLogger === undefined
               ? {}
               : {
                   logIncoming: true,
                   logOutgoing: true,
                   logger: protocolLogger,
-                };
+                }),
+          };
           const context = yield* Layer.build(CodexClient.layerChildProcess(handle, clientOptions));
           return yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
             Effect.provide(context),
@@ -6553,11 +6557,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           driver: CODEX_PROVIDER,
           providerSessionId: input.providerSessionId,
           providerSession: session,
-          events: input.runtimePolicy.runDestination
-            ? Stream.fromEffectRepeat(Queue.take(events)).pipe(
-                Stream.merge(Stream.fromEffect(Deferred.await(transportFailure))),
-              )
-            : Stream.fromEffectRepeat(Queue.take(events)),
+          events: Stream.fromEffectRepeat(Queue.take(events)).pipe(
+            Stream.merge(Stream.fromEffect(Deferred.await(transportFailure))),
+          ),
           canReuseContextUsage: canReuseCodexContextUsage,
           // Known gap: a subagent that Codex resumes later reads as completed
           // (not pending) between turns, so idle release can win the race
