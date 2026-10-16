@@ -85,6 +85,17 @@ export function AutomaticChatsSection({
         Number(b.status === "active") - Number(a.status === "active") || b.updatedAt - a.updatedAt,
     );
   const running = rows.filter((chat) => chat.status === "active").length;
+  const activityIncomplete = query.data?.hasMore || rows.some((chat) => chat.status === "unknown");
+  const runningDescription = activityIncomplete
+    ? running > 0
+      ? `At least ${running} running`
+      : "Running count unavailable"
+    : `${running} running`;
+  const runningLabel = activityIncomplete
+    ? running > 0
+      ? `${running}+ running`
+      : "? running"
+    : runningDescription;
   const isUnopened = (chat: CloudChatSummary) =>
     !!environmentId &&
     !!query.data &&
@@ -147,7 +158,20 @@ export function AutomaticChatsSection({
                   ) : (
                     <span>{query.data.hasMore ? "At least " : ""}0 new</span>
                   )}
-                  <span>· {running} running</span>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span
+                          tabIndex={0}
+                          aria-label={runningDescription}
+                          className="pointer-events-auto rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+                        />
+                      }
+                    >
+                      · {runningLabel}
+                    </TooltipTrigger>
+                    <TooltipPopup>{runningDescription}</TooltipPopup>
+                  </Tooltip>
                 </>
               ) : (
                 "Loading…"

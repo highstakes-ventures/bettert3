@@ -228,6 +228,59 @@ it.effect("lists named user chats without loading each conversation's turns", ()
   ),
 );
 
+it.effect(
+  "refreshes automatic chat activity from the newest turn rather than the list status",
+  () =>
+    provide(
+      Effect.gen(function* () {
+        const service = yield* CodexCloudChats.CodexCloudChats;
+        let status = "inProgress";
+        wire.response = (method, params) =>
+          method === "thread/list"
+            ? { data: [{ ...thread, threadSource: "automation" }], nextCursor: null }
+            : params.sortDirection === "desc"
+              ? { data: [{ id: "latest", status, items: [] }], nextCursor: null }
+              : page;
+
+        expect((yield* service.list()).chats[0]?.status).toBe("active");
+        status = "completed";
+        expect((yield* service.list()).chats[0]?.status).toBe("idle");
+        const activityReads = wire.requests.filter(
+          ({ method, params }) => method === "thread/turns/list" && params.sortDirection === "desc",
+        );
+        expect(activityReads).toHaveLength(2);
+        expect(
+          activityReads.every(
+            ({ params }) => params.limit === 1 && params.itemsView === "notLoaded",
+          ),
+        ).toBe(true);
+      }),
+    ),
+);
+
+it.effect.each(["protocol-error", "missing-status"])(
+  "keeps automatic chats visible with unknown activity after a %s status read",
+  (failure) =>
+    provide(
+      Effect.gen(function* () {
+        const service = yield* CodexCloudChats.CodexCloudChats;
+        wire.response = (method, params) =>
+          method === "thread/list"
+            ? { data: [{ ...thread, threadSource: "automation" }], nextCursor: null }
+            : params.sortDirection === "desc"
+              ? failure === "protocol-error"
+                ? "protocol-error"
+                : { data: [{ id: "latest", items: [] }], nextCursor: null }
+              : page;
+        expect((yield* service.list()).chats[0]).toMatchObject({
+          id: threadId,
+          title: "My question",
+          status: "unknown",
+        });
+      }),
+    ),
+);
+
 it.effect("reads a history page in order and excludes tool items", () =>
   provide(
     Effect.gen(function* () {
