@@ -1773,7 +1773,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           never,
           ProviderAdapter.ProviderAdapterEventStreamError
         >();
-        const client = yield* clientFactory.open({
+        const pendingCloudNotifications = new Map<string, Array<Effect.Effect<void>>>();
+        const transportClient = yield* clientFactory.open({
           onTransportError: (cause) =>
             Deferred.fail(
               transportFailure,
@@ -1790,6 +1791,27 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           settings: resolvedRuntime?.config ?? adapterOptions.settings,
           environment: resolvedRuntime?.environment ?? adapterOptions.environment,
         });
+        const client: CodexClient.CodexAppServerClient["Service"] = input.runtimePolicy
+          .runDestination
+          ? {
+              ...transportClient,
+              handleServerNotification: (method, handler) =>
+                transportClient.handleServerNotification(method, (payload) =>
+                  Effect.suspend(() => {
+                    const pending =
+                      "threadId" in payload && typeof payload.threadId === "string"
+                        ? pendingCloudNotifications.get(payload.threadId)
+                        : undefined;
+                    if (pending !== undefined) {
+                      // The input reader must reach the start reply before these callbacks run.
+                      pending.push(handler(payload).pipe(Effect.ignore));
+                      return Effect.void;
+                    }
+                    return handler(payload);
+                  }),
+                ),
+            }
+          : transportClient;
         const additionalContextByThread = yield* Ref.make(
           new Map<
             string,
@@ -4523,7 +4545,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               return;
             }
             const pendingRootTurn = (yield* Ref.get(pendingRootTurns)).get(payload.threadId);
-            if (pendingRootTurn !== undefined) {
+            if (pendingRootTurn !== undefined && !input.runtimePolicy.runDestination) {
               yield* registerRootTurn({
                 turnInput: pendingRootTurn,
                 nativeTurnId: payload.turn.id,
@@ -4539,6 +4561,20 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             // Codex continues an active goal on its own. The next turn joins the
             // run its previous turn belongs to.
             const goalHold = goalHolds.get(payload.threadId);
+            // Cloud replays older starts. The start reply owns the requested turn;
+            // after it completes, a held goal can own a new continuation instead.
+            if (input.runtimePolicy.runDestination) {
+              if (pendingRootTurn !== undefined && goalHold === undefined) return;
+              if (
+                (yield* Ref.get(settledTurns)).has(payload.turn.id) ||
+                goalHold?.context.nativeTurnId === payload.turn.id ||
+                (goalHold !== undefined &&
+                  goalRuns
+                    .get(goalHold.context.providerTurnId)
+                    ?.some((turn) => turn.nativeTurnId === payload.turn.id))
+              )
+                return;
+            }
             if (goalHold !== undefined) {
               goalHolds.delete(payload.threadId);
               yield* emitProviderEvent({
@@ -6357,22 +6393,30 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               else next.delete(threadId);
               return next;
             });
+            const notifications: Array<Effect.Effect<void>> = [];
+            if (input.runtimePolicy.runDestination) {
+              pendingCloudNotifications.set(threadId, notifications);
+            }
             const started = yield* client.request("turn/start", turnStartParams);
             yield* registerRootTurn({
               turnInput,
               nativeTurnId: started.turn.id,
               startedAt: codexTimestamp(started.turn.startedAt),
-              waitForNativeStart: started.turn.startedAt === null,
+              waitForNativeStart:
+                !input.runtimePolicy.runDestination && started.turn.startedAt === null,
             });
+            // Keep buffering while draining so new callbacks preserve wire order.
+            for (const notification of notifications) yield* notification;
           }).pipe(
             Effect.ensuring(
-              Effect.flatMap(getNativeThreadId(turnInput.providerThread), (threadId) =>
-                Ref.update(pendingRootTurns, (current) => {
+              Effect.flatMap(getNativeThreadId(turnInput.providerThread), (threadId) => {
+                pendingCloudNotifications.delete(threadId);
+                return Ref.update(pendingRootTurns, (current) => {
                   const updated = new Map(current);
                   updated.delete(threadId);
                   return updated;
-                }),
-              ).pipe(Effect.ignore),
+                });
+              }).pipe(Effect.ignore),
             ),
           );
 

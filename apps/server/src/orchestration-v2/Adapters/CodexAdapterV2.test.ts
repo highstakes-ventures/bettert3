@@ -2208,6 +2208,175 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       };
     });
 
+  it.effect("retains early Cloud replies without adopting replayed turn starts", () =>
+    Effect.gen(function* () {
+      const nativeThreadId = "cloud-replayed-start";
+      const firstId = "cloud-first-turn";
+      const secondId = "cloud-second-turn";
+      const secondPreamble = codexReplayPreamble({
+        nativeThreadId,
+        nativeTurnId: secondId,
+        prompt: "Follow up",
+      });
+      const secondRequest = secondPreamble.find(
+        (entry) => entry.type === "expect_outbound" && entry.label === "turn/start",
+      )!;
+      const secondAnswer = yield* Deferred.make<string>();
+      const secondTerminal = yield* Deferred.make<void>();
+      let terminalCount = 0;
+      const harness = yield* makeCodexReplayHarness(
+        makeCodexReplayTranscript({
+          scenario: "cloud-replayed-start",
+          entries: [
+            ...codexReplayPreamble({
+              nativeThreadId,
+              nativeTurnId: firstId,
+              prompt: "First message",
+            }),
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: firstId, status: "completed" }),
+                },
+              },
+            },
+            withReplayRequestId(secondRequest, 4),
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/started",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: firstId, status: "inProgress" }),
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: firstId, status: "completed" }),
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/started",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: secondId, status: "inProgress" }),
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "item/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turnId: secondId,
+                  item: {
+                    id: "cloud-second-answer",
+                    type: "agentMessage",
+                    text: "Follow-up answer",
+                    phase: "final_answer",
+                  },
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: secondId, status: "completed" }),
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "turn/start",
+              frame: {
+                id: 4,
+                result: {
+                  turn: {
+                    ...makeCodexReplayTurn({ id: secondId, status: "inProgress" }),
+                    startedAt: null,
+                  },
+                },
+              },
+            },
+          ],
+        }),
+        (event) =>
+          event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
+            ? Deferred.succeed(secondAnswer, event.turnItem.text)
+            : event.type === "turn.terminal" && ++terminalCount === 2
+              ? Deferred.succeed(secondTerminal, undefined)
+              : Effect.void,
+        () => Effect.void,
+        undefined,
+        {
+          destination: {
+            kind: "codexCloud",
+            accountId: "account",
+            environmentConfigId: "workspace",
+            name: "Cloud",
+            cwd: "/workspace",
+          },
+          disconnected: yield* Deferred.make<void>(),
+        },
+      );
+      yield* harness.runtime.startTurn(
+        makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("cloud-first-attempt"),
+          text: "First message",
+        }),
+      );
+      yield* harness.firstTerminal;
+      const boundary = harness.events.length;
+      yield* harness.runtime.startTurn(
+        makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("cloud-second-attempt"),
+          text: "Follow up",
+        }),
+      );
+      yield* Deferred.await(secondTerminal);
+      assert.equal(yield* Deferred.await(secondAnswer), "Follow-up answer");
+      const turnUpdates = harness.events
+        .slice(boundary)
+        .flatMap((event) => (event.type === "provider_turn.updated" ? [event.providerTurn] : []));
+      assert.isNotEmpty(turnUpdates);
+      assert.equal(turnUpdates.at(-1)?.status, "completed");
+      assert.lengthOf(harness.terminalEvents(), 2);
+      assert.isTrue(
+        turnUpdates.every(
+          (turn) =>
+            turn.nativeTurnRef?.nativeId === secondId &&
+            turn.runAttemptId === RunAttemptId.make("cloud-second-attempt"),
+        ),
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
   it.effect("sends Cloud image bytes without local attachment paths", () =>
     Effect.gen(function* () {
       const bytes = Buffer.from("cloud-image-bytes");
@@ -9012,6 +9181,101 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           ],
         );
         assert.equal(providerGoals(harness.events).at(-1), "complete");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    );
+
+    it.effect("retains a Cloud goal continuation buffered before the start reply", () =>
+      Effect.gen(function* () {
+        const preamble = codexReplayPreamble({
+          nativeThreadId,
+          nativeTurnId: "cloud-goal-first",
+          prompt: objective,
+        });
+        const startReply = preamble.find(
+          (entry) => entry.type === "emit_inbound" && entry.label === "turn/start",
+        )!;
+        const harness = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario: "cloud-goal-early-continuation",
+            entries: [
+              ...preamble.filter((entry) => entry !== startReply),
+              notification("goal active", "thread/goal/updated", {
+                threadId: nativeThreadId,
+                turnId: "cloud-goal-first",
+                goal: codexGoal("active", 0),
+              }),
+              notification("first done", "turn/completed", {
+                threadId: nativeThreadId,
+                turn: makeCodexReplayTurn({ id: "cloud-goal-first", status: "completed" }),
+              }),
+              notification("duplicate first start", "turn/started", {
+                threadId: nativeThreadId,
+                turn: makeCodexReplayTurn({ id: "cloud-goal-first", status: "inProgress" }),
+              }),
+              notification("continuation", "turn/started", {
+                threadId: nativeThreadId,
+                turn: makeCodexReplayTurn({ id: "cloud-goal-next", status: "inProgress" }),
+              }),
+              notification("answer", "item/completed", {
+                threadId: nativeThreadId,
+                turnId: "cloud-goal-next",
+                item: {
+                  id: "cloud-goal-answer",
+                  type: "agentMessage",
+                  text: "Goal completed",
+                  phase: "final_answer",
+                },
+              }),
+              notification("goal complete", "thread/goal/updated", {
+                threadId: nativeThreadId,
+                turnId: "cloud-goal-next",
+                goal: codexGoal("complete", 100),
+              }),
+              notification("continuation done", "turn/completed", {
+                threadId: nativeThreadId,
+                turn: makeCodexReplayTurn({ id: "cloud-goal-next", status: "completed" }),
+              }),
+              startReply,
+            ],
+          }),
+          () => Effect.void,
+          () => Effect.void,
+          undefined,
+          {
+            destination: {
+              kind: "codexCloud",
+              accountId: "account",
+              environmentConfigId: "workspace",
+              name: "Cloud",
+              cwd: "/workspace",
+            },
+            disconnected: yield* Deferred.make<void>(),
+          },
+        );
+        yield* harness.runtime.startTurn(yield* goalTurnInput(harness, objective));
+        yield* harness.firstTerminal;
+        const expectedId = (yield* IdAllocator.IdAllocatorV2).derive.providerTurn({
+          driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+          nativeTurnId: "cloud-goal-next",
+        });
+        assert.deepEqual(
+          harness.terminalEvents().map((event) => [event.providerTurnId, event.status]),
+          [[expectedId, "completed"]],
+        );
+        assert.isTrue(
+          harness.events.some(
+            (event) =>
+              event.type === "turn_item.updated" &&
+              event.turnItem.type === "assistant_message" &&
+              event.turnItem.text === "Goal completed" &&
+              event.turnItem.providerTurnId === expectedId,
+          ),
+        );
       }).pipe(
         Effect.scoped,
         Effect.provide(
