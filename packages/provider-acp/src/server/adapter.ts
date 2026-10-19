@@ -283,6 +283,7 @@ export interface AcpAdapterV2Flavor {
   readonly extractSubagentUpdate?: (
     toolCall: AcpToolCallState,
   ) => AcpAdapterV2SubagentUpdate | undefined;
+  readonly isProvisionalSubagentTool?: (toolCall: AcpToolCallState) => boolean;
   readonly normalizeToolCall?: (toolCall: AcpToolCallState) => AcpToolCallState;
   readonly extractProposedPlanMarkdown?: (toolCall: AcpToolCallState) => string | undefined;
   readonly extractBackgroundTaskId?: (toolCall: AcpToolCallState) => string | undefined;
@@ -3318,6 +3319,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const merged = mergeToolCallState(previous, incoming);
           const toolCall = flavor.normalizeToolCall?.(merged) ?? merged;
           context.tools.set(toolCall.toolCallId, toolCall);
+          if (
+            followsAgentWorkState &&
+            projectedStatus === undefined &&
+            flavor.isProvisionalSubagentTool?.(toolCall)
+          ) {
+            yield* rearmDeferredFinalize(context);
+            return;
+          }
           const backgroundTaskId = flavor.extractBackgroundTaskId?.(toolCall);
           if (backgroundTaskId !== undefined) {
             context.toolCallIdsByBackgroundTaskId.set(backgroundTaskId, toolCall.toolCallId);
@@ -3408,18 +3417,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             yield* emitSubagent(context, subagentUpdate);
             if (followsAgentWorkState) yield* syncNativeChildren(context);
             if (subagentUpdate.suppressNormalTool !== false) {
-              // Native agents can stream partial arguments before a tool becomes a subagent.
-              if (
-                followsAgentWorkState &&
-                previous !== undefined &&
-                extractSubagentUpdate(previous) === undefined &&
-                context.toolStartedAt.has(toolCall.toolCallId)
-              ) {
-                projectedStatus = toolStatus(toolCall.status) === "failed" ? "failed" : "completed";
-              } else {
-                yield* rearmDeferredFinalize(context);
-                return;
-              }
+              yield* rearmDeferredFinalize(context);
+              return;
             }
           }
           if (
@@ -6766,6 +6765,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             driver,
             providerThread: updatedProviderThread,
           });
+          const rootSessionId = yield* Ref.get(activeSessionId);
           yield* emitProviderEvent(
             settledStatus === "failed"
               ? {
@@ -6780,7 +6780,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   ),
                   status: settledStatus,
                   ...(followsAgentWorkState &&
-                  [...nativeChildren.values()].some((child) => child.status === "running")
+                  rootSessionId !== null &&
+                  hasWorkingDescendant(rootSessionId)
                     ? { childTurnsContinue: true }
                     : {}),
                   failure: failure ?? makeProviderFailure({ class: "provider_error" }),
@@ -7410,9 +7411,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           ...(postSettleContinuationEnabled || followsAgentWorkState
             ? {
                 hasPendingBackgroundWork: Effect.gen(function* () {
+                  const rootSessionId = yield* Ref.get(activeSessionId);
                   if (
                     followsAgentWorkState &&
-                    [...nativeChildren.values()].some((child) => child.status === "running")
+                    rootSessionId !== null &&
+                    hasWorkingDescendant(rootSessionId)
                   )
                     return true;
                   if (
