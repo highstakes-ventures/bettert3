@@ -3,6 +3,8 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { cloudChats } from "../state/cloudChats";
+import { useAtomCommand } from "../state/use-atom-command";
 import ChatView from "./ChatView";
 import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
 import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
@@ -56,6 +58,23 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   const serverThreadRef: ScopedThreadRef | null =
     target.kind === "server" ? target.threadRef : (draftSession?.promotedTo ?? inferredThreadRef);
   const serverThread = useThreadShell(serverThreadRef);
+  const openCloud = useAtomCommand(cloudChats.open, { reportFailure: false });
+  const cloudDestination = serverThread?.source.runDestination;
+  const cloudAccountId = cloudDestination?.accountId;
+  const cloudNativeId = cloudDestination?.existingThreadId;
+  const cloudEnvironmentId = serverThreadRef?.environmentId;
+  useEffect(() => {
+    if (!cloudEnvironmentId || !cloudAccountId || !cloudNativeId) return;
+    const refresh = () => {
+      void openCloud({
+        environmentId: cloudEnvironmentId,
+        input: { accountId: cloudAccountId, threadId: cloudNativeId },
+      });
+    };
+    refresh();
+    const timer = setInterval(refresh, 10_000);
+    return () => clearInterval(timer);
+  }, [cloudEnvironmentId, cloudAccountId, cloudNativeId, openCloud]);
   const backgroundSubmissionPending = useBackgroundDraftSubmissionPending(
     target.kind === "draft" ? serverThreadRef : null,
   );

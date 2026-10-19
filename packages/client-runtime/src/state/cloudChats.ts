@@ -1,7 +1,7 @@
 import { WS_METHODS } from "@t3tools/contracts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { Atom } from "effect/reactivity";
-import { createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
+import { createEnvironmentRpcCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 
 export function createCloudChatAtoms<R, E>(runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>) {
   const history = createEnvironmentRpcQueryAtomFamily(runtime, {
@@ -15,6 +15,10 @@ export function createCloudChatAtoms<R, E>(runtime: Atom.AtomRuntime<Environment
     atom.pipe(Atom.withRefresh(5_000), Atom.setIdleTTL(0)),
   );
   return {
+    open: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cloud-chats:open",
+      tag: WS_METHODS.cloudChatsOpen,
+    }),
     destinations: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:cloud-chats:destinations",
       tag: WS_METHODS.cloudChatsDestinations,

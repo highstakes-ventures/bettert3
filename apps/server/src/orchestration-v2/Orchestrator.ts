@@ -2300,7 +2300,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     if (
       command.runDestination &&
-      (command.worktreePath !== null || command.branch !== null || command.importedNativeThread)
+      (command.worktreePath !== null ||
+        command.branch !== null ||
+        (command.importedNativeThread !== undefined &&
+          (command.importedNativeThread.ref.driver !== "codex" ||
+            command.importedNativeThread.ref.nativeId !== command.runDestination.existingThreadId)))
     ) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
@@ -9719,6 +9723,39 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                   }),
               ),
             );
+      if (
+        Option.isNone(sessionOption) &&
+        projection.thread.runDestination?.existingThreadId &&
+        providerTurn?.nativeTurnRef?.nativeId &&
+        providerTurn.status === "running"
+      ) {
+        const destination = projection.thread.runDestination;
+        yield* emitEvent({
+          type: "turn-item.updated",
+          threadId: command.threadId,
+          runId: run.id,
+          nodeId: rootNode.id,
+          providerInstanceId: run.providerInstanceId,
+          occurredAt: now,
+          payload: interruptRequestItem,
+        });
+        yield* stopRemainingWork();
+        yield* Ref.update(effects, (existing) => [
+          ...existing,
+          {
+            id: `effect:${command.commandId}:cloud-turn.interrupt:${providerTurn.id}`,
+            commandId: command.commandId,
+            threadId: command.threadId,
+            request: {
+              type: "cloud-turn.interrupt",
+              accountId: destination.accountId,
+              threadId: destination.existingThreadId!,
+              turnId: providerTurn.nativeTurnRef!.nativeId!,
+            },
+          } satisfies PendingOrchestrationEffectV2,
+        ]);
+        return undefined;
+      }
       if (Option.isNone(sessionOption)) {
         yield* emitEvent({
           type: "turn-item.updated",

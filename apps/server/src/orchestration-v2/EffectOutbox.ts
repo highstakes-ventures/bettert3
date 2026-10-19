@@ -52,6 +52,12 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
     subagent: Schema.optional(Schema.Struct({ id: NodeId, nativeTaskId: Schema.String })),
   }),
   Schema.Struct({
+    type: Schema.Literal("cloud-turn.interrupt"),
+    accountId: Schema.String,
+    threadId: Schema.String,
+    turnId: Schema.String,
+  }),
+  Schema.Struct({
     type: Schema.Literal("provider-turn.steer"),
     providerSessionId: ProviderSessionId,
     providerThreadId: ProviderThreadId,
@@ -130,6 +136,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
   "attachment.cleanup",
   "thread-title.generate",
   "delegated-tasks.stop",
+  "cloud-turn.interrupt",
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [

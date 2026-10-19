@@ -4,6 +4,7 @@ import { CheckCheckIcon, WorkflowIcon } from "lucide-react";
 import { useLayoutEffect } from "react";
 import { cloudChatVisitKey, isUnopenedAutomaticChat } from "../../lib/cloudChatVisits";
 import { cn } from "../../lib/utils";
+import { useThreadShells } from "../../state/entities";
 import { cloudChats } from "../../state/cloudChats";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
@@ -16,17 +17,22 @@ function AutomaticChatRow({
   chat,
   environmentId,
   unopened,
+  normalThreadId,
 }: {
   chat: CloudChatSummary;
   environmentId: string;
   unopened: boolean;
+  normalThreadId: string | undefined;
 }) {
   const params = useParams({ strict: false });
   const { setOpenMobile } = useSidebar();
   const active =
-    "cloudThreadId" in params &&
-    params.cloudThreadId === chat.id &&
-    params.cloudEnvironmentId === environmentId;
+    ("cloudThreadId" in params &&
+      params.cloudThreadId === chat.id &&
+      params.cloudEnvironmentId === environmentId) ||
+    ("threadId" in params &&
+      params.threadId === normalThreadId &&
+      params.environmentId === environmentId);
   const running = chat.status === "active";
   const date = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(
     chat.updatedAt * 1000,
@@ -73,6 +79,7 @@ export function AutomaticChatsSection({
   onLayoutChange: () => void;
 }) {
   const environmentId = usePrimaryEnvironmentId();
+  const threads = useThreadShells();
   const visits = useUiStateStore((state) => state.threadLastVisitedAtById);
   const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   const query = useEnvironmentQuery(
@@ -96,7 +103,7 @@ export function AutomaticChatsSection({
     isUnopenedAutomaticChat(chat, environmentId, query.data.accountId, visits);
   const unopened = rows.filter(isUnopened).length;
   const markAllRead = () => {
-    if (!environmentId || !query.data || query.error) return;
+    if (!expanded || !environmentId || !query.data || query.error) return;
     const visitedAt = new Date().toISOString();
     for (const chat of rows.filter(isUnopened)) {
       markThreadVisited(cloudChatVisitKey(environmentId, query.data.accountId, chat.id), visitedAt);
@@ -127,7 +134,7 @@ export function AutomaticChatsSection({
               ) : query.data ? (
                 <>
                   {query.data.hasMore ? <span>Recent ·</span> : null}
-                  {unopened > 0 ? (
+                  {unopened > 0 && expanded ? (
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -195,6 +202,14 @@ export function AutomaticChatsSection({
                   chat={chat}
                   environmentId={environmentId}
                   unopened={isUnopened(chat)}
+                  normalThreadId={
+                    threads.find(
+                      (thread) =>
+                        thread.environmentId === environmentId &&
+                        thread.source.runDestination?.accountId === query.data?.accountId &&
+                        thread.source.runDestination?.existingThreadId === chat.id,
+                    )?.id
+                  }
                 />
               ))
             ) : (

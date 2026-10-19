@@ -2880,6 +2880,11 @@ export default function Sidebar() {
     // Subagent child threads live in the parent's Agents surface, not the
     // sidebar roster (v2 models them as real threads with lineage).
     const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys).filter((thread) => {
+      if (
+        thread.source.runDestination?.origin === "automatic" &&
+        thread.environmentId === primaryEnvironmentId
+      )
+        return false;
       if (sectionFilter === null) return true;
       const project = projectByKey.get(`${thread.environmentId}:${thread.projectId}`);
       return (
@@ -2991,6 +2996,7 @@ export default function Sidebar() {
     nowMinute,
     sectionFilter,
     projectByKey,
+    primaryEnvironmentId,
     optimisticDrop,
     scopedProjectKeys,
     serverConfigs,

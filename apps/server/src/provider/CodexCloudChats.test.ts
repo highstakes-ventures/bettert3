@@ -756,3 +756,99 @@ it.effect.each(["codex", "missing-codex"])(
       }),
     ),
 );
+
+const boundThread = {
+  ...thread,
+  model: "gpt-6-astra-wm",
+  canAcceptDirectInput: null,
+  environments: [{ environmentId: "remote-runtime", cwd: "/workspace/existing" }],
+};
+
+it.effect(
+  "reads a verified existing destination and paginates its history with one authentication",
+  () => {
+    wire.response = (method, params) =>
+      method === "thread/read"
+        ? { thread: boundThread }
+        : {
+            data: [{ id: params.cursor ? "older" : "newer", status: "completed", items: [] }],
+            nextCursor: params.cursor ? null : "older-page",
+          };
+    return Effect.gen(function* () {
+      const cloud = yield* CodexCloudChats.CodexCloudChats;
+      const snapshot = yield* cloud.snapshot({ accountId: "account-a", threadId });
+      expect(snapshot.destination).toMatchObject({
+        existingThreadId: threadId,
+        accountId: "account-a",
+        cwd: "/workspace/existing",
+      });
+      expect(snapshot.destination.environmentConfigId).toBeUndefined();
+      expect(snapshot.turns.map((turn) => turn.id)).toEqual(["older", "newer"]);
+      expect(wire.authInputs).toHaveLength(1);
+      expect(wire.requests.some((request) => request.method === "thread/start")).toBe(false);
+    }).pipe(provide);
+  },
+);
+
+it.effect("stops history pagination at a completed turn already projected", () => {
+  wire.response = (method) =>
+    method === "thread/read"
+      ? { thread: boundThread }
+      : {
+          data: [
+            { id: "live", status: "inProgress", items: [] },
+            { id: "known", status: "completed", items: [] },
+          ],
+          nextCursor: "unneeded",
+        };
+  return Effect.gen(function* () {
+    const cloud = yield* CodexCloudChats.CodexCloudChats;
+    const snapshot = yield* cloud.snapshot(
+      { accountId: "account-a", threadId },
+      new Set(["known"]),
+    );
+    expect(snapshot.turns.map((turn) => turn.id)).toEqual(["live"]);
+    expect(wire.requests.filter((request) => request.method === "thread/turns/list")).toHaveLength(
+      1,
+    );
+  }).pipe(provide);
+});
+
+it.effect.each([
+  { ...boundThread, id: "wrong-thread" },
+  { ...boundThread, canAcceptDirectInput: false },
+  { ...boundThread, environments: [] },
+  { ...boundThread, environments: [...boundThread.environments, ...boundThread.environments] },
+])("refuses an ambiguous or unwritable existing Cloud binding", (invalid) => {
+  wire.response = () => ({ thread: invalid });
+  return Effect.gen(function* () {
+    const cloud = yield* CodexCloudChats.CodexCloudChats;
+    const result = yield* cloud.snapshot({ accountId: "account-a", threadId }).pipe(Effect.result);
+    expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "protocol" } });
+    expect(wire.requests.some((request) => request.method === "thread/turns/list")).toBe(false);
+  }).pipe(provide);
+});
+
+it.effect(
+  "interrupts only the requested active native turn on the authenticated Cloud account",
+  () => {
+    wire.response = (method) =>
+      method === "thread/turns/list"
+        ? { data: [{ id: "active-turn", status: "inProgress", items: [] }], nextCursor: null }
+        : {};
+    return Effect.gen(function* () {
+      const cloud = yield* CodexCloudChats.CodexCloudChats;
+      yield* cloud.interrupt({ accountId: "account-a", threadId, turnId: "active-turn" });
+      expect(wire.requests.filter((request) => request.method === "turn/interrupt")).toEqual([
+        { method: "turn/interrupt", params: { threadId, turnId: "active-turn" } },
+      ]);
+      const switched = yield* cloud
+        .interrupt({ accountId: "another-account", threadId, turnId: "active-turn" })
+        .pipe(Effect.result);
+      expect(switched).toMatchObject({ _tag: "Failure", failure: { reason: "accountChanged" } });
+      expect(wire.requests.filter((request) => request.method === "turn/interrupt")).toHaveLength(
+        1,
+      );
+    }).pipe(provide);
+  },
+);

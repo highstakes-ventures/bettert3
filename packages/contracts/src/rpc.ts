@@ -1,5 +1,7 @@
 import { CloudChatDestinationsResult } from "./cloudChats.ts";
 import {
+  CloudChatOpenInput,
+  CloudChatOpenResult,
   CloudChatListInput,
   CloudChatListResult,
   CloudChatReadInput,
@@ -381,6 +383,7 @@ export const WS_METHODS = {
   cloudChatsDestinations: "cloudChats.destinations",
   cloudChatsList: "cloudChats.list",
   cloudChatsRead: "cloudChats.read",
+  cloudChatsOpen: "cloudChats.open",
   // Project registry methods
   projectsList: "projects.list",
   projectsAdd: "projects.add",
@@ -1902,7 +1905,14 @@ const WsCloudChatsReadRpc = Rpc.make(WS_METHODS.cloudChatsRead, {
   error: Schema.Union([CloudChatError, EnvironmentAuthorizationError]),
 });
 
+const WsCloudChatsOpenRpc = Rpc.make(WS_METHODS.cloudChatsOpen, {
+  payload: CloudChatOpenInput,
+  success: CloudChatOpenResult,
+  error: Schema.Union([CloudChatError, EnvironmentAuthorizationError]),
+});
+
 export const WsRpcGroup = RpcGroup.make(
+  WsCloudChatsOpenRpc,
   WsCloudChatsDestinationsRpc,
   WsCloudChatsListRpc,
   WsCloudChatsReadRpc,

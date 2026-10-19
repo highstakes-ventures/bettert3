@@ -177,3 +177,17 @@ effectIt.effect("reports disconnection after the turn start reply has arrived", 
     }),
   ),
 );
+
+it("keeps imported Cloud conversations on their bound native ID", () => {
+  const binding = { ...destination, environmentConfigId: undefined, existingThreadId: "existing" };
+  expect(() => Transport.cloudRequest({ method: "thread/start", params: {} }, binding)).toThrow();
+  expect(() =>
+    Transport.cloudRequest({ method: "thread/resume", params: { threadId: "other" } }, binding),
+  ).toThrow();
+  expect(
+    Transport.cloudRequest(
+      { method: "thread/resume", params: { threadId: "existing", cwd: "/local" } },
+      binding,
+    ).params,
+  ).toEqual({ threadId: "existing", excludeTurns: true });
+});

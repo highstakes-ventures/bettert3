@@ -13,6 +13,7 @@ vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({}),
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
 }));
+vi.mock("../../state/entities", () => ({ useThreadShells: () => [] }));
 vi.mock("../../state/cloudChats", () => ({ cloudChats: { list: () => null } }));
 vi.mock("../../state/environments", () => ({ usePrimaryEnvironmentId: () => "env" }));
 vi.mock("../../state/query", () => ({
@@ -71,10 +72,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("marks the current automatic chats read without expanding the section or clearing other scopes", async () => {
+it("marks the expanded automatic chats read without collapsing the section or clearing other scopes", async () => {
   const otherKey = cloudChatVisitKey("other-env", "account", "one");
   useUiStateStore.setState({ threadLastVisitedAtById: { [otherKey]: "2026-10-15T08:00:00Z" } });
-  await render();
+  await render(true);
   const action = container.querySelector<HTMLButtonElement>(
     'button[aria-label="Mark all automatic chats as read"]',
   )!;
@@ -90,7 +91,7 @@ it("marks the current automatic chats read without expanding the section or clea
   expect(
     container.querySelector('button[aria-label="Mark all automatic chats as read"]'),
   ).toBeNull();
-  expect(container.querySelector('button[aria-expanded="false"]')).not.toBeNull();
+  expect(container.querySelector('button[aria-expanded="true"]')).not.toBeNull();
   expect(onToggle).not.toHaveBeenCalled();
 
   state.chats.push(chat("later"));
@@ -151,4 +152,17 @@ it("does not report zero running when an automatic chat's activity is unavailabl
   expect(useUiStateStore.getState().threadLastVisitedAtById).toHaveProperty(
     cloudChatVisitKey("env", "account", "running"),
   );
+});
+
+it("keeps the collapsed count non-interactive while opening the section", async () => {
+  await render(false);
+  expect(
+    container.querySelector('button[aria-label="Mark all automatic chats as read"]'),
+  ).toBeNull();
+  expect(container.textContent).toContain("2 new");
+  await act(() =>
+    container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!.click(),
+  );
+  expect(onToggle).toHaveBeenCalledOnce();
+  expect(useUiStateStore.getState().threadLastVisitedAtById).toEqual({});
 });
