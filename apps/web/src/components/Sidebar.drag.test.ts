@@ -546,13 +546,14 @@ describe("sidebar drag projection", () => {
 
   it("scales the label space with the measured root scale", () => {
     const items = [pinnedHeader, thread("p", "pinned"), divider, thread("a1", "active")];
-    const result = preview(
-      { items, settledOrder: [], settledExpanded: true, boundaryLabelHeight: 16 },
-      "a1",
-      "p",
-      2,
-    );
-    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(32 + 165);
+    const strategy = createSidebarSortingStrategy({
+      items,
+      settledOrder: [],
+      settledExpanded: true,
+      boundaryLabelHeight: 16,
+    });
+    const args = layout(items, "a1", "p", 2, 60);
+    expect(strategy({ ...args, index: 2 })?.y).toBe(32 + 121);
   });
 
   it("keeps the pinned header above the first arriving pin", () => {
@@ -733,8 +734,8 @@ describe("sidebar drag projection", () => {
       0.75,
     );
     expect(result.get(sidebarMarkerId("pinned-header"))).toEqual(stationary);
-    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(62.5);
-    expect(result.get(sidebarMarkerId("active-placeholder"))?.y).toBe(62.5);
+    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(46);
+    expect(result.get(sidebarMarkerId("active-placeholder"))?.y).toBe(46);
   });
 
   it("updates the projection when the target or measured geometry changes", () => {
