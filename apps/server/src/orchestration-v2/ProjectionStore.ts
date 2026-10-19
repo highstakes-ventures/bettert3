@@ -1525,8 +1525,9 @@ export function threadShellFromProjection(
   const executionSession = projection.providerSessions.find(
     (session) => session.id === executionProviderThread?.providerSessionId,
   );
+  const executionDestination = executionSession?.executionDestination;
   return {
-    executionDestination: executionSession?.executionDestination,
+    ...(executionDestination === undefined ? {} : { executionDestination }),
     ...(projection.thread.runDestination === undefined
       ? {}
       : { runDestination: projection.thread.runDestination }),
@@ -1800,7 +1801,9 @@ function shellFromState(input: {
   readonly visibleItemCount: number;
 }): OrchestrationV2ThreadShell {
   return {
-    executionDestination: input.state.executionDestination,
+    ...(input.state.executionDestination === undefined
+      ? {}
+      : { executionDestination: input.state.executionDestination }),
     ...(input.state.thread.runDestination === undefined
       ? {}
       : { runDestination: input.state.thread.runDestination }),

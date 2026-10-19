@@ -10,6 +10,7 @@ import {
   MessageId,
   type ModelSelection,
   type OrchestrationV2ProviderThread,
+  OrchestrationV2ThreadShell,
   type OrchestrationV2ThreadShellSnapshot,
   NodeId,
   ProjectId,
@@ -766,10 +767,14 @@ const assertExecutionDestinationShell = Effect.gen(function* () {
     assert.deepEqual(shell?.executionDestination, destination);
     assert.isUndefined(shell?.runDestination);
     const projection = yield* store.getThreadProjection(threadId);
-    assert.deepEqual(
-      ProjectionStore.threadShellFromProjection(projection).executionDestination,
-      destination,
-    );
+    const projectedShell = ProjectionStore.threadShellFromProjection(projection);
+    assert.deepEqual(projectedShell.executionDestination, destination);
+    const wireCodec = Schema.toCodecJson(OrchestrationV2ThreadShell);
+    for (const summary of [shell!, projectedShell]) {
+      const wire = yield* Schema.encodeEffect(wireCodec)(summary);
+      const received = yield* Schema.decodeEffect(wireCodec)(wire);
+      assert.deepEqual(received.executionDestination, destination);
+    }
   }
   yield* store.apply({
     id: EventId.make("event:execution-destination:inactive"),
