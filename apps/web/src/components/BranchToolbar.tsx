@@ -28,6 +28,7 @@ import {
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { ThreadExecutionIcon, executionLocationLabel } from "./ThreadExecutionIcon";
 import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
 import {
   type EnvMode,
@@ -147,6 +148,9 @@ function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string)
 interface RunContextSelectorProps {
   cloudDestinations?: readonly CodexCloudDestination[] | undefined;
   runDestination?: CodexCloudDestination | null | undefined;
+  executionLocation?:
+    | { readonly executionDestination?: CodexCloudDestination | null | undefined }
+    | undefined;
   onCloudDestinationChange?: ((destination: CodexCloudDestination) => void) | undefined;
 
   displayMode?: "toolbar" | "panel";
@@ -181,6 +185,7 @@ const RunContextSelector = memo(function RunContextSelector({
   availableEnvironments,
   cloudDestinations,
   runDestination,
+  executionLocation,
   onCloudDestinationChange,
   showEnvironmentPicker,
   showEnvironmentIndicator,
@@ -241,48 +246,64 @@ const RunContextSelector = memo(function RunContextSelector({
       </TooltipPopup>
     </Tooltip>
   );
-  const icon = showEnvironmentIndicator ? (
-    // Button's base styles apply `-mx-0.5` to descendant SVGs, which eats 4px
-    // out of whatever gap we set. mx-0! cancels that so gap-0.5 reads as 2px.
-    <span className="inline-flex shrink-0 items-center gap-0.5">
-      <Tooltip>
-        <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
-          {runDestination ? (
-            <CloudIcon
-              className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
-              aria-hidden="true"
-            />
-          ) : autoEnvironmentLabel ? (
-            <ScaleIcon
-              className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
-              aria-hidden="true"
-            />
-          ) : (
-            <EnvironmentMachineIcon
-              kind={activeEnvironment?.machine ?? "server"}
-              className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
-            />
-          )}
-        </TooltipTrigger>
-        <TooltipPopup>
-          {runDestination
-            ? `Codex Cloud · ${runDestination.name}`
-            : (autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on")}
-        </TooltipPopup>
-      </Tooltip>
-      {!runDestination ? workspaceIcon : null}
-    </span>
-  ) : (
-    workspaceIcon
-  );
+  const runtimeLabel = executionLocation
+    ? executionLocationLabel(executionLocation.executionDestination, activeEnvironment?.label)
+    : undefined;
+  const icon =
+    showEnvironmentIndicator || executionLocation ? (
+      // Button's base styles apply `-mx-0.5` to descendant SVGs, which eats 4px
+      // out of whatever gap we set. mx-0! cancels that so gap-0.5 reads as 2px.
+      <span className="inline-flex shrink-0 items-center gap-0.5">
+        <Tooltip>
+          <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+            {executionLocation ? (
+              <ThreadExecutionIcon
+                destination={executionLocation.executionDestination}
+                machine={activeEnvironment?.machine ?? "server"}
+                className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
+              />
+            ) : runDestination ? (
+              <CloudIcon
+                className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
+                aria-hidden="true"
+              />
+            ) : autoEnvironmentLabel ? (
+              <ScaleIcon
+                className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
+                aria-hidden="true"
+              />
+            ) : (
+              <EnvironmentMachineIcon
+                kind={activeEnvironment?.machine ?? "server"}
+                className={isPanel ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3 shrink-0 mx-0!"}
+              />
+            )}
+          </TooltipTrigger>
+          <TooltipPopup>
+            {runtimeLabel ??
+              (runDestination
+                ? `Codex Cloud · ${runDestination.name}`
+                : (autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"))}
+          </TooltipPopup>
+        </Tooltip>
+        {!(executionLocation ? executionLocation.executionDestination !== null : runDestination)
+          ? workspaceIcon
+          : null}
+      </span>
+    ) : (
+      workspaceIcon
+    );
   const triggerContent = (
     <>
       {icon}
       <ComposerContextLabel displayMode={displayMode}>
-        {runDestination
-          ? `Codex Cloud · ${runDestination.name}`
-          : (autoEnvironmentLabel ??
-            (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel))}
+        {runtimeLabel ??
+          (runDestination
+            ? `Codex Cloud · ${runDestination.name}`
+            : (autoEnvironmentLabel ??
+              (showEnvironmentIndicator
+                ? (activeEnvironment?.label ?? "Run on")
+                : workspaceLabel)))}
       </ComposerContextLabel>
     </>
   );
@@ -783,6 +804,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             availableEnvironments={availableEnvironments}
             cloudDestinations={cloudDestinations}
             runDestination={runDestination}
+            executionLocation={serverThread?.source}
             onCloudDestinationChange={onCloudDestinationChange}
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={activeEnvironmentOption !== null}
@@ -840,6 +862,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             availableEnvironments={availableEnvironments}
             cloudDestinations={cloudDestinations}
             runDestination={runDestination}
+            executionLocation={serverThread?.source}
             onCloudDestinationChange={onCloudDestinationChange}
             showEnvironmentPicker={showEnvironmentPicker}
             showEnvironmentIndicator={showEnvironmentIndicator}
@@ -871,6 +894,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                 availableEnvironments={availableEnvironments}
                 cloudDestinations={cloudDestinations}
                 runDestination={runDestination}
+                executionLocation={serverThread?.source}
                 onCloudDestinationChange={onCloudDestinationChange}
                 {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
               />

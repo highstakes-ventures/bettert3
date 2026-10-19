@@ -1816,7 +1816,7 @@ describe("orchestration v2 provider switching", () => {
     ),
   );
 
-  it.live("resumes a queued account switch without requiring a portable handoff", () =>
+  it.live.each([false, true])("guards queued account switch, legacy: %s", (legacy) =>
     Effect.scoped(
       Effect.gen(function* () {
         const cwd = yield* checkpointWorkspace("queued-account-switch");
@@ -1856,7 +1856,9 @@ describe("orchestration v2 provider switching", () => {
               const adapter = adapters.find((candidate) => candidate.instanceId === instanceId);
               return adapter === undefined
                 ? Effect.fail(
-                    new ProviderAdapterRegistry.ProviderAdapterRegistryLookupError({ instanceId }),
+                    new ProviderAdapterRegistry.ProviderAdapterRegistryLookupError({
+                      instanceId,
+                    }),
                   )
                 : Effect.succeed(adapter);
             },
@@ -1865,7 +1867,9 @@ describe("orchestration v2 provider switching", () => {
               const adapter = adapters.find((candidate) => candidate.instanceId === instanceId);
               return adapter === undefined
                 ? Effect.fail(
-                    new ProviderAdapterRegistry.ProviderAdapterRegistryLookupError({ instanceId }),
+                    new ProviderAdapterRegistry.ProviderAdapterRegistryLookupError({
+                      instanceId,
+                    }),
                   )
                 : Effect.succeed({
                     driver: CODEX_DRIVER,
@@ -1934,6 +1938,28 @@ describe("orchestration v2 provider switching", () => {
           )?.nativeThreadRef;
           assert.isNotNull(sourceNativeRef);
           const now = yield* DateTime.now;
+          if (legacy) {
+            const source = queued.providerThreads.find(
+              (thread) => thread.id === queued.runs[0]?.providerThreadId,
+            )!;
+            yield* eventSink.write({
+              events: [
+                {
+                  id: EventId.make("event:queued-account-switch:legacy-runtime"),
+                  type: "provider-thread.updated",
+                  threadId: queuedThreadId,
+                  providerInstanceId: CODEX_MODEL_SELECTION.instanceId,
+                  occurredAt: now,
+                  payload: {
+                    ...source,
+                    providerSessionId: ProviderSessionId.make(
+                      "provider-session:provider-instance:codex:shared",
+                    ),
+                  },
+                },
+              ],
+            });
+          }
           yield* eventSink.write({
             events: [
               {
@@ -1947,6 +1973,19 @@ describe("orchestration v2 provider switching", () => {
               },
             ],
           });
+          if (legacy) {
+            yield* orchestrator.resumeQueuedRuns;
+            const preserved = yield* orchestrator.getThreadProjection(queuedThreadId);
+            assert.equal(preserved.runs[1]?.status, "failed");
+            assert.deepEqual(
+              preserved.providerThreads.find(
+                (thread) => thread.id === queued.runs[0]?.providerThreadId,
+              )?.nativeThreadRef,
+              sourceNativeRef,
+            );
+            assert.lengthOf(preserved.attempts, queued.attempts.length);
+            return preserved;
+          }
           yield* orchestrator.resumeQueuedRuns;
           yield* orchestrator.streamStoredEvents.pipe(
             Stream.filter(
@@ -1987,13 +2026,13 @@ describe("orchestration v2 provider switching", () => {
           projection.runs.map((run) => [run.providerInstanceId, run.status]),
           [
             [CODEX_MODEL_SELECTION.instanceId, "completed"],
-            [alternateSelection.instanceId, "completed"],
+            [alternateSelection.instanceId, legacy ? "failed" : "completed"],
           ],
         );
         assert.lengthOf(projection.contextHandoffs, 0);
         assert.deepEqual(
           (yield* Ref.get(capturedTurns)).map((turn) => turn.text),
-          ["First account turn", "Alternate account turn"],
+          legacy ? ["First account turn"] : ["First account turn", "Alternate account turn"],
         );
       }),
     ),

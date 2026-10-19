@@ -197,6 +197,7 @@ import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { ThreadExecutionIcon } from "./ThreadExecutionIcon";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import {
   buildDraftActionMenuItems,
@@ -504,23 +505,20 @@ function SidebarThreadTooltip({
             <div className="min-w-0 truncate text-foreground/75">{projectDisplayName}</div>
           </div>
         ) : null}
-        {thread.source.runDestination || environmentLabel ? (
-          <div className="flex min-w-0 items-center gap-2">
-            {thread.source.runDestination ? (
-              <CloudIcon className="size-3 shrink-0 stroke-muted-foreground" />
-            ) : (
-              <EnvironmentMachineIcon
-                kind={environmentMachine}
-                className="size-3 shrink-0 stroke-muted-foreground"
-              />
-            )}
-            <div className="min-w-0 truncate text-foreground/75">
-              {thread.source.runDestination
-                ? `Codex Cloud · ${thread.source.runDestination.name}`
-                : environmentLabel}
-            </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <ThreadExecutionIcon
+            destination={thread.source.executionDestination}
+            machine={environmentMachine}
+            className="size-3 shrink-0 stroke-muted-foreground"
+          />
+          <div className="min-w-0 truncate text-foreground/75">
+            {thread.source.executionDestination === undefined
+              ? "Execution location unknown"
+              : thread.source.executionDestination === null
+                ? (environmentLabel ?? "T3 host")
+                : `Codex Cloud · ${thread.source.executionDestination.name}`}
           </div>
-        ) : null}
+        </div>
         {thread.branch ? (
           <div className="flex min-w-0 items-center gap-2">
             <GitBranchIcon className="size-3 shrink-0 stroke-muted-foreground" />
@@ -1423,7 +1421,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     : thread.modelSelection.model;
 
   const showsScratchMachine =
-    !thread.source.runDestination && !thread.branch && props.scratchMachineLabel !== null;
+    thread.source.executionDestination === null &&
+    !thread.branch &&
+    props.scratchMachineLabel !== null;
 
   const detailsTooltip = (
     <SidebarThreadTooltip
@@ -2266,15 +2266,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               >
                 {!showsScratchMachine ? (
                   <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                    {thread.source.runDestination ? (
-                      <CloudIcon aria-hidden className="size-3.5" />
-                    ) : (
-                      <EnvironmentMachineIcon
-                        aria-hidden
-                        kind={props.environmentMachine}
-                        className="size-3.5"
-                      />
-                    )}
+                    <ThreadExecutionIcon
+                      aria-hidden
+                      destination={thread.source.executionDestination}
+                      machine={props.environmentMachine}
+                      className="size-3.5"
+                    />
                   </span>
                 ) : null}
                 <SidebarProviderStack

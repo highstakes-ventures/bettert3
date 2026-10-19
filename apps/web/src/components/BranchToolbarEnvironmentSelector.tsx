@@ -7,6 +7,7 @@ import { CloudIcon, ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
 import type { EnvironmentOption } from "./BranchToolbar.logic";
+import { ThreadExecutionIcon, executionLocationLabel } from "./ThreadExecutionIcon";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
@@ -21,6 +22,9 @@ import {
 interface BranchToolbarEnvironmentSelectorProps {
   cloudDestinations?: readonly CodexCloudDestination[] | undefined;
   runDestination?: CodexCloudDestination | null | undefined;
+  executionLocation?:
+    | { readonly executionDestination?: CodexCloudDestination | null | undefined }
+    | undefined;
   onCloudDestinationChange?: ((destination: CodexCloudDestination) => void) | undefined;
 
   autoEnvironmentLabel?: string | undefined;
@@ -39,6 +43,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   availableEnvironments,
   cloudDestinations,
   runDestination,
+  executionLocation,
   onCloudDestinationChange,
   onEnvironmentChange,
 }: BranchToolbarEnvironmentSelectorProps) {
@@ -47,10 +52,18 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     return availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
   }, [availableEnvironments, environmentId]);
 
-  const destinationLabel = runDestination
-    ? `Codex Cloud · ${runDestination.name}`
-    : (autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on");
-  const destinationIcon = runDestination ? (
+  const destinationLabel = executionLocation
+    ? executionLocationLabel(executionLocation.executionDestination, activeEnvironment?.label)
+    : runDestination
+      ? `Codex Cloud · ${runDestination.name}`
+      : (autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on");
+  const destinationIcon = executionLocation ? (
+    <ThreadExecutionIcon
+      destination={executionLocation.executionDestination}
+      machine={activeEnvironment?.machine ?? "server"}
+      className="size-3 shrink-0"
+    />
+  ) : runDestination ? (
     <CloudIcon className="size-3 shrink-0" aria-hidden="true" />
   ) : (
     <EnvironmentMachineIcon
@@ -88,21 +101,13 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         data-composer-context-control
       >
         {destinationIcon}
-        <ComposerContextLabel>
-          {runDestination
-            ? `Codex Cloud · ${runDestination.name}`
-            : (activeEnvironment?.label ?? "Run on")}
-        </ComposerContextLabel>
+        <ComposerContextLabel>{destinationLabel}</ComposerContextLabel>
       </span>
     );
     return (
       <Tooltip>
         <TooltipTrigger render={lockedRow} />
-        <TooltipPopup>
-          {runDestination
-            ? `Codex Cloud · ${runDestination.name}`
-            : (activeEnvironment?.label ?? "Run on")}
-        </TooltipPopup>
+        <TooltipPopup>{destinationLabel}</TooltipPopup>
       </Tooltip>
     );
   }
@@ -145,7 +150,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             destinationIcon
           )}
           <ComposerContextLabel>
-            <SelectValue />
+            {executionLocation ? destinationLabel : <SelectValue />}
           </ComposerContextLabel>
         </TooltipTrigger>
         <TooltipPopup>{destinationLabel}</TooltipPopup>

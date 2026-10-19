@@ -14,7 +14,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
-  type ProviderSessionId,
+  ProviderSessionId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -171,6 +171,160 @@ const ExclusiveCapabilities: OrchestrationV2ProviderCapabilities = {
     supportsMultipleProviderThreadsPerSession: false,
   },
 };
+
+it.effect.each([true, false])(
+  "rejects cross-destination session reuse, cloud first: %s",
+  (cloudFirst) =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      yield* Effect.gen(function* () {
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const sink = yield* EventSink.EventSinkV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("destination-isolation");
+        yield* sink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+        const providerSessionId = idAllocator.derive.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+        });
+        const cloudPolicy = {
+          ...runtimePolicy,
+          cwd: "/workspace",
+          runDestination: {
+            kind: "codexCloud" as const,
+            accountId: "account-a",
+            environmentConfigId: "workspace-a",
+            name: "Cloud workspace",
+            cwd: "/workspace",
+          },
+        };
+        yield* manager.open({
+          threadId,
+          providerSessionId,
+          modelSelection,
+          runtimePolicy: cloudFirst ? cloudPolicy : runtimePolicy,
+        });
+        const result = yield* manager
+          .open({
+            threadId,
+            providerSessionId,
+            modelSelection,
+            runtimePolicy: cloudFirst ? runtimePolicy : cloudPolicy,
+          })
+          .pipe(Effect.exit);
+        assert.isTrue(
+          Exit.isFailure(result),
+          "a different destination must never reuse the runtime",
+        );
+        assert.equal((yield* Ref.get(state)).openCount, 1);
+      }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 60_000 })), Effect.scoped);
+    }),
+);
+
+it.effect("isolates concurrent runtimes by execution destination", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    yield* Effect.gen(function* () {
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const sink = yield* EventSink.EventSinkV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("concurrent-destinations");
+      yield* sink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+      });
+      const cloud = {
+        kind: "codexCloud" as const,
+        accountId: "a",
+        environmentConfigId: "x",
+        name: "Cloud",
+        cwd: "/workspace",
+      };
+      const destinations = [
+        undefined,
+        cloud,
+        { ...cloud, accountId: "b" },
+        { ...cloud, environmentConfigId: "y" },
+        { ...cloud, cwd: "/other" },
+      ];
+      const open = (runDestination: typeof cloud | undefined) =>
+        manager.open({
+          threadId,
+          modelSelection,
+          providerSessionId: idAllocator.derive.providerSession({
+            providerInstanceId: modelSelection.instanceId,
+            ...(runDestination ? { runDestination } : {}),
+          }),
+          runtimePolicy: {
+            ...runtimePolicy,
+            ...(runDestination ? { runDestination, cwd: runDestination.cwd } : {}),
+          },
+        });
+      const runtimes = yield* Effect.all(destinations.map(open), { concurrency: "unbounded" });
+      assert.equal(new Set(runtimes).size, destinations.length);
+      assert.equal((yield* Ref.get(state)).openCount, destinations.length);
+      for (const [index, runtime] of runtimes.entries()) {
+        assert.deepEqual(runtime.providerSession.executionDestination, destinations[index] ?? null);
+      }
+      assert.strictEqual(yield* open({ ...cloud, name: "Renamed" }), runtimes[1]);
+      const cloudRuntime = runtimes[1]!;
+      const notification = yield* cloudRuntime.events.pipe(
+        Stream.runHead,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      const queue = (yield* Ref.get(state)).eventQueues.get(
+        String(cloudRuntime.providerSessionId),
+      )!;
+      yield* Queue.offer(queue, {
+        type: "provider_session.updated",
+        driver: CODEX_DRIVER,
+        providerSession: {
+          ...makeProviderSession({ providerSessionId: cloudRuntime.providerSessionId, now }),
+          status: "ready",
+        },
+      });
+      const received = yield* Fiber.join(notification);
+      assert.isTrue(Option.isSome(received));
+      if (Option.isSome(received) && received.value.type === "provider_session.updated") {
+        assert.deepEqual(received.value.providerSession.executionDestination, cloud);
+      } else assert.fail("Expected a provider session notification");
+      const projected = yield* (yield* ProjectionStore.ProjectionStoreV2).getThreadProjection(
+        threadId,
+      );
+      assert.deepEqual(
+        projected.providerSessions.find((session) => session.id === cloudRuntime.providerSessionId)
+          ?.executionDestination,
+        cloud,
+      );
+      yield* manager.close(cloudRuntime.providerSessionId);
+      const invalidResume = yield* manager
+        .open({
+          threadId,
+          modelSelection,
+          providerSessionId: cloudRuntime.providerSessionId,
+          runtimePolicy,
+          resumeFromSession: cloudRuntime.providerSession,
+        })
+        .pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(invalidResume));
+      const legacyResume = yield* manager
+        .open({
+          threadId,
+          modelSelection,
+          providerSessionId: ProviderSessionId.make(
+            "provider-session:provider-instance:codex:shared",
+          ),
+          runtimePolicy,
+          initialNativeThreadId: "cloud-native",
+        })
+        .pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(legacyResume));
+      assert.equal((yield* Ref.get(state)).openCount, destinations.length);
+    }).pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 60_000 })), Effect.scoped);
+  }),
+);
 
 interface TestProviderRuntimeState {
   readonly openCount: number;

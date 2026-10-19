@@ -6,6 +6,7 @@ import {
   CheckpointId,
   CheckpointRef,
   CheckpointScopeId,
+  type CodexCloudDestination,
   MessageId,
   type ModelSelection,
   type OrchestrationV2ProviderThread,
@@ -690,7 +691,105 @@ it.effect("memory shell snapshots scope to one project", () =>
   ),
 );
 
+const assertExecutionDestinationShell = Effect.gen(function* () {
+  const store = yield* ProjectionStore.ProjectionStoreV2;
+  const threadId = yield* addRolledBackRecoveryCandidate("execution-destination");
+  const now = yield* DateTime.now;
+  const thread = (yield* store.getThreadProjection(threadId)).thread;
+  const cloud: CodexCloudDestination = {
+    kind: "codexCloud",
+    accountId: "account",
+    environmentConfigId: "workspace",
+    name: "Cloud workspace",
+    cwd: "/workspace",
+  };
+  const runtimeThreadId = ProviderThreadId.make("runtime-thread:execution-destination");
+  const sessionId = ProviderSessionId.make("session:execution-destination");
+  const session = {
+    id: sessionId,
+    driver,
+    providerInstanceId,
+    status: "ready" as const,
+    cwd: "/workspace",
+    model: modelSelection.model,
+    capabilities: CodexProviderCapabilitiesV2,
+    createdAt: now,
+    updatedAt: now,
+    lastError: null,
+  };
+  yield* store.apply({
+    id: EventId.make("event:execution-destination:runtime-thread"),
+    type: "provider-thread.updated",
+    threadId,
+    driver,
+    providerInstanceId,
+    occurredAt: now,
+    payload: {
+      id: runtimeThreadId,
+      driver,
+      providerInstanceId,
+      providerSessionId: sessionId,
+      appThreadId: threadId,
+      ownerNodeId: null,
+      nativeThreadRef: null,
+      nativeConversationHeadRef: null,
+      status: "idle",
+      firstRunOrdinal: null,
+      lastRunOrdinal: null,
+      handoffIds: [],
+      forkedFrom: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  });
+  yield* store.apply({
+    id: EventId.make("event:execution-destination:active"),
+    type: "thread.metadata-updated",
+    threadId,
+    occurredAt: now,
+    payload: { ...thread, activeProviderThreadId: runtimeThreadId },
+  });
+  for (const [index, destination] of [cloud, null, undefined].entries()) {
+    yield* store.apply({
+      id: EventId.make(`event:execution-destination:session:${index}`),
+      type: "provider-session.attached",
+      threadId,
+      driver,
+      providerInstanceId,
+      occurredAt: now,
+      payload: {
+        ...session,
+        ...(destination === undefined ? {} : { executionDestination: destination }),
+      },
+    });
+    const shell = yield* store.getThreadShell(threadId);
+    assert.deepEqual(shell?.executionDestination, destination);
+    assert.isUndefined(shell?.runDestination);
+    const projection = yield* store.getThreadProjection(threadId);
+    assert.deepEqual(
+      ProjectionStore.threadShellFromProjection(projection).executionDestination,
+      destination,
+    );
+  }
+  yield* store.apply({
+    id: EventId.make("event:execution-destination:inactive"),
+    type: "thread.metadata-updated",
+    threadId,
+    occurredAt: now,
+    payload: { ...thread, activeProviderThreadId: null },
+  });
+  assert.isUndefined((yield* store.getThreadShell(threadId))?.executionDestination);
+});
+
+it.effect("memory shells use recorded runtime destination including local and unknown", () =>
+  assertExecutionDestinationShell.pipe(Effect.provide(ProjectionStore.layerMemory)),
+);
+
 it.layer(layerTest)("ProjectionStoreV2", (it) => {
+  it.effect(
+    "SQL shells use recorded runtime destination including local and unknown",
+    () => assertExecutionDestinationShell,
+  );
   it.effect(
     "SQL recovery selects unfinished runless native subagents",
     () => runlessNativeSubagentNeedsRecovery,

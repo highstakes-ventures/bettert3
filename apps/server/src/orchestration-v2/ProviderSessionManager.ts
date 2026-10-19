@@ -2016,7 +2016,17 @@ export const layerWithOptions = (
       const startEventPump = (entry: LiveSessionEntry) => {
         let stoppedByProvider = false;
         return entry.runtime.events.pipe(
-          Stream.runForEach((event) => {
+          Stream.runForEach((rawEvent) => {
+            const event: ProviderAdapter.ProviderAdapterV2Event =
+              rawEvent.type === "provider_session.updated"
+                ? {
+                    ...rawEvent,
+                    providerSession: {
+                      ...rawEvent.providerSession,
+                      executionDestination: entry.runtime.providerSession.executionDestination,
+                    },
+                  }
+                : rawEvent;
             if (shutdownSignal.received) return Effect.void;
             if (
               event.type === "provider_session.updated" &&
@@ -2172,8 +2182,47 @@ export const layerWithOptions = (
                 }
               }
               const key = sessionKey(input.providerSessionId);
+              if (
+                input.initialNativeThreadId !== undefined &&
+                !IdAllocator.sharedSessionMatchesDestination(
+                  input.providerSessionId,
+                  input.runtimePolicy.runDestination,
+                )
+              ) {
+                return yield* new ProviderSessionOpenError({
+                  instanceId: input.modelSelection.instanceId,
+                  providerSessionId: input.providerSessionId,
+                  cause:
+                    "Preserve and recover this legacy or different-runtime conversation before resuming its native ID.",
+                });
+              }
+              if (
+                input.resumeFromSession?.executionDestination !== undefined &&
+                IdAllocator.executionDestinationKey(
+                  input.resumeFromSession.executionDestination,
+                ) !== IdAllocator.executionDestinationKey(input.runtimePolicy.runDestination)
+              ) {
+                return yield* new ProviderSessionOpenError({
+                  instanceId: input.modelSelection.instanceId,
+                  providerSessionId: input.providerSessionId,
+                  cause:
+                    "The saved provider session belongs to a different execution destination. Preserve and recover its conversation before continuing.",
+                });
+              }
               const existing = (yield* Ref.get(sessions)).get(key);
               if (existing !== undefined) {
+                if (
+                  IdAllocator.executionDestinationKey(
+                    existing.runtime.providerSession.executionDestination,
+                  ) !== IdAllocator.executionDestinationKey(input.runtimePolicy.runDestination)
+                ) {
+                  return yield* new ProviderSessionOpenError({
+                    instanceId: input.modelSelection.instanceId,
+                    providerSessionId: input.providerSessionId,
+                    cause:
+                      "The existing provider session runs at a different execution destination. Start a destination-scoped session instead.",
+                  });
+                }
                 const attached = existing.attachedThreadIds.has(input.threadId);
                 if (!attached && !existing.supportsMultipleProviderThreads) {
                   return yield* new ProviderSessionOpenError({
@@ -2222,7 +2271,7 @@ export const layerWithOptions = (
               // The previous session's agent scope must not explain this
               // session's failures, even when this provider runs without one.
               yield* agentScope.clear(input.threadId);
-              const runtime = yield* adapter
+              const openedRuntime = yield* adapter
                 .openSession({
                   threadId: input.threadId,
                   providerSessionId: input.providerSessionId,
@@ -2280,6 +2329,13 @@ export const layerWithOptions = (
                     attributes: { provider: adapter.driver, operation: "open" },
                   }),
                 );
+              const runtime = {
+                ...openedRuntime,
+                providerSession: {
+                  ...openedRuntime.providerSession,
+                  executionDestination: input.runtimePolicy.runDestination ?? null,
+                },
+              };
               const eventSubscribers = yield* Ref.make<
                 ReadonlyMap<number, Queue.Queue<ProviderSessionEventSignal, Cause.Done>>
               >(new Map());

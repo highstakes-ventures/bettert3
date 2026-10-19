@@ -1073,3 +1073,77 @@ it.effect("validates section ownership and preserves assignment across lifecycle
     assert.isNull((yield* projections.getThreadShell(threadId))?.sectionId);
   }).pipe(Effect.provide(layerTest)),
 );
+
+it.effect("does not move a legacy native conversation onto a destination-scoped transport", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const now = yield* DateTime.now;
+    const threadId = ThreadId.make("legacy-runtime-recovery");
+    const providerThreadId = ProviderThreadId.make("legacy-runtime-conversation");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("legacy-create"),
+      threadId,
+      projectId: ProjectId.make("legacy-runtime-project"),
+      title: "Legacy runtime",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* projections.apply({
+      id: EventId.make("legacy-provider-thread"),
+      type: "provider-thread.updated",
+      threadId,
+      occurredAt: now,
+      payload: {
+        id: providerThreadId,
+        driver: adapter.driver,
+        providerInstanceId: instanceId,
+        providerSessionId: ProviderSessionId.make(
+          "provider-session:provider-instance:codex:shared",
+        ),
+        appThreadId: threadId,
+        ownerNodeId: null,
+        nativeThreadRef: { driver: adapter.driver, nativeId: "cloud-native", strength: "strong" },
+        nativeConversationHeadRef: null,
+        status: "idle",
+        firstRunOrdinal: null,
+        lastRunOrdinal: null,
+        handoffIds: [],
+        forkedFrom: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    const thread = (yield* projections.getThreadProjection(threadId)).thread;
+    yield* projections.apply({
+      id: EventId.make("legacy-active-thread"),
+      type: "thread.metadata-updated",
+      threadId,
+      occurredAt: now,
+      payload: { ...thread, activeProviderThreadId: providerThreadId },
+    });
+    const result = yield* orchestrator
+      .dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("legacy-continue"),
+        threadId,
+        messageId: MessageId.make("legacy-continue"),
+        text: "Continue",
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(Effect.exit);
+    assert.equal(result._tag, "Failure");
+    const preserved = yield* projections.getThreadProjection(threadId);
+    assert.equal(preserved.providerThreads[0]?.nativeThreadRef?.nativeId, "cloud-native");
+    assert.isEmpty(preserved.runs);
+  }).pipe(Effect.provide(layerTest)),
+);

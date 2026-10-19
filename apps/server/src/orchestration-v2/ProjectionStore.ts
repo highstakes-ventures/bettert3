@@ -40,6 +40,7 @@ import type {
   RunAttemptId,
 } from "@t3tools/contracts";
 import {
+  CodexCloudDestination,
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
   OrchestrationV2CheckpointJson as OrchestrationV2CheckpointJsonSchema,
   OrchestrationV2CheckpointScopeJson as OrchestrationV2CheckpointScopeJsonSchema,
@@ -1032,6 +1033,7 @@ type ShellThreadRow = {
   readonly active_run_id: string | null;
   readonly activity_run_status: string | null;
   readonly activity_run_started_at: string | null;
+  readonly execution_destination_json: string | null;
   readonly last_error: string | null;
   readonly terminal_failure_payload_json: string | null;
   readonly blocking_run_id: string | null;
@@ -1148,6 +1150,9 @@ const decodeNodePayload = Schema.decodeUnknownEffect(
 );
 const decodeSubagentPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2SubagentJsonSchema),
+);
+const decodeExecutionDestinationPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.NullOr(CodexCloudDestination)),
 );
 const decodeProviderSessionPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2ProviderSessionJsonSchema),
@@ -1514,7 +1519,14 @@ export function threadShellFromProjection(
     runs: projection.runs,
     pullRequests: projection.thread.pullRequests,
   });
+  const executionProviderThread = projection.providerThreads.find(
+    (thread) => thread.id === projection.thread.activeProviderThreadId,
+  );
+  const executionSession = projection.providerSessions.find(
+    (session) => session.id === executionProviderThread?.providerSessionId,
+  );
   return {
+    executionDestination: executionSession?.executionDestination,
     ...(projection.thread.runDestination === undefined
       ? {}
       : { runDestination: projection.thread.runDestination }),
@@ -1655,6 +1667,7 @@ function isActivityRunForShell(
 }
 
 type ShellThreadState = {
+  readonly executionDestination: OrchestrationV2ThreadShell["executionDestination"];
   readonly thread: OrchestrationV2ThreadProjection["thread"];
   readonly latestRunId: RunId | null;
   readonly latestRunStatus: OrchestrationV2ShellThreadStatus;
@@ -1787,6 +1800,7 @@ function shellFromState(input: {
   readonly visibleItemCount: number;
 }): OrchestrationV2ThreadShell {
   return {
+    executionDestination: input.state.executionDestination,
     ...(input.state.thread.runDestination === undefined
       ? {}
       : { runDestination: input.state.thread.runDestination }),
@@ -5355,6 +5369,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 LIMIT 1
               ) AS activity_run_started_at,
               (
+                SELECT json_quote(json_extract(execution_session.payload_json, '$.executionDestination'))
+                FROM orchestration_v2_projection_provider_threads runtime_thread
+                JOIN orchestration_v2_projection_provider_sessions execution_session
+                  ON execution_session.provider_session_id = runtime_thread.provider_session_id
+                WHERE runtime_thread.provider_thread_id = t.active_provider_thread_id
+                  AND json_type(execution_session.payload_json, '$.executionDestination') IS NOT NULL
+                LIMIT 1
+              ) AS execution_destination_json,
+              (
                 SELECT json_extract(session.payload_json, '$.lastError')
                 -- Keep bindings outermost: one provider instance can hold every session.
                 FROM orchestration_v2_projection_provider_session_bindings binding
@@ -5872,6 +5895,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           }),
         ];
         return {
+          executionDestination:
+            row.execution_destination_json === null
+              ? undefined
+              : yield* decodeExecutionDestinationPayload(row.execution_destination_json),
           thread,
           latestRunId,
           latestRunStatus,

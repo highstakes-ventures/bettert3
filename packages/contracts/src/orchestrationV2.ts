@@ -813,6 +813,8 @@ export const OrchestrationV2CheckpointScope = Schema.Struct({
 export type OrchestrationV2CheckpointScope = typeof OrchestrationV2CheckpointScope.Type;
 
 export const OrchestrationV2ProviderSession = Schema.Struct({
+  /** Opened transport destination. Absent on legacy records; null means the T3 host. */
+  executionDestination: Schema.optional(Schema.NullOr(CodexCloudDestination)),
   id: ProviderSessionId,
   driver: ProviderDriverKind,
   providerInstanceId: ProviderInstanceId,
@@ -1941,6 +1943,8 @@ export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
 export const OrchestrationV2ThreadShell = Schema.Struct({
+  /** Actual attached runtime, not the thread's requested runDestination. */
+  executionDestination: Schema.optional(Schema.NullOr(CodexCloudDestination)),
   runDestination: Schema.optional(CodexCloudDestination),
   ...OrchestrationV2CreationFields,
   id: ThreadId,

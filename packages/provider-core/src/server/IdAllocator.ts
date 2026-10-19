@@ -1,4 +1,5 @@
 import {
+  type CodexCloudDestination,
   CheckpointId,
   CheckpointScopeId,
   CommandId,
@@ -129,6 +130,7 @@ export interface IdAllocatorV2Allocate {
 export interface IdAllocatorV2Derive {
   readonly providerSession: (input: {
     readonly providerInstanceId: ProviderInstanceId;
+    readonly runDestination?: CodexCloudDestination;
   }) => ProviderSessionId;
   readonly delegatedTaskNode: (input: { readonly commandId: CommandId }) => NodeId;
   readonly delegatedTaskThread: (input: { readonly commandId: CommandId }) => ThreadId;
@@ -252,10 +254,39 @@ const randomId =
     );
 
 /** Deterministic id derivations; pure, so callers that only derive need no allocator. */
+export function executionDestinationKey(destination?: CodexCloudDestination | null): string {
+  return destination == null
+    ? "local"
+    : JSON.stringify([
+        destination.kind,
+        destination.accountId,
+        destination.environmentConfigId,
+        destination.cwd,
+      ]);
+}
+
+/** Native IDs can move between account overlays, but not execution destinations. */
+export function sharedSessionMatchesDestination(
+  sessionId: ProviderSessionId,
+  destination?: CodexCloudDestination | null,
+): boolean {
+  return (
+    !sessionId.startsWith("provider-session:provider-instance:") ||
+    sessionId.split(":")[3] !== "shared" ||
+    sessionId.endsWith(`:shared:${encodePart(executionDestinationKey(destination))}`)
+  );
+}
+
 export const derive: IdAllocatorV2Derive = {
   providerSession: (input) =>
     ProviderSessionId.make(
-      joinId("provider-session", "provider-instance", input.providerInstanceId, "shared"),
+      joinId(
+        "provider-session",
+        "provider-instance",
+        input.providerInstanceId,
+        "shared",
+        executionDestinationKey(input.runDestination),
+      ),
     ),
   delegatedTaskNode: (input) => NodeId.make(joinId("node", "delegated-task", input.commandId)),
   delegatedTaskThread: (input) =>
