@@ -4672,6 +4672,41 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   ) =>
     Effect.gen(function* () {
       let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      const isLocalRecovery = command.recoverLocalProviderThreadId !== undefined;
+      if (isLocalRecovery) {
+        const source = projection.providerThreads.find(
+          (thread) => thread.id === projection.thread.activeProviderThreadId,
+        );
+        const sourceSession = projection.providerSessions.find(
+          (session) => session.id === source?.providerSessionId,
+        );
+        if (
+          source === undefined ||
+          source.id !== command.recoverLocalProviderThreadId ||
+          source.nativeThreadRef === null ||
+          (source.providerSessionId !== null &&
+            IdAllocator.sharedSessionMatchesDestination(source.providerSessionId, null) &&
+            sourceSession?.executionDestination == null) ||
+          projection.thread.runDestination != null ||
+          projection.thread.archivedAt !== null ||
+          projection.thread.deletedAt !== null ||
+          projection.runs.some((run) => isBlockingRun(run) || run.status === "queued") ||
+          command.dispatchMode.type !== "start_immediately" ||
+          (command.deliveryIntent !== undefined && command.deliveryIntent !== "auto") ||
+          command.restartContinuationOfRunId !== undefined ||
+          command.usageLimitContinuationOfRunId !== undefined ||
+          command.manualContinuationOfRunId !== undefined ||
+          pendingForkTransferForThread(projection) !== undefined ||
+          pendingMergeBackTransfersForThread(projection).length > 0
+        ) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause:
+              "Local recovery requires an idle Local chat and its current legacy or different-runtime native conversation.",
+          });
+        }
+      }
       if (
         projection.thread.runDestination &&
         (command.attachments.some((attachment) => !isProviderNativeImageAttachment(attachment)) ||
@@ -5426,6 +5461,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // Account overlays share native history. Selection commands may already
       // have updated the app thread, so classify against the native thread's owner.
       const canResumeAcrossInstances =
+        !isLocalRecovery &&
         isProviderSwitch &&
         activeProviderThread.nativeThreadRef !== null &&
         (yield* providerSwitchService
@@ -5447,7 +5483,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (
         pendingForkTransfer === undefined &&
         pendingMergeBackTransfer === undefined &&
-        !isProviderSwitch
+        !isProviderSwitch &&
+        !isLocalRecovery
       ) {
         const adapter = yield* providerAdapters.get(modelSelection.instanceId).pipe(
           Effect.mapError(
@@ -5844,8 +5881,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             }),
         ),
       );
-      const targetProviderThread =
-        isProviderSwitch && !canResumeAcrossInstances
+      const targetProviderThread = isLocalRecovery
+        ? undefined
+        : isProviderSwitch && !canResumeAcrossInstances
           ? rootProviderThreadsForProvider(projection, modelSelection.instanceId)[0]
           : activeProviderThread;
       const providerSessionId = yield* mapDispatchError(command)(
@@ -5995,13 +6033,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 ),
               );
       const requiresFullProviderSwitchContext =
-        isProviderSwitch && pendingMergeBackTransfer !== undefined;
+        isLocalRecovery || (isProviderSwitch && pendingMergeBackTransfer !== undefined);
       const targetLastCompletedRun =
         targetProviderThread === undefined
           ? undefined
           : lastDeliveredRunForProviderThread(projection, targetProviderThread.id);
       const providerSwitchCoveredRuns =
-        !isProviderSwitch || canResumeAcrossInstances || latestHandoffRun === undefined
+        (!isProviderSwitch && !isLocalRecovery) ||
+        canResumeAcrossInstances ||
+        latestHandoffRun === undefined
           ? []
           : projection.runs.filter(
               (run) =>
@@ -6090,7 +6130,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 ),
               );
       const legacyImportRecoveryHandoff =
-        isProviderSwitch &&
+        (isProviderSwitch || isLocalRecovery) &&
         !canResumeAcrossInstances &&
         latestCompletedRun === undefined &&
         legacyImportItems.length > 0

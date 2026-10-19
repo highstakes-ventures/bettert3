@@ -1816,6 +1816,235 @@ describe("orchestration v2 provider switching", () => {
     ),
   );
 
+  it.live.each([
+    "legacy",
+    "cloud",
+    "failed",
+    "interrupted",
+    "stale",
+    "active",
+    "destination",
+    "local",
+    "deferred",
+  ] as const)("recovers an existing chat locally: %s", (scenario) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = yield* checkpointWorkspace(`local-recovery-${scenario}`);
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const injectedHistory = yield* Ref.make<ReadonlyArray<unknown>>([]);
+        const generation = yield* Ref.make(0);
+        const failResumeOnce = yield* Ref.make(false);
+        const registry = ProviderAdapterRegistry.layerFromAdapters([
+          makeTestAdapter({
+            instanceId: CODEX_MODEL_SELECTION.instanceId,
+            driver: CODEX_DRIVER,
+            capabilities: CodexProviderCapabilitiesV2,
+            modelSelection: CODEX_MODEL_SELECTION,
+            responseByRunOrdinal: {
+              1: "Saved assistant context",
+              2: "Recovered locally",
+              3: "Local follow-up",
+            },
+            ...(scenario === "failed" ? { failedRunOrdinals: new Set([1]) } : {}),
+            ...(scenario === "interrupted" ? { interruptedRunOrdinals: new Set([1]) } : {}),
+            capturedTurns,
+            injectedHistory,
+            nativeThreadGeneration: generation,
+            failResumeOnce,
+          }),
+        ]);
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const sink = yield* EventSink.EventSinkV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          const dispatch = (ordinal: number) => ({
+            type: "message.dispatch" as const,
+            createdBy: "user" as const,
+            creationSource: "web" as const,
+            commandId: CommandId.make(`recovery:send:${ordinal}`),
+            threadId,
+            messageId: MessageId.make(`recovery:message:${ordinal}`),
+            text: ordinal === 1 ? "Saved user context" : "Continue the approved work locally",
+            attachments: [],
+            dispatchMode: { type: "start_immediately" as const },
+          });
+          const wait = (ordinal: number) =>
+            orchestrator.streamStoredEvents.pipe(
+              Stream.filter(
+                ({ event }) =>
+                  event.type === "run.updated" &&
+                  event.payload.ordinal === ordinal &&
+                  ["completed", "failed", "interrupted"].includes(event.payload.status),
+              ),
+              Stream.runHead,
+              Effect.andThen(worker.drain()),
+            );
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make("recovery:create"),
+            threadId,
+            projectId,
+            title: "Recover original chat",
+            modelSelection: CODEX_MODEL_SELECTION,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: cwd,
+          });
+          yield* orchestrator.dispatch(dispatch(1));
+          yield* wait(1);
+          const initial = yield* orchestrator.getThreadProjection(threadId);
+          const source = initial.providerThreads.find(
+            (thread) => thread.id === initial.thread.activeProviderThreadId,
+          )!;
+          const now = yield* DateTime.now;
+          yield* sink.write({
+            events: [
+              {
+                id: EventId.make("recovery:source"),
+                type: "provider-thread.updated",
+                threadId,
+                providerInstanceId: CODEX_MODEL_SELECTION.instanceId,
+                occurredAt: now,
+                payload: {
+                  ...source,
+                  providerSessionId:
+                    scenario === "local"
+                      ? source.providerSessionId
+                      : ProviderSessionId.make(
+                          scenario === "cloud"
+                            ? "provider-session:provider-instance:codex:shared:cloud-other"
+                            : "provider-session:provider-instance:codex:shared",
+                        ),
+                },
+              },
+              ...(scenario === "active"
+                ? [
+                    {
+                      id: EventId.make("recovery:active"),
+                      type: "run.updated" as const,
+                      threadId,
+                      runId: initial.runs[0]!.id,
+                      providerInstanceId: CODEX_MODEL_SELECTION.instanceId,
+                      occurredAt: now,
+                      payload: {
+                        ...initial.runs[0]!,
+                        status: "running" as const,
+                        completedAt: null,
+                      },
+                    },
+                  ]
+                : []),
+              ...(scenario === "destination"
+                ? [
+                    {
+                      id: EventId.make("recovery:destination"),
+                      type: "thread.metadata-updated" as const,
+                      threadId,
+                      occurredAt: now,
+                      payload: {
+                        ...initial.thread,
+                        runDestination: {
+                          kind: "codexCloud" as const,
+                          accountId: "account",
+                          environmentConfigId: "environment",
+                          name: "Cloud",
+                          cwd: "/workspace",
+                        },
+                      },
+                    },
+                  ]
+                : []),
+            ],
+          });
+          const before = yield* orchestrator.getThreadProjection(threadId);
+          yield* Ref.set(injectedHistory, []);
+          yield* Ref.set(failResumeOnce, true);
+          const command = {
+            ...dispatch(2),
+            recoverLocalProviderThreadId:
+              scenario === "stale" ? ProviderThreadId.make("stale-source") : source.id,
+            ...(scenario === "deferred" ? { dispatchMode: { type: "defer_start" as const } } : {}),
+          };
+          if (!["legacy", "cloud", "failed", "interrupted"].includes(scenario)) {
+            const result = yield* orchestrator.dispatch(command).pipe(Effect.result);
+            assert.equal(result._tag, "Failure");
+            const after = yield* orchestrator.getThreadProjection(threadId);
+            assert.deepEqual(after.runs, before.runs);
+            assert.deepEqual(after.providerThreads, before.providerThreads);
+            assert.deepEqual(after.messages, before.messages);
+            assert.lengthOf(yield* Ref.get(capturedTurns), 1);
+            return;
+          }
+          yield* orchestrator.dispatch(command);
+          yield* wait(2);
+          const recovered = yield* orchestrator.getThreadProjection(threadId);
+          assert.equal(recovered.thread.id, threadId);
+          assert.deepEqual(
+            recovered.runs.map((run) => run.status),
+            [
+              scenario === "failed" || scenario === "interrupted" ? scenario : "completed",
+              "completed",
+            ],
+          );
+          assert.deepEqual(
+            recovered.providerThreads.find((thread) => thread.id === source.id),
+            before.providerThreads.find((thread) => thread.id === source.id),
+          );
+          const target = recovered.providerThreads.find(
+            (thread) => thread.id === recovered.thread.activeProviderThreadId,
+          )!;
+          assert.notEqual(target.id, source.id);
+          assert.notDeepEqual(target.nativeThreadRef, source.nativeThreadRef);
+          assert.isNull(
+            recovered.providerSessions.find((session) => session.id === target.providerSessionId)
+              ?.executionDestination,
+          );
+          assert.equal(recovered.contextHandoffs.at(-1)?.strategy, "full_thread_summary");
+          assert.isTrue(yield* Ref.get(failResumeOnce));
+          const delivered =
+            JSON.stringify(yield* Ref.get(injectedHistory)) +
+            JSON.stringify((yield* Ref.get(capturedTurns)).slice(1));
+          assert.include(delivered, "Saved user context");
+          assert.include(delivered, "Saved assistant context");
+          assert.isTrue(
+            initial.messages.every((old) =>
+              recovered.messages.some(
+                (message) => message.id === old.id && message.text === old.text,
+              ),
+            ),
+          );
+          yield* Ref.set(failResumeOnce, false);
+          yield* orchestrator.dispatch(dispatch(3));
+          yield* wait(3);
+          const followup = yield* orchestrator.getThreadProjection(threadId);
+          assert.equal(followup.runs.at(-1)?.status, "completed");
+          assert.equal(followup.thread.activeProviderThreadId, target.id);
+        }).pipe(
+          Effect.provide(
+            ProviderReplayHarness.layerWithRegistry(
+              {
+                name: `local-recovery-${scenario}`,
+                runtimePolicyOverride: {
+                  cwd,
+                  approvalPolicy: "never",
+                  sandboxPolicy: {
+                    type: "readOnly",
+                    access: { type: "fullAccess" },
+                    networkAccess: false,
+                  },
+                },
+              },
+              registry,
+            ),
+          ),
+        );
+      }),
+    ),
+  );
+
   it.live.each([false, true])("guards queued account switch, legacy: %s", (legacy) =>
     Effect.scoped(
       Effect.gen(function* () {
