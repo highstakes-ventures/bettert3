@@ -2054,21 +2054,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   onChange={(id) => props.onSectionChange(threadRef, id)}
                 />
               ) : null}
-              <span
-                aria-hidden
-                className="pointer-events-none inline-flex shrink-0 items-center gap-1 text-sidebar-muted-foreground/70"
-              >
-                <ThreadExecutionIcon
-                  aria-hidden
-                  destination={thread.source.executionDestination}
-                  machine={props.environmentMachine}
-                  className="size-3.5 shrink-0"
-                />
-                <SidebarProviderStack
-                  thread={thread}
-                  providerEntryByInstanceId={props.providerEntryByInstanceId}
-                />
-              </span>
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping
@@ -2241,6 +2226,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   </span>
                 </span>
               ) : null}
+              <span
+                aria-hidden
+                className="pointer-events-none inline-flex shrink-0 items-center gap-1 text-sidebar-muted-foreground/70"
+              >
+                <ThreadExecutionIcon
+                  aria-hidden
+                  destination={thread.source.executionDestination}
+                  machine={props.environmentMachine}
+                  className="size-3.5 shrink-0"
+                />
+                <SidebarProviderStack
+                  thread={thread}
+                  providerEntryByInstanceId={props.providerEntryByInstanceId}
+                />
+              </span>
             </div>
           </div>
           {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
