@@ -1685,6 +1685,7 @@ const layer: Layer.Layer<
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
   | McpProviderSessions.McpProviderSessions
+  | Path.Path
   | ServerConfig
 > = Layer.effect(
   ProviderAdapter.ProviderAdapterV2,
@@ -1747,6 +1748,39 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
     threadId === null ? Effect.succeed(undefined) : mcpSessions.read(threadId);
   const { clientFactory, crypto, fileSystem, idAllocator, serverConfig } = adapterOptions;
   const continuationRequests = adapterOptions.continuationRequests;
+  const path = yield* Path.Path;
+  // Codex rejects symlinked sandbox roots, including aliases inherited by old tasks.
+  // Resolve missing writable directories through their nearest existing parent.
+  const resolvePath: FileSystem.FileSystem["realPath"] = (value) =>
+    fileSystem.realPath(value).pipe(
+      Effect.catchIf(
+        (cause) => cause.reason._tag === "NotFound" && path.dirname(value) !== value,
+        () =>
+          resolvePath(path.dirname(value)).pipe(
+            Effect.map((parent) => path.join(parent, path.basename(value))),
+          ),
+      ),
+    );
+  const resolveRuntimePolicy = Effect.fnUntraced(function* (
+    policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+  ) {
+    // Cloud paths belong to the remote filesystem, never the T3 host.
+    if (policy.runDestination) return policy;
+    const cwd = policy.cwd === null ? null : yield* resolvePath(policy.cwd);
+    if (policy.sandboxPolicy === undefined) return { ...policy, cwd };
+    const sandboxPolicy = yield* decodeTurnSandboxPolicy(policy.sandboxPolicy);
+    return {
+      ...policy,
+      cwd,
+      sandboxPolicy:
+        sandboxPolicy?.type === "workspaceWrite" && sandboxPolicy.writableRoots !== undefined
+          ? {
+              ...sandboxPolicy,
+              writableRoots: yield* Effect.forEach(sandboxPolicy.writableRoots, resolvePath),
+            }
+          : sandboxPolicy,
+    };
+  });
 
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: adapterOptions.instanceId,
@@ -1755,6 +1789,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
     planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
     openSession: (input) =>
       Effect.gen(function* () {
+        input = {
+          ...input,
+          runtimePolicy: yield* resolveRuntimePolicy(input.runtimePolicy).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapter.ProviderAdapterOpenSessionError({
+                  driver: CODEX_PROVIDER,
+                  providerSessionId: input.providerSessionId,
+                  cause,
+                }),
+            ),
+          ),
+        };
         const scope = yield* Scope.Scope;
         const resolvedRuntime =
           adapterOptions.resolveRuntime === undefined
@@ -6373,7 +6420,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const turnStartParams = yield* buildCodexTurnStartParams({
               nativeThreadId: threadId,
               codexInput,
-              runtimePolicy: turnInput.runtimePolicy,
+              runtimePolicy: yield* resolveRuntimePolicy(turnInput.runtimePolicy),
               modelSelection: turnInput.modelSelection,
               hasT3Mcp: mcpSession !== undefined,
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
@@ -6664,14 +6711,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   : mcpSessions.read(threadInput.threadId),
               ),
               Effect.flatMap((mcpSession) =>
-                client.request(
-                  "thread/start",
-                  codexThreadRuntimeParams({
-                    mcpSession,
-                    modelSelection: threadInput.modelSelection,
-                    runtimePolicy: threadInput.runtimePolicy,
-                  }),
-                ),
+                Effect.gen(function* () {
+                  return yield* client.request(
+                    "thread/start",
+                    codexThreadRuntimeParams({
+                      mcpSession,
+                      modelSelection: threadInput.modelSelection,
+                      runtimePolicy: yield* resolveRuntimePolicy(threadInput.runtimePolicy),
+                    }),
+                  );
+                }),
               ),
               Effect.map((response): OrchestrationV2ProviderThread =>
                 providerThreadFromCodexThread({
@@ -6708,9 +6757,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ...(threadInput.modelSelection === undefined
                     ? {}
                     : { modelSelection: threadInput.modelSelection }),
-                  ...(threadInput.runtimePolicy === undefined
-                    ? {}
-                    : { runtimePolicy: threadInput.runtimePolicy }),
+                  runtimePolicy: yield* resolveRuntimePolicy(
+                    threadInput.runtimePolicy ?? input.runtimePolicy,
+                  ),
                 }),
               });
               const response = yield* ensureInitialized.pipe(
@@ -7488,9 +7537,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       ...(threadInput.modelSelection === undefined
                         ? {}
                         : { modelSelection: threadInput.modelSelection }),
-                      ...(threadInput.runtimePolicy === undefined
-                        ? {}
-                        : { runtimePolicy: threadInput.runtimePolicy }),
+                      runtimePolicy: yield* resolveRuntimePolicy(
+                        threadInput.runtimePolicy ?? input.runtimePolicy,
+                      ),
                     }),
                   }),
                 ),

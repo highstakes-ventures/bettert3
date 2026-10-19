@@ -1627,6 +1627,8 @@ function codexReplayPreamble(input: {
   readonly prompt: string;
   /** Text the adapter should send, when it differs from what the user typed. */
   readonly sentPrompt?: string;
+  readonly cwd?: string;
+  readonly sandboxPolicy?: unknown;
   readonly images?: ReadonlyArray<{ readonly type: "image"; readonly url: string }>;
 }): Array<CodexReplay.CodexAppServerReplayEntry> {
   return [
@@ -1722,11 +1724,11 @@ function codexReplayPreamble(input: {
             { type: "text", text: input.sentPrompt ?? input.prompt },
             ...(input.images ?? []),
           ],
-          cwd: "/workspace",
+          cwd: input.cwd ?? "/workspace",
           model: "gpt-5.4",
           approvalPolicy: "never",
           approvalsReviewer: "user",
-          sandboxPolicy: { type: "dangerFullAccess" },
+          sandboxPolicy: input.sandboxPolicy ?? { type: "dangerFullAccess" },
           summary: "detailed",
         },
       },
@@ -2072,6 +2074,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       >;
       readonly disconnected: Deferred.Deferred<void>;
     },
+    policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy = CODEX_TEST_RUNTIME_POLICY,
   ) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -2143,7 +2146,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       });
       const threadId = ThreadId.make(`thread-${transcript.scenario}`);
       const runtimePolicy = {
-        ...CODEX_TEST_RUNTIME_POLICY,
+        ...policy,
         ...(cloud ? { runDestination: cloud.destination } : {}),
       };
       const runtime = yield* adapter.openSession({
@@ -2207,6 +2210,111 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         firstTerminal: Deferred.await(firstTerminal),
       };
     });
+
+  it.effect.each([false, true])(
+    "resolves workspace aliases only for local Codex requests, Cloud=%s",
+    (cloud) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const temp = yield* fs.makeTempDirectoryScoped();
+        const workspace = path.join(temp, "workspace");
+        const alias = path.join(temp, "alias");
+        yield* fs.makeDirectory(workspace);
+        yield* fs.symlink(workspace, alias);
+        const realWorkspace = yield* fs.realPath(workspace);
+        const expectedWorkspace = cloud ? alias : realWorkspace;
+        const policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy = {
+          ...CODEX_TEST_RUNTIME_POLICY,
+          cwd: alias,
+          ...(cloud
+            ? {
+                runDestination: {
+                  kind: "codexCloud" as const,
+                  accountId: "account",
+                  environmentConfigId: "workspace",
+                  name: "Cloud",
+                  cwd: alias,
+                },
+              }
+            : {}),
+          sandboxPolicy: {
+            type: "workspaceWrite",
+            writableRoots: [alias, path.join(alias, "new", "nested")],
+            networkAccess: false,
+            excludeSlashTmp: true,
+            excludeTmpdirEnvVar: true,
+          },
+        };
+        const seen: Array<string> = [];
+        const harness = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario: "canonical-workspace",
+            entries: [
+              ...codexReplayPreamble({
+                nativeThreadId: "canonical-workspace",
+                nativeTurnId: "canonical-turn",
+                prompt: "Check the browser",
+                cwd: expectedWorkspace,
+                sandboxPolicy: {
+                  ...(policy.sandboxPolicy as object),
+                  writableRoots: [expectedWorkspace, path.join(expectedWorkspace, "new", "nested")],
+                },
+              }),
+              {
+                type: "emit_inbound",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: "canonical-workspace",
+                    turn: makeCodexReplayTurn({ id: "canonical-turn", status: "completed" }),
+                  },
+                },
+              },
+            ],
+          }),
+          undefined,
+          (method, params) =>
+            Effect.sync(() => {
+              if (method !== "thread/start" && method !== "turn/start") return;
+              assert.isObject(params);
+              const request = params as { cwd: string; sandboxPolicy?: unknown };
+              assert.equal(request.cwd, expectedWorkspace);
+              if (method === "turn/start") {
+                assert.deepEqual(request.sandboxPolicy, {
+                  type: "workspaceWrite",
+                  networkAccess: false,
+                  excludeSlashTmp: true,
+                  excludeTmpdirEnvVar: true,
+                  writableRoots: [expectedWorkspace, path.join(expectedWorkspace, "new", "nested")],
+                });
+              }
+              seen.push(method);
+            }),
+          undefined,
+          undefined,
+          policy,
+        );
+        yield* harness.runtime.startTurn({
+          ...makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("canonical-attempt"),
+            text: "Check the browser",
+          }),
+          runtimePolicy: policy,
+        });
+        yield* harness.firstTerminal;
+        assert.deepEqual(seen, ["thread/start", "turn/start"]);
+        assert.equal(policy.cwd, alias);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
 
   it.effect("retains early Cloud replies without adopting replayed turn starts", () =>
     Effect.gen(function* () {
@@ -5266,7 +5374,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bg-stop-workspace-" });
+        const cwd = yield* fs
+          .makeTempDirectoryScoped({ prefix: "t3-bg-stop-workspace-" })
+          .pipe(Effect.flatMap(fs.realPath));
         const localTranscript = yield* decodeReplayTranscriptJson(
           (yield* encodeReplayTranscriptJson(transcript)).replaceAll(
             yield* encodeStringJson("/workspace"),
@@ -5398,7 +5508,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "t3-bg-stale-workspace-" });
+        const cwd = yield* fs
+          .makeTempDirectoryScoped({ prefix: "t3-bg-stale-workspace-" })
+          .pipe(Effect.flatMap(fs.realPath));
         const staleTranscript = makeCodexReplayTranscript({
           scenario: "codex-bg-stop-untracked",
           entries: [
