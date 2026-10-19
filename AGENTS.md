@@ -104,7 +104,16 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 
 For authorized mobile verification, a missing or outdated native client is a build step, not a blocker. Run `node scripts/mobile-native-client.ts ensure <ios|android> <device-id>` on the simulator host before starting Metro. It checks the local Expo fingerprint and builds/installs when needed. See `test-t3-mobile` for the full workflow.
 
+## Development workflow
+
+- BetterT3 is maintained in `highstakes-ventures/bettert3`. Use its `main` branch as the trunk.
+- Land small, validated commits directly on `main`. Do not require routine pull requests or long-lived feature branches.
+- Fetch the fork's current `main` before publishing and reconcile concurrent changes. Preserve unrelated work and never force-push the trunk.
+- Treat `pingdotgg/t3code` as upstream. Keep upstream imports separate from BetterT3 feature delivery.
+
 ## Pull requests
+
+These rules apply when Joseph explicitly requests a pull request, including contributions to upstream T3 Code.
 
 - Never make a PR unless the developer explicitly asks you to do so.
 - Conventional commit titles, plain language: `fix(web): new threads no longer spike CPU`.
@@ -130,7 +139,7 @@ Most code changes do not need an internal documentation change. Agents can read 
 
 - Do not commit implementation plans, research notes, or agent scratch files. Keep temporary working material outside the worktree. `.plans/` is gitignored only as a safety net for legacy tooling.
 - Track active maintainer work in the GitHub issue or project item that owns it. External proposals follow `CONTRIBUTING.md` and belong in Ideas discussions.
-- A merged PR is the implementation record. Close or update its tracking item when the work lands; do not preserve a second checklist in the repository.
+- The landed commits are the implementation record. Close or update any tracking item when the work lands; do not preserve a second checklist in the repository.
 
 ## How it works
 
