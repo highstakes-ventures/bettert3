@@ -1,5 +1,10 @@
-import type { OrchestrationV2ThreadProjection, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  OrchestrationV2ProjectedTurnItem,
+  OrchestrationV2ThreadProjection,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import {
@@ -20,6 +25,48 @@ import { arrayElementsEqual, parseThreadKey, threadKey } from "./entities.ts";
 const EMPTY_VISIBLE_TURN_ITEMS: OrchestrationV2ThreadProjection["visibleTurnItems"] = Object.freeze(
   [],
 );
+
+const decodeCloudCompletion = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      agentContextJson: Schema.String,
+      completion: Schema.Struct({ report: Schema.String }),
+    }),
+  ),
+);
+
+function createCloudReportProjector() {
+  const cache = new WeakMap<OrchestrationV2ProjectedTurnItem, OrchestrationV2ProjectedTurnItem>();
+  let previous: OrchestrationV2ThreadProjection["visibleTurnItems"] | undefined;
+  let result = EMPTY_VISIBLE_TURN_ITEMS;
+  return (rows: OrchestrationV2ThreadProjection["visibleTurnItems"]) => {
+    if (rows === previous) return result;
+    previous = rows;
+    let changed = false;
+    const projected = rows.map((row) => {
+      let next = cache.get(row);
+      if (next === undefined) {
+        next = row;
+        const item = row.item;
+        if (
+          item.type === "assistant_message" &&
+          !item.streaming &&
+          item.text.trimStart().startsWith("{") &&
+          item.text.includes('"agentContextJson"')
+        ) {
+          const decoded = decodeCloudCompletion(item.text);
+          if (Option.isSome(decoded) && decoded.value.completion.report.trim())
+            next = { ...row, item: { ...item, text: decoded.value.completion.report } };
+        }
+        cache.set(row, next);
+      }
+      changed ||= next !== row;
+      return next;
+    });
+    result = changed ? projected : rows;
+    return result;
+  };
+}
 
 export function createEnvironmentThreadDetailAtoms<E>(
   threadStateAtom: (
@@ -52,9 +99,15 @@ export function createEnvironmentThreadDetailAtoms<E>(
 
   const visibleTurnItemsAtomFamily = Atom.family((key: string) => {
     const projectQuestionHistory = createQuestionHistoryProjector();
+    const projectCloudReports = createCloudReportProjector();
     return Atom.make((get): OrchestrationV2ThreadProjection["visibleTurnItems"] => {
       const projection = Option.getOrNull(get(threadStateValueAtomFamily(key)).data);
-      return projection === null ? EMPTY_VISIBLE_TURN_ITEMS : projectQuestionHistory(projection);
+      if (projection === null) return EMPTY_VISIBLE_TURN_ITEMS;
+      const rows = projectQuestionHistory(projection);
+      const destination = projection.thread.runDestination;
+      return destination?.kind === "codexCloud" && destination.origin === "automatic"
+        ? projectCloudReports(rows)
+        : rows;
     }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-visible-turn-items:${key}`));
   });
 

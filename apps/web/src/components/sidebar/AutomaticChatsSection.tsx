@@ -16,16 +16,19 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 function AutomaticChatRow({
   chat,
   environmentId,
+  accountId,
   unopened,
   normalThreadId,
 }: {
   chat: CloudChatSummary;
   environmentId: string;
+  accountId: string;
   unopened: boolean;
   normalThreadId: string | undefined;
 }) {
   const params = useParams({ strict: false });
   const { setOpenMobile } = useSidebar();
+  const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   const active =
     ("cloudThreadId" in params &&
       params.cloudThreadId === chat.id &&
@@ -40,9 +43,23 @@ function AutomaticChatRow({
   return (
     <li className="list-none">
       <Link
-        to="/cloud/$cloudEnvironmentId/$cloudThreadId"
-        params={{ cloudEnvironmentId: environmentId, cloudThreadId: chat.id }}
-        onClick={() => setOpenMobile(false)}
+        {...(normalThreadId
+          ? {
+              to: "/$environmentId/$threadId",
+              params: { environmentId, threadId: normalThreadId },
+            }
+          : {
+              to: "/cloud/$cloudEnvironmentId/$cloudThreadId",
+              params: { cloudEnvironmentId: environmentId, cloudThreadId: chat.id },
+            })}
+        onClick={() => {
+          setOpenMobile(false);
+          if (normalThreadId)
+            markThreadVisited(
+              cloudChatVisitKey(environmentId, accountId, chat.id),
+              new Date().toISOString(),
+            );
+        }}
         aria-current={active ? "page" : undefined}
         aria-label={`${chat.title}${chat.repository ? `, ${chat.repository}` : ""}${unopened ? ", new" : ""}${running ? ", running" : ""}`}
         className={cn(
@@ -85,7 +102,8 @@ export function AutomaticChatsSection({
   const query = useEnvironmentQuery(
     environmentId ? cloudChats.list({ environmentId, input: {} }) : null,
   );
-  const rows = (query.error ? [] : (query.data?.chats ?? []))
+  const data = query.data;
+  const rows = (query.error ? [] : (data?.chats ?? []))
     .filter((chat) => chat.origin === "automatic")
     .toSorted(
       (a, b) =>
@@ -99,18 +117,18 @@ export function AutomaticChatsSection({
     : runningLabel;
   const isUnopened = (chat: CloudChatSummary) =>
     !!environmentId &&
-    !!query.data &&
-    isUnopenedAutomaticChat(chat, environmentId, query.data.accountId, visits);
+    !!data &&
+    isUnopenedAutomaticChat(chat, environmentId, data.accountId, visits);
   const unopened = rows.filter(isUnopened).length;
   const markAllRead = () => {
-    if (!expanded || !environmentId || !query.data || query.error) return;
+    if (!expanded || !environmentId || !data || query.error) return;
     const visitedAt = new Date().toISOString();
     for (const chat of rows.filter(isUnopened)) {
-      markThreadVisited(cloudChatVisitKey(environmentId, query.data.accountId, chat.id), visitedAt);
+      markThreadVisited(cloudChatVisitKey(environmentId, data.accountId, chat.id), visitedAt);
     }
   };
   const layoutKey = expanded
-    ? `${query.error ?? ""}:${query.data !== null}:${rows.map((chat) => chat.id).join(":")}`
+    ? `${query.error ?? ""}:${data !== null}:${rows.map((chat) => chat.id).join(":")}`
     : "collapsed";
   useLayoutEffect(() => {
     void layoutKey;
@@ -131,9 +149,9 @@ export function AutomaticChatsSection({
             >
               {query.error ? (
                 "Couldn't refresh"
-              ) : query.data ? (
+              ) : data ? (
                 <>
-                  {query.data.hasMore ? <span>Recent ·</span> : null}
+                  {data.hasMore ? <span>Recent ·</span> : null}
                   {unopened > 0 && expanded ? (
                     <Tooltip>
                       <TooltipTrigger
@@ -159,7 +177,7 @@ export function AutomaticChatsSection({
                   ) : (
                     <span>{unopened} new</span>
                   )}
-                  {!query.data.hasMore ? (
+                  {!data.hasMore ? (
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -194,19 +212,20 @@ export function AutomaticChatsSection({
             >
               {query.error}
             </li>
-          ) : query.data ? (
+          ) : data ? (
             rows.length > 0 ? (
               rows.map((chat) => (
                 <AutomaticChatRow
                   key={chat.id}
                   chat={chat}
                   environmentId={environmentId}
+                  accountId={data.accountId}
                   unopened={isUnopened(chat)}
                   normalThreadId={
                     threads.find(
                       (thread) =>
                         thread.environmentId === environmentId &&
-                        thread.source.runDestination?.accountId === query.data?.accountId &&
+                        thread.source.runDestination?.accountId === data?.accountId &&
                         thread.source.runDestination?.existingThreadId === chat.id,
                     )?.id
                   }
@@ -218,7 +237,7 @@ export function AutomaticChatsSection({
               </li>
             )
           ) : null}
-          {query.data?.hasMore && !query.error ? (
+          {data?.hasMore && !query.error ? (
             <li className="list-none px-2.5 py-2 text-xs text-sidebar-muted-foreground">
               Counts and read actions cover automatic chats among the 100 most recent Cloud chats.
             </li>
