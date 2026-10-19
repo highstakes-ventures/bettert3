@@ -5884,7 +5884,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const targetProviderThread = isLocalRecovery
         ? undefined
         : isProviderSwitch && !canResumeAcrossInstances
-          ? rootProviderThreadsForProvider(projection, modelSelection.instanceId)[0]
+          ? rootProviderThreadsForProvider(projection, modelSelection.instanceId).find(
+              (candidate) =>
+                candidate.nativeThreadRef === null ||
+                candidate.providerSessionId === null ||
+                IdAllocator.sharedSessionMatchesDestination(
+                  candidate.providerSessionId,
+                  projection.thread.runDestination,
+                ),
+            )
           : activeProviderThread;
       const providerSessionId = yield* mapDispatchError(command)(
         providerSessionIdFor({
