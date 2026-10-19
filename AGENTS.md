@@ -1,5 +1,12 @@
 # T3 Code
 
+## Development workflow
+
+- BetterT3 is maintained in `highstakes-ventures/bettert3`. Use its `main` branch as the trunk.
+- Land small, validated commits directly on `main`. Do not require routine pull requests or long-lived feature branches.
+- Fetch the fork's current `main` before publishing and reconcile concurrent changes. Preserve unrelated work and never force-push the trunk.
+- Treat `pingdotgg/t3code` as upstream. Keep upstream imports separate from BetterT3 feature delivery.
+
 T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients.
 
 You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
@@ -103,13 +110,6 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 - Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
 
 For authorized mobile verification, a missing or outdated native client is a build step, not a blocker. Run `node scripts/mobile-native-client.ts ensure <ios|android> <device-id>` on the simulator host before starting Metro. It checks the local Expo fingerprint and builds/installs when needed. See `test-t3-mobile` for the full workflow.
-
-## Development workflow
-
-- BetterT3 is maintained in `highstakes-ventures/bettert3`. Use its `main` branch as the trunk.
-- Land small, validated commits directly on `main`. Do not require routine pull requests or long-lived feature branches.
-- Fetch the fork's current `main` before publishing and reconcile concurrent changes. Preserve unrelated work and never force-push the trunk.
-- Treat `pingdotgg/t3code` as upstream. Keep upstream imports separate from BetterT3 feature delivery.
 
 ## Pull requests
 
