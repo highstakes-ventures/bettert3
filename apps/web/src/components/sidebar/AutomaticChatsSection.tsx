@@ -85,17 +85,11 @@ export function AutomaticChatsSection({
         Number(b.status === "active") - Number(a.status === "active") || b.updatedAt - a.updatedAt,
     );
   const running = rows.filter((chat) => chat.status === "active").length;
-  const activityIncomplete = query.data?.hasMore || rows.some((chat) => chat.status === "unknown");
-  const runningDescription = activityIncomplete
-    ? running > 0
-      ? `At least ${running} running`
-      : "Running count unavailable"
-    : `${running} running`;
-  const runningLabel = activityIncomplete
-    ? running > 0
-      ? `${running}+ running`
-      : "? running"
-    : runningDescription;
+  const activityUnavailable = rows.some((chat) => chat.status === "unknown");
+  const runningLabel = activityUnavailable ? "No status" : `${running} running`;
+  const runningDescription = activityUnavailable
+    ? "Cloud activity couldn't be checked for every automatic chat."
+    : runningLabel;
   const isUnopened = (chat: CloudChatSummary) =>
     !!environmentId &&
     !!query.data &&
@@ -129,9 +123,10 @@ export function AutomaticChatsSection({
               aria-live="polite"
             >
               {query.error ? (
-                "Unavailable"
+                "Couldn't refresh"
               ) : query.data ? (
                 <>
+                  {query.data.hasMore ? <span>Recent ·</span> : null}
                   {unopened > 0 ? (
                     <Tooltip>
                       <TooltipTrigger
@@ -145,7 +140,6 @@ export function AutomaticChatsSection({
                         }
                       >
                         <span className="col-start-1 row-start-1 group-hover/mark-read:invisible group-focus-visible/mark-read:invisible">
-                          {query.data.hasMore ? "At least " : ""}
                           {unopened} new
                         </span>
                         <CheckCheckIcon
@@ -156,22 +150,24 @@ export function AutomaticChatsSection({
                       <TooltipPopup>Mark all as read</TooltipPopup>
                     </Tooltip>
                   ) : (
-                    <span>{query.data.hasMore ? "At least " : ""}0 new</span>
+                    <span>{unopened} new</span>
                   )}
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span
-                          tabIndex={0}
-                          aria-label={runningDescription}
-                          className="pointer-events-auto rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-                        />
-                      }
-                    >
-                      · {runningLabel}
-                    </TooltipTrigger>
-                    <TooltipPopup>{runningDescription}</TooltipPopup>
-                  </Tooltip>
+                  {!query.data.hasMore ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <span
+                            tabIndex={0}
+                            aria-label={activityUnavailable ? "Activity unavailable" : runningLabel}
+                            className="pointer-events-auto rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+                          />
+                        }
+                      >
+                        · {runningLabel}
+                      </TooltipTrigger>
+                      <TooltipPopup>{runningDescription}</TooltipPopup>
+                    </Tooltip>
+                  ) : null}
                 </>
               ) : (
                 "Loading…"
@@ -209,7 +205,7 @@ export function AutomaticChatsSection({
           ) : null}
           {query.data?.hasMore && !query.error ? (
             <li className="list-none px-2.5 py-2 text-xs text-sidebar-muted-foreground">
-              Showing automatic kickoffs among the 100 most recent cloud chats.
+              Counts and read actions cover automatic chats among the 100 most recent Cloud chats.
             </li>
           ) : null}
         </>

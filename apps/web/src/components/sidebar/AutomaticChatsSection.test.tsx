@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 const state = vi.hoisted(() => ({
   accountId: "account",
   chats: [] as CloudChatSummary[],
+  hasMore: false,
 }));
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({}),
@@ -17,7 +18,7 @@ vi.mock("../../state/environments", () => ({ usePrimaryEnvironmentId: () => "env
 vi.mock("../../state/query", () => ({
   useEnvironmentQuery: () => ({
     error: null,
-    data: { accountId: state.accountId, chats: state.chats, hasMore: false },
+    data: { accountId: state.accountId, chats: state.chats, hasMore: state.hasMore },
   }),
 }));
 vi.mock("../ui/sidebar", () => ({ useSidebar: () => ({ setOpenMobile: () => {} }) }));
@@ -59,6 +60,7 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   state.accountId = "account";
+  state.hasMore = false;
   state.chats = [chat("one"), chat("two"), chat("user", "user")];
   onToggle.mockClear();
   useUiStateStore.setState({ threadLastVisitedAtById: {} });
@@ -125,15 +127,28 @@ it("keeps the section toggle independent from its read action", async () => {
 it("does not report zero running when an automatic chat's activity is unavailable", async () => {
   state.chats = [{ ...chat("one"), status: "unknown" }];
   await render();
-  expect(container.querySelector('[aria-label="Running count unavailable"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Activity unavailable"]')).not.toBeNull();
   expect(container.textContent).not.toContain("0 running");
 
   state.chats.push(chat("running"));
   await render();
-  expect(container.querySelector('[aria-label="At least 1 running"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Activity unavailable"]')).not.toBeNull();
+  expect(container.textContent).not.toContain("1 running");
 
   state.chats[0] = { ...chat("one"), status: "idle" };
   await render();
   expect(container.textContent).toContain("· 1 running");
   expect(container.textContent).not.toContain("At least");
+
+  state.hasMore = true;
+  await render(true);
+  expect(container.textContent).toContain("Recent ·");
+  expect(container.textContent).not.toContain("1 running");
+  const action = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Mark all automatic chats as read"]',
+  )!;
+  await act(() => action.click());
+  expect(useUiStateStore.getState().threadLastVisitedAtById).toHaveProperty(
+    cloudChatVisitKey("env", "account", "running"),
+  );
 });
