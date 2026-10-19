@@ -1,16 +1,22 @@
 import { Link, useParams } from "@tanstack/react-router";
 import type { CloudChatSummary } from "@t3tools/contracts";
-import { CheckCheckIcon, WorkflowIcon } from "lucide-react";
-import { useLayoutEffect } from "react";
+import { CheckCheckIcon, CloudIcon, PlusIcon } from "lucide-react";
+import { useLayoutEffect, useState } from "react";
 import { cloudChatVisitKey, isUnopenedAutomaticChat } from "../../lib/cloudChatVisits";
 import { cn } from "../../lib/utils";
+import { deriveProjectIdentity } from "../../projectIdentity";
 import { cloudChats } from "../../state/cloudChats";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useUiStateStore } from "../../uiStateStore";
+import { ProjectMonogram } from "../ProjectMonogram";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+
+const AUTOMATIC_INITIAL_COUNT = 10;
+const AUTOMATIC_PAGE_COUNT = 25;
 
 function AutomaticChatRow({
   chat,
@@ -28,11 +34,13 @@ function AutomaticChatRow({
     params.cloudThreadId === chat.id &&
     params.cloudEnvironmentId === environmentId;
   const running = chat.status === "active";
-  const date = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(
-    chat.updatedAt * 1000,
-  );
+  const repositoryName = chat.repository?.split("/").at(-1);
+  const identity = repositoryName ? deriveProjectIdentity(repositoryName) : null;
+  const updatedAt = new Date(chat.updatedAt * 1000).toISOString();
+  const relativeTime = formatRelativeTimeLabel(updatedAt);
+  const timeLabel = relativeTime === "just now" ? "now" : relativeTime.replace(/ ago$/, "");
   return (
-    <li className="list-none">
+    <li className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_36px]">
       <Link
         to="/cloud/$cloudEnvironmentId/$cloudThreadId"
         params={{ cloudEnvironmentId: environmentId, cloudThreadId: chat.id }}
@@ -40,7 +48,8 @@ function AutomaticChatRow({
         aria-current={active ? "page" : undefined}
         aria-label={`${chat.title}${chat.repository ? `, ${chat.repository}` : ""}${unopened ? ", new" : ""}${running ? ", running" : ""}`}
         className={cn(
-          "group/sidebar-row flex h-9 w-full cursor-pointer items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-left text-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          "group/sidebar-row relative flex h-9 w-full cursor-pointer items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-left text-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          !unopened && !running && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
           active
             ? "bg-sidebar-row-active text-sidebar-foreground"
             : unopened
@@ -48,15 +57,46 @@ function AutomaticChatRow({
               : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
         )}
       >
-        <WorkflowIcon aria-hidden className="size-4 shrink-0 opacity-40" />
-        <span className={cn("min-w-0 flex-1 truncate", unopened && "font-medium")}>
+        <span className="flex shrink-0 items-center opacity-40 grayscale transition-opacity group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0">
+          {identity ? (
+            <ProjectMonogram text={identity.monogram} color={identity.color} />
+          ) : (
+            <CloudIcon aria-hidden className="size-4" />
+          )}
+        </span>
+        {repositoryName ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="inline-flex min-w-0 max-w-24 shrink items-center gap-1 text-xs text-secondary-label" />
+              }
+            >
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current" />
+              <span className="truncate">{repositoryName}</span>
+            </TooltipTrigger>
+            <TooltipPopup>{chat.repository}</TooltipPopup>
+          </Tooltip>
+        ) : null}
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
+            unopened && "font-medium",
+          )}
+        >
           {chat.title}
         </span>
         {unopened ? (
           <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
         ) : null}
-        <span className="shrink-0 text-xs tabular-nums text-secondary-label">
-          {running ? "Running" : date}
+        <span className="ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end text-xs tabular-nums text-secondary-label">
+          {running ? (
+            "Running"
+          ) : (
+            <Tooltip>
+              <TooltipTrigger render={<time dateTime={updatedAt} />}>{timeLabel}</TooltipTrigger>
+              <TooltipPopup>{new Date(updatedAt).toLocaleString()}</TooltipPopup>
+            </Tooltip>
+          )}
         </span>
       </Link>
     </li>
@@ -73,6 +113,7 @@ export function AutomaticChatsSection({
   onLayoutChange: () => void;
 }) {
   const environmentId = usePrimaryEnvironmentId();
+  const params = useParams({ strict: false });
   const visits = useUiStateStore((state) => state.threadLastVisitedAtById);
   const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   const query = useEnvironmentQuery(
@@ -84,6 +125,21 @@ export function AutomaticChatsSection({
       (a, b) =>
         Number(b.status === "active") - Number(a.status === "active") || b.updatedAt - a.updatedAt,
     );
+  const [visibleCount, setVisibleCount] = useState(AUTOMATIC_INITIAL_COUNT);
+  const resetKey = `${environmentId}:${query.data?.accountId ?? ""}`;
+  const [previousResetKey, setPreviousResetKey] = useState(resetKey);
+  if (previousResetKey !== resetKey) {
+    setPreviousResetKey(resetKey);
+    setVisibleCount(AUTOMATIC_INITIAL_COUNT);
+  }
+  const visibleRows = rows.filter(
+    (chat, index) =>
+      index < visibleCount ||
+      ("cloudThreadId" in params &&
+        params.cloudEnvironmentId === environmentId &&
+        params.cloudThreadId === chat.id),
+  );
+  const hiddenCount = rows.length - visibleRows.length;
   const running = rows.filter((chat) => chat.status === "active").length;
   const activityIncomplete = query.data?.hasMore || rows.some((chat) => chat.status === "unknown");
   const runningDescription = activityIncomplete
@@ -109,7 +165,7 @@ export function AutomaticChatsSection({
     }
   };
   const layoutKey = expanded
-    ? `${query.error ?? ""}:${query.data !== null}:${rows.map((chat) => chat.id).join(":")}`
+    ? `${query.error ?? ""}:${query.data !== null}:${visibleRows.map((chat) => chat.id).join(":")}`
     : "collapsed";
   useLayoutEffect(() => {
     void layoutKey;
@@ -193,7 +249,7 @@ export function AutomaticChatsSection({
             </li>
           ) : query.data ? (
             rows.length > 0 ? (
-              rows.map((chat) => (
+              visibleRows.map((chat) => (
                 <AutomaticChatRow
                   key={chat.id}
                   chat={chat}
@@ -206,6 +262,18 @@ export function AutomaticChatsSection({
                 No automatic kickoffs yet.
               </li>
             )
+          ) : null}
+          {!query.error && hiddenCount > 0 ? (
+            <li className="list-none">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((count) => count + AUTOMATIC_PAGE_COUNT)}
+                className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <PlusIcon aria-hidden className="size-4 shrink-0" />
+                Show {Math.min(hiddenCount, AUTOMATIC_PAGE_COUNT)} more
+              </button>
+            </li>
           ) : null}
           {query.data?.hasMore && !query.error ? (
             <li className="list-none px-2.5 py-2 text-xs text-sidebar-muted-foreground">

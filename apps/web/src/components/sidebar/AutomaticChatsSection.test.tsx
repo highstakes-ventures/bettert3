@@ -6,14 +6,16 @@ import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
   accountId: "account",
+  environmentId: "env",
+  params: {} as { cloudThreadId?: string; cloudEnvironmentId?: string },
   chats: [] as CloudChatSummary[],
 }));
 vi.mock("@tanstack/react-router", () => ({
-  useParams: () => ({}),
+  useParams: () => state.params,
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
 }));
 vi.mock("../../state/cloudChats", () => ({ cloudChats: { list: () => null } }));
-vi.mock("../../state/environments", () => ({ usePrimaryEnvironmentId: () => "env" }));
+vi.mock("../../state/environments", () => ({ usePrimaryEnvironmentId: () => state.environmentId }));
 vi.mock("../../state/query", () => ({
   useEnvironmentQuery: () => ({
     error: null,
@@ -59,6 +61,8 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   state.accountId = "account";
+  state.environmentId = "env";
+  state.params = {};
   state.chats = [chat("one"), chat("two"), chat("user", "user")];
   onToggle.mockClear();
   useUiStateStore.setState({ threadLastVisitedAtById: {} });
@@ -136,4 +140,58 @@ it("does not report zero running when an automatic chat's activity is unavailabl
   await render();
   expect(container.textContent).toContain("· 1 running");
   expect(container.textContent).not.toContain("At least");
+});
+
+it("pages automatic history while keeping unread actions scoped to the whole fetched list", async () => {
+  state.chats = Array.from({ length: 40 }, (_, index) => chat(`automatic-${index}`));
+  await render(true);
+  expect(container.querySelectorAll("a")).toHaveLength(10);
+  expect(container.textContent).not.toContain("automatic-39");
+
+  await act(() =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Mark all automatic chats as read"]')!
+      .click(),
+  );
+  expect(
+    isUnopenedAutomaticChat(
+      chat("automatic-39"),
+      "env",
+      "account",
+      useUiStateStore.getState().threadLastVisitedAtById,
+    ),
+  ).toBe(false);
+
+  const showMore = () =>
+    Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Show "),
+    )!;
+  await act(() => showMore().click());
+  expect(container.querySelectorAll("a")).toHaveLength(35);
+  await act(() => showMore().click());
+  expect(container.querySelectorAll("a")).toHaveLength(40);
+  expect(showMore()).toBeUndefined();
+
+  state.accountId = "other-account";
+  await render(true);
+  expect(container.querySelectorAll("a")).toHaveLength(10);
+
+  await act(() => showMore().click());
+  state.environmentId = "other-env";
+  await render(true);
+  expect(container.querySelectorAll("a")).toHaveLength(10);
+});
+
+it("keeps an opened chat beyond the first page visible only in its destination environment", async () => {
+  state.chats = Array.from({ length: 40 }, (_, index) => chat(`automatic-${index}`));
+  state.params = { cloudThreadId: "automatic-39", cloudEnvironmentId: "env" };
+  await render(true);
+  expect(container.querySelectorAll("a")).toHaveLength(11);
+  expect(container.textContent).toContain("automatic-39");
+  expect(container.textContent).not.toContain("automatic-38");
+
+  state.params.cloudEnvironmentId = "other-env";
+  await render(true);
+  expect(container.querySelectorAll("a")).toHaveLength(10);
+  expect(container.textContent).not.toContain("automatic-39");
 });
