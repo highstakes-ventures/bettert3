@@ -73,13 +73,14 @@ describe("buildCodexDeveloperInstructions", () => {
 describe("T3 browser developer instructions", () => {
   const runtime = { model: "gpt-5.3-codex", reasoningEffort: "high" };
 
-  it("prefers the product-native preview tools in both collaboration modes", () => {
+  it("prefers Chrome and keeps T3 preview opt-in", () => {
     {
       const instructions = toolInstructions(runtime, true);
       NodeAssert.match(instructions, /t3-code/);
       NodeAssert.match(instructions, /preview_status/);
       NodeAssert.match(instructions, /preview_open/);
-      NodeAssert.match(instructions, /Do not switch to global browser skills/);
+      NodeAssert.match(instructions, /Use Chrome through the available browser tools/);
+      NodeAssert.match(instructions, /only when the user explicitly requests it/);
     }
   });
 
@@ -89,9 +90,7 @@ describe("T3 browser developer instructions", () => {
       NodeAssert.doesNotMatch(instructions, /preview_status/);
       NodeAssert.doesNotMatch(instructions, /preview_open/);
       NodeAssert.doesNotMatch(instructions, /T3 Code collaborative browser/);
-      // Steering away from other browser automation must go with the tools;
-      // keeping it would leave the model talked out of its only option.
-      NodeAssert.doesNotMatch(instructions, /Do not switch to global browser skills/);
+      NodeAssert.doesNotMatch(instructions, /Use Chrome through the available browser tools/);
       // The rest of the collaboration mode is untouched.
       NodeAssert.match(buildCodexDeveloperInstructions(mode), /<collaboration_mode>/);
       NodeAssert.match(buildCodexDeveloperInstructions(mode), /<\/collaboration_mode>/);
