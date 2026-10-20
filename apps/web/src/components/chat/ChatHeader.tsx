@@ -39,6 +39,7 @@ import {
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { useClientSettings } from "../../hooks/useSettings";
+import { ThreadAutomationsIndicator } from "./ThreadAutomationsPanel";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -374,7 +375,7 @@ export const ChatHeader = memo(function ChatHeader({
             </WorkspaceBreadcrumbSeparator>
           </>
         ) : null}
-        <WorkspaceBreadcrumbItem current className="min-w-10 flex-1">
+        <WorkspaceBreadcrumbItem current className="min-w-10 flex-1 gap-1">
           {renamingTitle !== null ? (
             <input
               autoFocus
@@ -434,6 +435,13 @@ export const ChatHeader = memo(function ChatHeader({
               <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
             </Tooltip>
           )}
+          {isServerThread ? (
+            <ThreadAutomationsIndicator
+              key={`${activeThreadEnvironmentId}:${activeThreadId}`}
+              environmentId={activeThreadEnvironmentId}
+              threadId={activeThreadId}
+            />
+          ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
     </div>

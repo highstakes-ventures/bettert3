@@ -1,8 +1,15 @@
 import { useAtomValue } from "@effect/atom-react";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { useNavigate } from "@tanstack/react-router";
-import { CalendarClockIcon, PencilIcon, PlayIcon, Settings2Icon } from "lucide-react";
-import { useState } from "react";
+import {
+  CalendarClockIcon,
+  CalendarOffIcon,
+  CircleAlertIcon,
+  PencilIcon,
+  PlayIcon,
+  Settings2Icon,
+} from "lucide-react";
+import { useId, useState } from "react";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
@@ -23,6 +30,8 @@ import { useAtomCommand } from "../../state/use-atom-command";
 
 import { readEnvironmentScope } from "../../state/session";
 import { Switch } from "../ui/switch";
+import { Button } from "../ui/button";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -37,6 +46,67 @@ const STATUS_DOT_CLASS: Record<ScheduledTask["lastRunStatus"], string> = {
   failed: "bg-destructive",
 };
 
+/** Keeps bound schedules reachable even when the thread details card is closed or compact. */
+export function ThreadAutomationsIndicator(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}) {
+  const tasksQuery = useEnvironmentQuery(
+    serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} }),
+  );
+  const tasks = (tasksQuery.data?.tasks ?? []).filter((task) => task.threadId === props.threadId);
+  if (tasks.length === 0 && tasksQuery.error === null) return null;
+
+  const activeCount = tasks.filter((task) => task.enabled).length;
+  const task = tasks.length === 1 ? tasks[0] : undefined;
+  const label =
+    tasksQuery.error !== null
+      ? "Could not load thread automations"
+      : task
+        ? `${task.title} · ${scheduleLabel(task.schedule)}${
+            !task.enabled
+              ? " · paused"
+              : task.nextRunAt !== null
+                ? ` · next ${new Date(task.nextRunAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}`
+                : ""
+          }`
+        : `${tasks.length} automations · ${activeCount} active`;
+  const Icon =
+    tasksQuery.error !== null
+      ? CircleAlertIcon
+      : activeCount > 0
+        ? CalendarClockIcon
+        : CalendarOffIcon;
+
+  return (
+    <span className="inline-flex shrink-0" data-thread-automations-indicator>
+      <Popover>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <PopoverTrigger
+                render={
+                  <Button variant={activeCount > 0 ? "ghost" : "ghost-muted"} size="icon-xs" />
+                }
+                aria-label={`Show thread automations: ${label}`}
+              />
+            }
+          >
+            <Icon aria-hidden />
+          </TooltipTrigger>
+          <TooltipPopup>{label}</TooltipPopup>
+        </Tooltip>
+        <PopoverPopup width="md" padding="none" align="end" aria-label="Thread automations">
+          <ThreadAutomationsPanel {...props} />
+        </PopoverPopup>
+      </Popover>
+    </span>
+  );
+}
+
 /**
  * Thread details panel section listing the automations (scheduled tasks) bound
  * to this thread. Fed by the live scheduled-task subscription, so run status
@@ -47,6 +117,7 @@ export function ThreadAutomationsPanel(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }) {
+  const headingId = useId();
   const canOperate = useAtomValue(
     serverEnvironment.runScheduledTaskNow.permissionAtom(props.environmentId),
   );
@@ -118,7 +189,7 @@ export function ThreadAutomationsPanel(props: {
 
   return (
     <ThreadDetailsSection
-      headingId="thread-details-automations-heading"
+      headingId={headingId}
       title="Automations"
       data-thread-automations-panel
       actions={
