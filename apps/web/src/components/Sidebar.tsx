@@ -2917,6 +2917,7 @@ export default function Sidebar() {
     // Working beta: only inbox threads fold away. Pins stay where the user
     // put them, and snoozed or settled threads keep their shelves.
     const inbox = (thread: EnvironmentThreadShell) =>
+      !isSidebarThreadWorking(thread) &&
       timerThreadKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
         ? timer
         : workingShelfEnabled && isSidebarThreadWorking(thread)

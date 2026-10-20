@@ -2348,7 +2348,7 @@ describe("Working section beta", () => {
     layout.items.map((item) => item.thread.id);
 
   it("places timed chats above Working, preserves parked chats, and returns chats when their timers stop", () => {
-    const timed = makeThread({ id: ThreadId.make("timed"), title: "timed", runtime: running });
+    const timed = makeThread({ id: ThreadId.make("timed"), title: "timed" });
     const pinned = makeThread({ ...timed, id: ThreadId.make("pinned"), pinnedAt: NOW });
     const settled = makeThread({
       ...timed,
@@ -2398,8 +2398,36 @@ describe("Working section beta", () => {
     });
     expect(items[timerIndex + 2]?.type).toBe("v2-working-shelf");
     expect(build({ ...input, timerThreadKeys: new Set() }).timerCount).toBe(0);
-    expect(build({ ...input, timerThreadKeys: new Set() }).workingCount).toBe(2);
+    expect(build({ ...input, timerThreadKeys: new Set() }).workingCount).toBe(1);
     expect(build({ ...input, workingShelfEnabled: false }).timerCount).toBe(1);
+  });
+
+  it("keeps a scheduled chat out of Timer while it works, then returns it when work ends", () => {
+    const timed = makeThread({ id: ThreadId.make("timed"), title: "timed", runtime: running });
+    const input = {
+      threads: [timed],
+      timerThreadKeys: new Set([`${environmentId}:timed`]),
+      timerShelfExpanded: true,
+      workingShelfExpanded: true,
+    };
+    const busy = build(input);
+    expect(busy.timerCount).toBe(0);
+    expect(busy.workingCount).toBe(1);
+    expect(ids(busy)).toEqual(["timed"]);
+    const betaOff = build({ ...input, workingShelfEnabled: false });
+    expect(betaOff.timerCount).toBe(0);
+    expect(betaOff.workingCount).toBe(0);
+    expect(ids(betaOff)).toEqual(["timed"]);
+    const waiting = build({
+      ...input,
+      threads: [{ ...timed, runtime: { ...running, status: "idle" } }],
+    });
+    expect(waiting.timerCount).toBe(0);
+    expect(waiting.workingCount).toBe(1);
+    const stopped = build({ ...input, threads: [{ ...timed, runtime: null }] });
+    expect(stopped.timerCount).toBe(1);
+    expect(stopped.workingCount).toBe(0);
+    expect(ids(stopped)).toEqual(["timed"]);
   });
 
   it("folds unpinned working threads into a collapsed shelf", () => {

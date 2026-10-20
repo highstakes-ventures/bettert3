@@ -869,7 +869,10 @@ export function buildThreadListV2Items(input: {
       settled.push(thread);
     } else if (thread.pinnedAt != null) {
       pinned.push(thread);
-    } else if (input.timerThreadKeys?.has(`${thread.environmentId}:${thread.id}`)) {
+    } else if (
+      !isThreadWorking(thread) &&
+      input.timerThreadKeys?.has(`${thread.environmentId}:${thread.id}`)
+    ) {
       timer.push(thread);
     } else if (workingShelfEnabled && isThreadWorking(thread)) {
       working.push(thread);

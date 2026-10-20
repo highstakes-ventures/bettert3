@@ -140,7 +140,8 @@ appear on web, desktop, and mobile without requiring the originating browser to 
 open.
 
 Chats with an enabled interval or fixed-time schedule appear in the collapsible **Timer**
-section above Working. Pausing or deleting the schedule returns the chat to its usual section.
+section above Working while they are not working. Busy chats stay in Working and return to
+Timer when their work ends. Pausing or deleting the schedule returns the chat to its usual section.
 Pinned, snoozed, and settled chats keep their sections.
 
 ### Fold working threads (beta)
