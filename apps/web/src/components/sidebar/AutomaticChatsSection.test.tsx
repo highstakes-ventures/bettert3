@@ -7,19 +7,31 @@ import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 const state = vi.hoisted(() => ({
   accountId: "account",
   environmentId: "env",
-  params: {} as { cloudThreadId?: string; cloudEnvironmentId?: string },
+  params: {} as {
+    cloudThreadId?: string;
+    cloudEnvironmentId?: string;
+    threadId?: string;
+    environmentId?: string;
+  },
+  threads: [] as {
+    id: string;
+    environmentId: string;
+    source: { runDestination: { accountId: string; existingThreadId: string } };
+  }[],
   chats: [] as CloudChatSummary[],
+  hasMore: false,
 }));
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => state.params,
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
 }));
+vi.mock("../../state/entities", () => ({ useThreadShells: () => state.threads }));
 vi.mock("../../state/cloudChats", () => ({ cloudChats: { list: () => null } }));
 vi.mock("../../state/environments", () => ({ usePrimaryEnvironmentId: () => state.environmentId }));
 vi.mock("../../state/query", () => ({
   useEnvironmentQuery: () => ({
     error: null,
-    data: { accountId: state.accountId, chats: state.chats, hasMore: false },
+    data: { accountId: state.accountId, chats: state.chats, hasMore: state.hasMore },
   }),
 }));
 vi.mock("../ui/sidebar", () => ({ useSidebar: () => ({ setOpenMobile: () => {} }) }));
@@ -63,6 +75,8 @@ beforeEach(() => {
   state.accountId = "account";
   state.environmentId = "env";
   state.params = {};
+  state.threads = [];
+  state.hasMore = false;
   state.chats = [chat("one"), chat("two"), chat("user", "user")];
   onToggle.mockClear();
   useUiStateStore.setState({ threadLastVisitedAtById: {} });
@@ -73,10 +87,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it("marks the current automatic chats read without expanding the section or clearing other scopes", async () => {
+it("marks the expanded automatic chats read without collapsing the section or clearing other scopes", async () => {
   const otherKey = cloudChatVisitKey("other-env", "account", "one");
   useUiStateStore.setState({ threadLastVisitedAtById: { [otherKey]: "2026-10-15T08:00:00Z" } });
-  await render();
+  await render(true);
   const action = container.querySelector<HTMLButtonElement>(
     'button[aria-label="Mark all automatic chats as read"]',
   )!;
@@ -92,7 +106,7 @@ it("marks the current automatic chats read without expanding the section or clea
   expect(
     container.querySelector('button[aria-label="Mark all automatic chats as read"]'),
   ).toBeNull();
-  expect(container.querySelector('button[aria-expanded="false"]')).not.toBeNull();
+  expect(container.querySelector('button[aria-expanded="true"]')).not.toBeNull();
   expect(onToggle).not.toHaveBeenCalled();
 
   state.chats.push(chat("later"));
@@ -129,17 +143,43 @@ it("keeps the section toggle independent from its read action", async () => {
 it("does not report zero running when an automatic chat's activity is unavailable", async () => {
   state.chats = [{ ...chat("one"), status: "unknown" }];
   await render();
-  expect(container.querySelector('[aria-label="Running count unavailable"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Activity unavailable"]')).not.toBeNull();
   expect(container.textContent).not.toContain("0 running");
 
   state.chats.push(chat("running"));
   await render();
-  expect(container.querySelector('[aria-label="At least 1 running"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Activity unavailable"]')).not.toBeNull();
+  expect(container.textContent).not.toContain("1 running");
 
   state.chats[0] = { ...chat("one"), status: "idle" };
   await render();
   expect(container.textContent).toContain("· 1 running");
   expect(container.textContent).not.toContain("At least");
+
+  state.hasMore = true;
+  await render(true);
+  expect(container.textContent).toContain("Recent ·");
+  expect(container.textContent).not.toContain("1 running");
+  const action = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Mark all automatic chats as read"]',
+  )!;
+  await act(() => action.click());
+  expect(useUiStateStore.getState().threadLastVisitedAtById).toHaveProperty(
+    cloudChatVisitKey("env", "account", "running"),
+  );
+});
+
+it("keeps the collapsed count non-interactive while opening the section", async () => {
+  await render(false);
+  expect(
+    container.querySelector('button[aria-label="Mark all automatic chats as read"]'),
+  ).toBeNull();
+  expect(container.textContent).toContain("2 new");
+  await act(() =>
+    container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!.click(),
+  );
+  expect(onToggle).toHaveBeenCalledOnce();
+  expect(useUiStateStore.getState().threadLastVisitedAtById).toEqual({});
 });
 
 it("pages automatic history while keeping unread actions scoped to the whole fetched list", async () => {
@@ -191,6 +231,26 @@ it("keeps an opened chat beyond the first page visible only in its destination e
   expect(container.textContent).not.toContain("automatic-38");
 
   state.params.cloudEnvironmentId = "other-env";
+  await render(true);
+  expect(container.querySelectorAll("a")).toHaveLength(10);
+  expect(container.textContent).not.toContain("automatic-39");
+});
+
+it("keeps an imported automatic chat visible on its normal thread route within the same account", async () => {
+  state.chats = Array.from({ length: 40 }, (_, index) => chat(`automatic-${index}`));
+  state.threads = [
+    {
+      id: "normal-thread",
+      environmentId: "env",
+      source: { runDestination: { accountId: "account", existingThreadId: "automatic-39" } },
+    },
+  ];
+  state.params = { threadId: "normal-thread", environmentId: "env" };
+  await render(true);
+  expect(container.querySelectorAll("a")).toHaveLength(11);
+  expect(container.textContent).toContain("automatic-39");
+
+  state.accountId = "other-account";
   await render(true);
   expect(container.querySelectorAll("a")).toHaveLength(10);
   expect(container.textContent).not.toContain("automatic-39");

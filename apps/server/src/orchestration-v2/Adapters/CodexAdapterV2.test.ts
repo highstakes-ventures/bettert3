@@ -80,6 +80,8 @@ const encodeStringJson = Schema.encodeEffect(Schema.fromJsonString(Schema.String
 
 const unusedCloudChats = CodexCloudChats.CodexCloudChats.of({
   list: () => Effect.die("Unexpected Cloud listing"),
+  snapshot: () => Effect.die("Unexpected Cloud snapshot"),
+  interrupt: () => Effect.die("Unexpected Cloud interrupt"),
   read: () => Effect.die("Unexpected Cloud read"),
   destinations: () => Effect.die("Unexpected Cloud catalogue"),
   openClient: () => Effect.die("Unexpected Cloud execution"),

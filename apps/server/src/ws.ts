@@ -1,3 +1,4 @@
+import * as CloudThreadService from "./orchestration-v2/CloudThreadService.ts";
 import * as CodexCloudChats from "./provider/CodexCloudChats.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
@@ -1244,6 +1245,7 @@ const layerWsRpc = (
       const secretRequests = yield* SecretRequests.SecretRequests;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const cloudChats = yield* CodexCloudChats.CodexCloudChats;
+      const cloudThreads = yield* CloudThreadService.CloudThreadService;
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
@@ -2499,6 +2501,7 @@ const layerWsRpc = (
             .pipe(Effect.map((destinations) => ({ destinations }))),
         [WS_METHODS.cloudChatsList]: () => cloudChats.list(),
         [WS_METHODS.cloudChatsRead]: (input) => cloudChats.read(input),
+        [WS_METHODS.cloudChatsOpen]: (input) => cloudThreads.open(input),
         [WS_METHODS.pullRequestsList]: (input) => pullRequests.list(input),
         [WS_METHODS.pullRequestsListStats]: (input) => pullRequests.listStats(input),
         [WS_METHODS.pullRequestsRoutingIdentity]: (input) => pullRequests.routingIdentity(input),
@@ -3178,6 +3181,7 @@ export const layer = Layer.unwrap(
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const pullRequests = yield* PullRequestService.PullRequestService;
     const cloudChats = yield* CodexCloudChats.CodexCloudChats;
+    const cloudThreads = yield* CloudThreadService.CloudThreadService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
@@ -3246,6 +3250,7 @@ export const layer = Layer.unwrap(
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(Layer.succeed(CodexCloudChats.CodexCloudChats, cloudChats)),
+              Layer.provide(Layer.succeed(CloudThreadService.CloudThreadService, cloudThreads)),
               Layer.provide(OtlpEndpointCheck.layer),
               // Shared like the pull request service, so concurrent generations single-flight.
               Layer.provide(

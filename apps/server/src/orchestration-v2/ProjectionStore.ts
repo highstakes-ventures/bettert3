@@ -426,6 +426,9 @@ export interface ProjectionStoreV2Shape {
     Effect.Effect<OrchestrationV2ThreadShellSnapshot, ProjectionStoreV2Error>,
     ProjectionStoreV2Error
   >;
+  readonly getProviderThreadOwner: (
+    providerThreadId: ProviderThreadId,
+  ) => Effect.Effect<ThreadId | null, ProjectionStoreV2Error>;
   readonly getThreadShell: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadShell | null, ProjectionStoreV2Error>;
@@ -1525,8 +1528,18 @@ export function threadShellFromProjection(
   const executionSession = projection.providerSessions.find(
     (session) => session.id === executionProviderThread?.providerSessionId,
   );
+  const importedCloudDestination =
+    executionProviderThread?.providerSessionId === null &&
+    projection.thread.runDestination?.existingThreadId !== undefined &&
+    executionProviderThread.nativeThreadRef?.nativeId ===
+      projection.thread.runDestination.existingThreadId
+      ? projection.thread.runDestination
+      : undefined;
+  const executionDestination = executionSession
+    ? executionSession.executionDestination
+    : importedCloudDestination;
   return {
-    executionDestination: executionSession?.executionDestination,
+    ...(executionDestination === undefined ? {} : { executionDestination }),
     ...(projection.thread.runDestination === undefined
       ? {}
       : { runDestination: projection.thread.runDestination }),
@@ -1800,7 +1813,9 @@ function shellFromState(input: {
   readonly visibleItemCount: number;
 }): OrchestrationV2ThreadShell {
   return {
-    executionDestination: input.state.executionDestination,
+    ...(input.state.executionDestination === undefined
+      ? {}
+      : { executionDestination: input.state.executionDestination }),
     ...(input.state.thread.runDestination === undefined
       ? {}
       : { runDestination: input.state.thread.runDestination }),
@@ -5368,14 +5383,25 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 ORDER BY r.ordinal DESC, r.run_id DESC
                 LIMIT 1
               ) AS activity_run_started_at,
-              (
-                SELECT json_quote(json_extract(execution_session.payload_json, '$.executionDestination'))
-                FROM orchestration_v2_projection_provider_threads runtime_thread
-                JOIN orchestration_v2_projection_provider_sessions execution_session
-                  ON execution_session.provider_session_id = runtime_thread.provider_session_id
-                WHERE runtime_thread.provider_thread_id = t.active_provider_thread_id
-                  AND json_type(execution_session.payload_json, '$.executionDestination') IS NOT NULL
-                LIMIT 1
+              COALESCE(
+                (
+                  SELECT json_quote(json_extract(execution_session.payload_json, '$.executionDestination'))
+                  FROM orchestration_v2_projection_provider_threads runtime_thread
+                  JOIN orchestration_v2_projection_provider_sessions execution_session
+                    ON execution_session.provider_session_id = runtime_thread.provider_session_id
+                  WHERE runtime_thread.provider_thread_id = t.active_provider_thread_id
+                    AND json_type(execution_session.payload_json, '$.executionDestination') IS NOT NULL
+                  LIMIT 1
+                ),
+                (
+                  SELECT json_quote(json_extract(t.payload_json, '$.runDestination'))
+                  FROM orchestration_v2_projection_provider_threads runtime_thread
+                  WHERE runtime_thread.provider_thread_id = t.active_provider_thread_id
+                    AND runtime_thread.provider_session_id IS NULL
+                    AND json_extract(runtime_thread.payload_json, '$.nativeThreadRef.nativeId') =
+                      json_extract(t.payload_json, '$.runDestination.existingThreadId')
+                  LIMIT 1
+                )
               ) AS execution_destination_json,
               (
                 SELECT json_extract(session.payload_json, '$.lastError')
@@ -6138,6 +6164,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       apply,
       getShellSnapshot,
       readShellSnapshot,
+      getProviderThreadOwner: (providerThreadId) =>
+        sql<{ readonly thread_id: string | null }>`
+        SELECT thread_id FROM orchestration_v2_projection_provider_threads WHERE provider_thread_id = ${providerThreadId}
+      `.pipe(
+          Effect.map((rows) => (rows[0]?.thread_id ? ThreadId.make(rows[0].thread_id) : null)),
+          Effect.mapError(shellSnapshotReadError),
+        ),
       getThreadShell,
       getThread,
       getSettlementCandidates,
@@ -6206,6 +6239,18 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           }
           yield* Ref.update(sequence, (current) => current + 1);
         }),
+      getProviderThreadOwner: (providerThreadId) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) => {
+            for (const projection of state.projections.values()) {
+              const providerThread = projection.providerThreads.find(
+                (candidate) => candidate.id === providerThreadId,
+              );
+              if (providerThread) return providerThread.appThreadId;
+            }
+            return null;
+          }),
+        ),
       getShellSnapshot: (options) =>
         Effect.gen(function* () {
           const existing = (yield* Ref.get(replayState)).projections;

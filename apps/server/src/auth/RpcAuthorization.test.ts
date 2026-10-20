@@ -35,6 +35,9 @@ describe("RPC authorization scopes", () => {
   it("requires conversation read access for cloud listing and history", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.cloudChatsList)).toBe(AuthOrchestrationReadScope);
     expect(requiredScopeForRpcMethod(WS_METHODS.cloudChatsRead)).toBe(AuthOrchestrationReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.cloudChatsOpen)).toBe(
+      AuthOrchestrationOperateScope,
+    );
   });
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));

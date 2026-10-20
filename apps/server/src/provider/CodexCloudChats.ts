@@ -1,5 +1,5 @@
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
-import type { CodexCloudDestination, ProviderInstanceId } from "@t3tools/contracts";
+import { ProviderInstanceId, type CodexCloudDestination } from "@t3tools/contracts";
 import type * as CodexClient from "effect-codex-app-server/client";
 import type * as CodexError from "effect-codex-app-server/errors";
 import type * as Scope from "effect/Scope";
@@ -46,6 +46,15 @@ const Item = Schema.Struct({
   id: Schema.String,
   type: Schema.String,
   text: Schema.optional(Schema.String),
+  status: Schema.optional(Schema.String),
+  command: Schema.optional(Schema.String),
+  aggregatedOutput: Schema.optional(Schema.NullOr(Schema.String)),
+  server: Schema.optional(Schema.String),
+  tool: Schema.optional(Schema.String),
+  arguments: Schema.optional(Schema.Unknown),
+  result: Schema.optional(Schema.Unknown),
+  error: Schema.optional(Schema.Unknown),
+  summary: Schema.optional(Schema.Array(Schema.String)),
   content: Schema.optional(
     Schema.Array(
       Schema.Union([
@@ -62,10 +71,30 @@ const Turns = Schema.Struct({
       items: Schema.Array(Item),
       status: Schema.optional(Schema.String),
       startedAt: Schema.optional(Schema.NullOr(Schema.Number)),
+      completedAt: Schema.optional(Schema.NullOr(Schema.Number)),
     }),
   ),
   nextCursor: Schema.NullOr(Schema.String),
 });
+const CloudThread = Schema.Struct({
+  ...Thread.fields,
+  model: Schema.NullOr(Schema.String),
+  canAcceptDirectInput: Schema.NullOr(Schema.Boolean),
+  environments: Schema.Array(
+    Schema.Struct({
+      environmentId: Schema.String,
+      cwd: Schema.String.check(Schema.isPattern(/^\//)),
+    }),
+  ),
+});
+const decodeCloudThread = Schema.decodeUnknownEffect(Schema.Struct({ thread: CloudThread }));
+export type CloudThreadSnapshot = {
+  readonly instanceId: ProviderInstanceId;
+  readonly destination: CodexCloudDestination;
+  readonly thread: typeof CloudThread.Type;
+  readonly turns: ReadonlyArray<(typeof Turns.Type.data)[number]>;
+};
+
 const Reply = Schema.Struct({
   id: Schema.optional(Schema.Number),
   result: Schema.optional(Schema.Unknown),
@@ -80,7 +109,11 @@ const decodeClaims = Schema.decodeUnknownEffect(Claims);
 const decodeTurns = Schema.decodeUnknownEffect(Turns);
 const decodeThreads = Schema.decodeUnknownEffect(ThreadList);
 const isCloudChatError = Schema.is(CloudChatError);
-class CloudIdentity extends Data.Class<{ readonly token: string; readonly accountId: string }> {}
+class CloudIdentity extends Data.Class<{
+  readonly token: string;
+  readonly accountId: string;
+  readonly instanceId: ProviderInstanceId;
+}> {}
 
 type TurnsPage = typeof Turns.Type;
 type CloudRequest = (method: string, params: unknown) => Effect.Effect<unknown, CloudChatError>;
@@ -223,6 +256,15 @@ export class CodexCloudChats extends Context.Service<
       instanceId: ProviderInstanceId,
       onTermination?: (error: CodexError.CodexAppServerError) => Effect.Effect<void>,
     ) => Effect.Effect<CodexClient.CodexAppServerClient["Service"], CloudChatError, Scope.Scope>;
+    readonly interrupt: (input: {
+      readonly accountId: string;
+      readonly threadId: string;
+      readonly turnId: string;
+    }) => Effect.Effect<void, CloudChatError>;
+    readonly snapshot: (
+      input: CloudChatReadInput,
+      knownCompletedTurns?: ReadonlySet<string>,
+    ) => Effect.Effect<CloudThreadSnapshot, CloudChatError>;
     readonly list: () => Effect.Effect<
       { accountId: string; chats: ReadonlyArray<CloudChatSummary>; hasMore: boolean },
       CloudChatError
@@ -292,7 +334,7 @@ const make = Effect.gen(function* () {
         const accountId = parsedClaims["https://api.openai.com/auth"].chatgpt_account_id;
         if (expectedAccount !== null && accountId !== expectedAccount)
           return yield* new CloudChatError({ reason: "accountChanged" });
-        return { token, accountId };
+        return { token, accountId, instanceId: ProviderInstanceId.make(instance?.id ?? "codex") };
       }),
     );
   });
@@ -374,7 +416,11 @@ const make = Effect.gen(function* () {
   });
   const withCloud = <A>(
     expectedAccount: string | null,
-    operation: (request: CloudRequest, accountId: string) => Effect.Effect<A, CloudChatError>,
+    operation: (
+      request: CloudRequest,
+      accountId: string,
+      instanceId: ProviderInstanceId,
+    ) => Effect.Effect<A, CloudChatError>,
   ) =>
     Effect.gen(function* () {
       const auth = new CloudIdentity(yield* authenticate(expectedAccount));
@@ -383,7 +429,7 @@ const make = Effect.gen(function* () {
           const entry = yield* RcMap.get(connections, auth);
           return yield* Effect.gen(function* () {
             if (entry.result._tag === "Failure") return yield* entry.result.failure;
-            return yield* operation(entry.result.success.request, auth.accountId);
+            return yield* operation(entry.result.success.request, auth.accountId, auth.instanceId);
           }).pipe(
             Effect.tapError(() =>
               Effect.suspend(() => {
@@ -434,18 +480,99 @@ const make = Effect.gen(function* () {
     openClient: (destination, instanceId, onTermination) =>
       Effect.gen(function* () {
         const auth = yield* authenticate(destination.accountId, instanceId);
-        const choices = yield* catalog(auth);
-        const verified = choices.find(
-          (choice) => choice.environmentConfigId === destination.environmentConfigId,
-        );
-        if (!verified || destination.cwd !== verified.cwd)
-          return yield* new CloudChatError({ reason: "protocol" });
+        let verified = destination;
+        if (destination.existingThreadId) {
+          const connection = yield* connect(auth.token, auth.accountId);
+          yield* connection.request("initialize", {
+            clientInfo: { name: "t3_cloud_binding", version: "0.0.45" },
+            capabilities: { experimentalApi: true },
+          });
+          yield* Effect.sync(connection.notify);
+          const response = yield* connection.request("thread/read", {
+            threadId: destination.existingThreadId,
+            includeTurns: false,
+          });
+          const { thread } = yield* decodeCloudThread(response).pipe(
+            Effect.mapError(() => new CloudChatError({ reason: "protocol" })),
+          );
+          if (
+            thread.id !== destination.existingThreadId ||
+            thread.canAcceptDirectInput === false ||
+            thread.environments.length !== 1 ||
+            thread.environments[0]?.cwd !== destination.cwd
+          )
+            return yield* new CloudChatError({ reason: "protocol" });
+        } else {
+          const choices = yield* catalog(auth);
+          const choice = choices.find(
+            (choice) => choice.environmentConfigId === destination.environmentConfigId,
+          );
+          if (!choice || destination.cwd !== choice.cwd)
+            return yield* new CloudChatError({ reason: "protocol" });
+          verified = choice;
+        }
         return yield* CodexCloudTransport.open({
           token: auth.token,
           destination: verified,
           onTermination,
         }).pipe(Effect.mapError(() => new CloudChatError({ reason: "connection" })));
       }),
+    interrupt: (input) =>
+      withCloud(input.accountId, (request) =>
+        Effect.gen(function* () {
+          const page = yield* turns(request, input.threadId, 25, undefined, "desc", "notLoaded");
+          const turn = page.data.find((turn) => turn.id === input.turnId);
+          if (!turn) return yield* new CloudChatError({ reason: "protocol" });
+          if (turn.status === "inProgress")
+            yield* request("turn/interrupt", { threadId: input.threadId, turnId: input.turnId });
+        }),
+      ),
+    snapshot: (input, knownCompletedTurns = new Set()) =>
+      withCloud(input.accountId, (request, accountId, instanceId) =>
+        Effect.gen(function* () {
+          const response = yield* request("thread/read", {
+            threadId: input.threadId,
+            includeTurns: false,
+          });
+          const { thread } = yield* decodeCloudThread(response).pipe(
+            Effect.mapError(() => new CloudChatError({ reason: "protocol" })),
+          );
+          const environment = thread.environments[0];
+          if (
+            thread.id !== input.threadId ||
+            thread.canAcceptDirectInput === false ||
+            !environment ||
+            thread.environments.length !== 1
+          )
+            return yield* new CloudChatError({ reason: "protocol" });
+          const history: Array<(typeof Turns.Type.data)[number]> = [];
+          let cursor: string | undefined;
+          do {
+            const page = yield* turns(request, input.threadId, 25, cursor, "desc");
+            history.push(...page.data.filter((turn) => !knownCompletedTurns.has(turn.id)));
+            if (page.data.some((turn) => knownCompletedTurns.has(turn.id))) break;
+            cursor = page.nextCursor ?? undefined;
+          } while (cursor);
+          const first = history.at(-1)?.items.find((item) => item.type === "userMessage");
+          const provenance =
+            summaries.get(input.threadId)?.provenance ??
+            cloudChatOrigin(thread.threadSource, first ? messageText(first) : "");
+          return {
+            instanceId,
+            destination: {
+              kind: "codexCloud" as const,
+              accountId,
+              existingThreadId: thread.id,
+              name: thread.name || provenance.title || thread.preview || "Cloud chat",
+              cwd: environment.cwd,
+              origin: provenance.origin,
+              githubRunUrl: provenance.githubRunUrl,
+            },
+            thread,
+            turns: history.toReversed(),
+          };
+        }),
+      ),
     list: () =>
       withCloud(null, (request, accountId) =>
         Effect.gen(function* () {
