@@ -898,7 +898,12 @@ describe("resolveSidebarThreadStatus", () => {
     updatedAt: "2026-03-09T10:00:00.000Z",
   };
 
-  const idle = { hasPendingApprovals: false, hasPendingUserInput: false, runtime: null };
+  const idle = {
+    id: ThreadId.make("scheduled-thread"),
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    runtime: null,
+  };
 
   it("prioritizes approval over a running runtime", () => {
     expect(resolveSidebarThreadStatus({ ...idle, hasPendingApprovals: true, runtime })).toBe(
@@ -981,6 +986,47 @@ describe("resolveSidebarThreadStatus", () => {
 
   it("defaults to ready with no runtime", () => {
     expect(resolveSidebarThreadStatus(idle)).toBe("ready");
+  });
+
+  it("waits between scheduled runs even when the last completion is unread", () => {
+    const thread = { ...idle, runtime: { ...runtime, status: "completed" as const } };
+    const task = { threadId: thread.id, enabled: true };
+    const status = resolveSidebarThreadStatus(thread, [task]);
+
+    expect(status).toBe("waiting");
+    expect(resolveSidebarV2TopStatus({ status, isUnread: true, isWoke: true })).toBe("waiting");
+    expect(
+      shouldRecedeSidebarThread({
+        status,
+        isUnread: true,
+        isWoke: true,
+        isActive: false,
+        isSelected: false,
+      }),
+    ).toBe(true);
+    expect(resolveSidebarThreadStatus({ ...thread, runtime }, [task])).toBe("working");
+    expect(resolveSidebarThreadStatus(thread, [{ ...task, enabled: false }])).toBe("ready");
+    expect(
+      resolveSidebarThreadStatus(thread, [{ ...task, threadId: ThreadId.make("other-thread") }]),
+    ).toBe("ready");
+    expect(resolveSidebarThreadStatus(thread, [])).toBe("ready");
+  });
+
+  it("does not let a schedule hide pending input or a failed run", () => {
+    const tasks = [{ threadId: idle.id, enabled: true }];
+    expect(resolveSidebarThreadStatus({ ...idle, hasPendingApprovals: true }, tasks)).toBe(
+      "approval",
+    );
+    expect(resolveSidebarThreadStatus({ ...idle, hasPendingUserInput: true }, tasks)).toBe("input");
+    expect(
+      resolveSidebarThreadStatus(
+        { ...idle, runtime: { ...runtime, status: "failed", lastErrorClass: "usage_limit" } },
+        tasks,
+      ),
+    ).toBe("limited");
+    expect(
+      resolveSidebarThreadStatus({ ...idle, runtime: { ...runtime, status: "failed" } }, tasks),
+    ).toBe("failed");
   });
 
   it("keeps a waiting runtime visible ahead of unread and woke presentation", () => {
