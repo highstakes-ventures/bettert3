@@ -1,3 +1,5 @@
+import * as CodexCloudChats from "../provider/CodexCloudChats.ts";
+import * as CloudThreadService from "./CloudThreadService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
@@ -297,6 +299,7 @@ const layerThreadTitleRegenerationProvided = ThreadTitleRegenerationService.laye
   ),
 );
 const layerEffectExecutorProvided = EffectWorker.layerExecutor.pipe(
+  Layer.provide(CodexCloudChats.layer),
   Layer.provide(
     Layer.mergeAll(
       layerRunFinalizationServiceProvided,
@@ -363,3 +366,16 @@ export const layerProduction = Layer.mergeAll(
   layerAgentSessionImporterProvided,
   EffectOutbox.layerPruneWorker.pipe(Layer.provide(EffectOutbox.layer)),
 ).pipe(Layer.provide(Scheduler.layer), Layer.provideMerge(layerEventInfrastructure));
+
+export const layerCloudThreads = CloudThreadService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      ProjectionStore.layer,
+      layerThreadLaunchProvided,
+      ThreadCommandExecutor.layer,
+      layerOrchestratorProvided,
+      layerManagedProjectFoldersProvided,
+      layerEventSinkProvided,
+    ),
+  ),
+);

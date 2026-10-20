@@ -1,12 +1,20 @@
 import * as Schema from "effect/Schema";
+import { ThreadId } from "./baseSchemas.ts";
 
 export const CodexCloudDestination = Schema.Struct({
   kind: Schema.Literal("codexCloud"),
   accountId: Schema.String,
-  environmentConfigId: Schema.String,
+  environmentConfigId: Schema.optional(Schema.String),
+  existingThreadId: Schema.optional(Schema.String),
+  origin: Schema.optional(Schema.Literals(["user", "automatic", "unknown"])),
+  githubRunUrl: Schema.optional(Schema.NullOr(Schema.String)),
   name: Schema.String,
   cwd: Schema.String.check(Schema.isPattern(/^\//)),
-});
+}).check(
+  Schema.makeFilter(
+    (destination) => !!destination.environmentConfigId || !!destination.existingThreadId,
+  ),
+);
 export type CodexCloudDestination = typeof CodexCloudDestination.Type;
 
 export const CloudChatDestinationsResult = Schema.Struct({
@@ -59,6 +67,13 @@ export const CloudChatReadResult = Schema.Struct({
   ),
   nextCursor: Schema.NullOr(Schema.String),
 });
+
+export const CloudChatOpenInput = Schema.Struct({
+  threadId: CloudChatReadInput.fields.threadId,
+  accountId: Schema.String,
+});
+export type CloudChatOpenInput = typeof CloudChatOpenInput.Type;
+export const CloudChatOpenResult = Schema.Struct({ threadId: ThreadId });
 
 export class CloudChatError extends Schema.TaggedError<CloudChatError>()("CloudChatError", {
   reason: Schema.Literals(["authentication", "accountChanged", "connection", "protocol"]),

@@ -1819,6 +1819,9 @@ describe("orchestration v2 provider switching", () => {
   it.live.each([
     "legacy",
     "cloud",
+    "provider-return-legacy",
+    "provider-return-cloud",
+    "provider-return-local",
     "failed",
     "interrupted",
     "stale",
@@ -1851,6 +1854,14 @@ describe("orchestration v2 provider switching", () => {
             injectedHistory,
             nativeThreadGeneration: generation,
             failResumeOnce,
+          }),
+          makeTestAdapter({
+            instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+            driver: CLAUDE_DRIVER,
+            capabilities: ClaudeProviderCapabilitiesV2,
+            modelSelection: CLAUDE_MODEL_SELECTION,
+            responseByRunOrdinal: { 2: "Claude context before returning to Codex" },
+            capturedTurns,
           }),
         ]);
         yield* Effect.gen(function* () {
@@ -1911,10 +1922,10 @@ describe("orchestration v2 provider switching", () => {
                 payload: {
                   ...source,
                   providerSessionId:
-                    scenario === "local"
+                    scenario === "local" || scenario === "provider-return-local"
                       ? source.providerSessionId
                       : ProviderSessionId.make(
-                          scenario === "cloud"
+                          scenario === "cloud" || scenario === "provider-return-cloud"
                             ? "provider-session:provider-instance:codex:shared:cloud-other"
                             : "provider-session:provider-instance:codex:shared",
                         ),
@@ -1960,6 +1971,45 @@ describe("orchestration v2 provider switching", () => {
             ],
           });
           const before = yield* orchestrator.getThreadProjection(threadId);
+          if (scenario.startsWith("provider-return-")) {
+            yield* orchestrator.dispatch({
+              ...dispatch(2),
+              modelSelection: CLAUDE_MODEL_SELECTION,
+            });
+            yield* wait(2);
+            yield* Ref.set(injectedHistory, []);
+            yield* Ref.set(failResumeOnce, scenario !== "provider-return-local");
+            yield* orchestrator.dispatch({ ...dispatch(3), modelSelection: CODEX_MODEL_SELECTION });
+            yield* wait(3);
+            const returned = yield* orchestrator.getThreadProjection(threadId);
+            assert.equal(returned.runs.at(-1)?.status, "completed");
+            const target = returned.providerThreads.find(
+              (thread) => thread.id === returned.thread.activeProviderThreadId,
+            )!;
+            const delivered =
+              JSON.stringify(yield* Ref.get(injectedHistory)) +
+              JSON.stringify((yield* Ref.get(capturedTurns)).slice(2));
+            assert.include(delivered, "Claude context before returning to Codex");
+            assert.isNull(
+              returned.providerSessions.find((session) => session.id === target.providerSessionId)
+                ?.executionDestination,
+            );
+            if (scenario === "provider-return-local") {
+              assert.deepEqual(target.nativeThreadRef, source.nativeThreadRef);
+            } else {
+              assert.notEqual(target.id, source.id);
+              assert.notDeepEqual(target.nativeThreadRef, source.nativeThreadRef);
+              assert.deepEqual(
+                returned.providerThreads.find((thread) => thread.id === source.id),
+                before.providerThreads.find((thread) => thread.id === source.id),
+              );
+              assert.include(delivered, "Saved user context");
+              assert.include(delivered, "Saved assistant context");
+              assert.equal(returned.contextHandoffs.at(-1)?.strategy, "full_thread_summary");
+              assert.isTrue(yield* Ref.get(failResumeOnce));
+            }
+            return;
+          }
           yield* Ref.set(injectedHistory, []);
           yield* Ref.set(failResumeOnce, true);
           const command = {

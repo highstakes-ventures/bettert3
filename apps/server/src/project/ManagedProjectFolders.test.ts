@@ -146,6 +146,14 @@ it.effect("offers nothing when the data dir sits inside a Git checkout", () =>
       assert.isTrue(Option.isNone(yield* scratch.scratchRoot));
       const failure = yield* Effect.flip(scratch.ensureScratchProject);
       assert.equal(failure._tag, "ScratchUnavailableError");
+      const first = yield* scratch.ensureCloudProject;
+      const again = yield* scratch.ensureCloudProject;
+      assert.equal(first.projectId, again.projectId);
+      const projects = yield* ProjectService.ProjectService;
+      const cloud = yield* projects.getById(first.projectId);
+      assert.isTrue(Option.isSome(cloud));
+      if (Option.isSome(cloud))
+        assert.equal(cloud.value.workspaceRoot, path.join(baseDir, "cloud"));
     }).pipe(Effect.provide(layer(baseDir)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

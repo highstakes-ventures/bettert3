@@ -23,6 +23,9 @@ import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 
+import { GithubIcon } from "lucide-react";
+import { ThreadDetailsControl } from "./ThreadDetailsControl";
+
 const GitActionsControl = memo(BaseGitActionsControl);
 
 export interface ThreadDetailsPanelProps extends Pick<
@@ -128,6 +131,18 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 />
               ) : null}
 
+              {props.runDestination?.githubRunUrl ? (
+                <ThreadDetailsControl
+                  variant="ghost"
+                  size="sm"
+                  render={
+                    <a href={props.runDestination.githubRunUrl} target="_blank" rel="noreferrer" />
+                  }
+                >
+                  <GithubIcon className="size-4" />
+                  <span className="min-w-0 flex-1 text-left">GitHub workflow run</span>
+                </ThreadDetailsControl>
+              ) : null}
               {density !== "essential" && props.showOpenInPicker ? (
                 <OpenInPicker
                   keybindings={props.keybindings}

@@ -145,6 +145,11 @@ export function restartContinuationRun(
     undefined,
   );
   if (!run) return;
+  if (
+    projection.thread.runDestination?.existingThreadId &&
+    run.id.startsWith(`cloud-run:${projection.thread.id}:`)
+  )
+    return;
   const preparedContinuation =
     run.status === "starting" && run.restartContinuationOfRunId !== undefined;
   const settled = run.status === "completed" || run.status === "waiting";
