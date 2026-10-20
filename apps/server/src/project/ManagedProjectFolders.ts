@@ -104,6 +104,7 @@ export class ManagedProjectFolders extends Context.Service<
     readonly scratchRoot: Effect.Effect<Option.Option<string>>;
     /** Finds or creates the Scratch project and (re)creates its folder. */
     readonly ensureScratchProject: Effect.Effect<{ readonly projectId: ProjectId }, ScratchError>;
+    readonly ensureCloudProject: Effect.Effect<{ readonly projectId: ProjectId }, ScratchError>;
     /**
      * Claims a fresh folder for a new thread in the Scratch project, named from
      * the date, its first message, and its id. None for every other project.
@@ -296,16 +297,8 @@ const make = Effect.gen(function* () {
       .makeDirectory(folder, { recursive: true })
       .pipe(Effect.mapError((cause) => new ScratchFolderError({ folder, cause })));
 
-  const ensureScratchProject: ManagedProjectFolders["Service"]["ensureScratchProject"] = Effect.gen(
-    function* () {
-      const workspaceRoot = yield* scratchRoot.pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.fail(new ScratchUnavailableError()),
-            onSome: Effect.succeed,
-          }),
-        ),
-      );
+  const ensureProject = (workspaceRoot: string, title: string) =>
+    Effect.gen(function* () {
       // Re-made on every call, so a deleted Scratch folder still runs threads.
       yield* makeScratchFolder(workspaceRoot);
       const id = yield* crypto
@@ -315,7 +308,7 @@ const make = Effect.gen(function* () {
         .bootstrap({
           commandId: CommandId.make(`scratch-project:${id}`),
           projectId: ProjectId.make(id),
-          title: "No project",
+          title,
           workspaceRoot,
         })
         .pipe(
@@ -337,13 +330,27 @@ const make = Effect.gen(function* () {
           .update({
             commandId: CommandId.make(`scratch-project-icon:${id}`),
             projectId: bootstrapped.project.id,
-            projectIcon: { kind: "lucide", name: "message-square-dashed", color: "gray" },
+            projectIcon: {
+              kind: "lucide",
+              name: title === "Codex Cloud" ? "cloud" : "message-square-dashed",
+              color: "gray",
+            },
           })
           .pipe(Effect.mapError((cause) => new ScratchProjectError({ workspaceRoot, cause })));
       }
       return { projectId: bootstrapped.project.id };
+    });
+
+  const ensureScratchProject: ManagedProjectFolders["Service"]["ensureScratchProject"] = Effect.gen(
+    function* () {
+      const root = yield* scratchRoot;
+      if (Option.isNone(root)) return yield* new ScratchUnavailableError();
+      return yield* ensureProject(root.value, "No project");
     },
   );
+  // Cloud never runs local checkpoints or commands, so this project can live
+  // inside a development checkout even when local Scratch is unavailable.
+  const ensureCloudProject = ensureProject(path.resolve(config.baseDir, "cloud"), "Codex Cloud");
 
   const isScratchProject = (projectId: ProjectId, root: string) =>
     projects.getById(projectId).pipe(
@@ -518,6 +525,7 @@ const make = Effect.gen(function* () {
   return ManagedProjectFolders.of({
     scratchRoot,
     ensureScratchProject,
+    ensureCloudProject,
     folderForThread,
     namedProjectsRoot,
     createNamedProject,

@@ -32,6 +32,8 @@ const decodeCollaborationMode = Schema.decodeUnknownSync(CollaborationMode);
 export function cloudRequest(message: unknown, destination: CodexCloudDestination) {
   const request = decodeOutgoing(message);
   if (request.method === "thread/start") {
+    if (destination.existingThreadId || !destination.environmentConfigId)
+      throw new Error("An existing Cloud conversation must be resumed.");
     return {
       ...request,
       params: {
@@ -45,6 +47,8 @@ export function cloudRequest(message: unknown, destination: CodexCloudDestinatio
     };
   }
   if (request.method === "thread/resume") {
+    if (destination.existingThreadId && request.params?.threadId !== destination.existingThreadId)
+      throw new Error("The Cloud binding cannot resume a different conversation.");
     return { ...request, params: { threadId: request.params?.threadId, excludeTurns: true } };
   }
   if (request.method === "turn/start") {

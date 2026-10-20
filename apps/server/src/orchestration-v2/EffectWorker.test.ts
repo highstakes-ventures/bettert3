@@ -1,3 +1,4 @@
+import * as CodexCloudChats from "../provider/CodexCloudChats.ts";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
@@ -82,6 +83,7 @@ function layerExecutorFor(input: {
   readonly failFirstStart?: Ref.Ref<boolean>;
   readonly threads?: Partial<ThreadManagementService.ThreadManagementService["Service"]>;
   readonly continueAfterRestart?: boolean;
+  readonly cloudInterrupt?: CodexCloudChats.CodexCloudChats["Service"]["interrupt"];
   readonly interrupt?: ProviderTurnControlService.ProviderTurnControlServiceV2Shape["interrupt"];
 }) {
   const record = (event: string) => Ref.update(input.events, (events) => [...events, event]);
@@ -150,6 +152,11 @@ function layerExecutorFor(input: {
     ),
   );
   return EffectWorker.layerExecutor.pipe(
+    Layer.provide(
+      Layer.mock(CodexCloudChats.CodexCloudChats)({
+        interrupt: input.cloudInterrupt ?? (() => Effect.die("Unexpected Cloud interrupt")),
+      }),
+    ),
     Layer.provide(
       Layer.mergeAll(
         layerDependencies,
@@ -906,5 +913,39 @@ it.effect.each(["confirmed", "unconfirmed", "failed"] as const)(
         yield* Ref.get(events),
         outcome === "confirmed" ? ["stop-child", "settle-child"] : ["stop-child"],
       );
+    }),
+);
+
+it.effect(
+  "executes a persisted Cloud Stop against the exact account and native IDs without local settlement",
+  () =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const events = yield* Ref.make<ReadonlyArray<string>>([]);
+      const calls: unknown[] = [];
+      const layer = layerExecutorFor({
+        events,
+        cloudInterrupt: (input) =>
+          Effect.sync(() => {
+            calls.push(input);
+          }),
+        threads: {
+          dispatch: () => Effect.die("Cloud Stop must wait for remote terminal evidence"),
+        },
+      });
+      const effect = {
+        ...restartEffect(now, { type: "detach" }),
+        request: {
+          type: "cloud-turn.interrupt" as const,
+          accountId: "account",
+          threadId: "native-thread",
+          turnId: "native-turn",
+        },
+      };
+      yield* Effect.gen(function* () {
+        const executor = yield* EffectWorker.OrchestrationEffectExecutorV2;
+        yield* executor.execute(effect);
+        assert.deepEqual(calls, [effect.request]);
+      }).pipe(Effect.provide(layer));
     }),
 );

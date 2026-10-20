@@ -1,3 +1,4 @@
+import * as CodexCloudChats from "../provider/CodexCloudChats.ts";
 import { CommandId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -81,6 +82,7 @@ export class OrchestrationEffectExecutorV2 extends Context.Service<
 export const layerExecutor: Layer.Layer<
   OrchestrationEffectExecutorV2,
   never,
+  | CodexCloudChats.CodexCloudChats
   | ProviderSessionManager.ProviderSessionManagerV2
   | RunFinalizationService.RunFinalizationService
   | CheckpointRollbackService.CheckpointRollbackServiceV2
@@ -97,6 +99,7 @@ export const layerExecutor: Layer.Layer<
     const resourceCleanup = yield* ResourceCleanupService.ResourceCleanupService;
     const checkpointRollback = yield* CheckpointRollbackService.CheckpointRollbackServiceV2;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+    const cloudChats = yield* CodexCloudChats.CodexCloudChats;
     const providerTurnControl = yield* ProviderTurnControlService.ProviderTurnControlServiceV2;
     const providerTurnStart = yield* ProviderTurnStartService.ProviderTurnStartServiceV2;
     const runtimeRequests = yield* RuntimeRequestService.RuntimeRequestServiceV2;
@@ -162,6 +165,19 @@ export const layerExecutor: Layer.Layer<
                     }),
                 ),
               );
+          case "cloud-turn.interrupt":
+            // Cloud confirms its eventual terminal state through snapshot refresh.
+            // An accepted Stop must not fabricate local completion.
+            return cloudChats.interrupt(effect.request).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationEffectExecutionError({
+                    effectId: effect.id,
+                    effectType: effect.request.type,
+                    cause,
+                  }),
+              ),
+            );
           case "provider-turn.interrupt": {
             const request = effect.request;
             return providerTurnControl

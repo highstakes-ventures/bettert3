@@ -1,3 +1,12 @@
+import * as ProjectionStore from "./ProjectionStore.ts";
+import * as ProviderRuntimeRecovery from "./ProviderRuntimeRecoveryService.ts";
+import * as EventSink from "./EventSink.ts";
+import * as Fiber from "effect/Fiber";
+import * as CloudThreads from "./CloudThreadService.ts";
+import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
+import * as CloudChats from "../provider/CodexCloudChats.ts";
+import * as Orchestrator from "./Orchestrator.ts";
+import { CloudChatError } from "@t3tools/contracts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
@@ -16,6 +25,7 @@ import {
   type ChatAttachment,
   CommandId,
   EnvironmentId,
+  EventId,
   DEFAULT_SERVER_SETTINGS,
   GitCommandError,
   MessageId,
@@ -90,6 +100,28 @@ const otherProject = {
   id: otherProjectId,
   title: "Other",
 } as const;
+
+it.effect("binds an existing Cloud conversation without starting a replacement turn", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const nativeId = "01a13ebf-a381-768e-baa7-f5475e3a6075";
+    const input = {
+      ...launchInput({ command: "cloud-import-binding", thread: "cloud-import-binding" }),
+      runDestination: { ...cloudDestination, existingThreadId: nativeId },
+      importedNativeThread: {
+        ref: { driver: ProviderDriverKind.make("codex"), nativeId, strength: "strong" as const },
+      },
+    };
+    const opened = yield* launches.launch(input);
+    const projection = yield* threads.getThreadProjection(opened.threadId);
+    assert.equal(projection.providerThreads[0]?.nativeThreadRef?.nativeId, nativeId);
+    assert.deepEqual(projection.runs, []);
+    assert.equal((yield* launches.launch(input)).threadId, opened.threadId);
+    assert.deepEqual(projection.checkpointScopes, []);
+  }).pipe(Effect.provide(harness.layer));
+});
 
 const adapter = {
   instanceId: modelSelection.instanceId,
@@ -243,6 +275,7 @@ function makeHarness(options: HarnessOptions = {}) {
   return {
     layer: Layer.mergeAll(
       layerLaunch,
+      layerOrchestrator,
       layerRegistry,
       layerThreadManagement,
       layerTitleRegeneration,
@@ -3116,3 +3149,494 @@ it.effect(
     }).pipe(Effect.provide(harness.layer));
   },
 );
+
+// The external Cloud socket is fake. Thread launch, event persistence, projections,
+// queueing, and PR linking use the real orchestration stack and an isolated database.
+function cloudHarness(status = "completed") {
+  const nativeId = "01a13ebf-a381-768e-baa7-f5475e3a6075";
+  const destination = {
+    ...cloudDestination,
+    existingThreadId: nativeId,
+    origin: "automatic" as const,
+  };
+  const snapshot: CloudChats.CloudThreadSnapshot = {
+    instanceId: modelSelection.instanceId,
+    destination,
+    thread: {
+      id: nativeId,
+      name: "Nightly",
+      preview: "",
+      createdAt: 100,
+      updatedAt: 200,
+      status: { type: "idle" },
+      model: modelSelection.model,
+      canAcceptDirectInput: true,
+      environments: [{ environmentId: "remote", cwd: destination.cwd }],
+    },
+    turns: [
+      {
+        id: "external-turn",
+        status,
+        startedAt: 100,
+        completedAt: status === "completed" ? 200 : null,
+        items: [
+          {
+            id: "external-user",
+            type: "userMessage",
+            content: [{ type: "text", text: "Nightly request" }],
+          },
+          {
+            id: "external-command",
+            type: "commandExecution",
+            command: "vp test",
+            aggregatedOutput: "passed",
+          },
+          {
+            id: "external-agent",
+            type: "agentMessage",
+            text: "Fixed https://github.com/recuut/platform/pull/42",
+          },
+        ],
+      },
+    ],
+  };
+  const harness = makeHarness({
+    managedFolders: Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      namedProjectsRoot: "/projects",
+      ensureCloudProject: Effect.succeed({ projectId, workspaceRoot: "/repo" }),
+    }),
+  });
+  const remote = vi.fn(() => Effect.succeed(snapshot));
+  const dependencies = Layer.mergeAll(
+    harness.layer,
+    ThreadCommandExecutor.layer,
+    ProjectionStore.layer.pipe(Layer.provide(harness.layer)),
+    Layer.mock(CloudChats.CodexCloudChats)({ snapshot: remote }),
+    NodeCrypto.layer,
+  );
+  const layer = CloudThreads.layer.pipe(Layer.provideMerge(dependencies));
+  return {
+    ...harness,
+    layer,
+    dependencies,
+    remote,
+    snapshot,
+    input: { accountId: destination.accountId, threadId: nativeId },
+  };
+}
+
+it.effect(
+  "opens external Cloud history idempotently as a normal thread and resumes its native binding",
+  () => {
+    const harness = cloudHarness();
+    return Effect.gen(function* () {
+      const cloud = yield* CloudThreads.CloudThreadService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const first = yield* cloud.open(harness.input);
+      const second = yield* cloud.open(harness.input);
+      assert.equal(second.threadId, first.threadId);
+      const imported = yield* threads.getThreadProjection(first.threadId);
+      assert.equal(imported.runs.length, 1);
+      assert.deepEqual(
+        (yield* threads.getThreadShell(first.threadId))?.executionDestination,
+        harness.snapshot.destination,
+      );
+      assert.deepEqual(
+        ProjectionStore.threadShellFromProjection(imported).executionDestination,
+        harness.snapshot.destination,
+      );
+      assert.deepEqual(
+        imported.messages.map((message) => message.text),
+        ["Nightly request", "Fixed https://github.com/recuut/platform/pull/42"],
+      );
+      assert.isTrue(
+        imported.turnItems.some(
+          (item) => item.type === "command_execution" && item.output === "passed",
+        ),
+      );
+      assert.equal(
+        imported.thread.pullRequests?.[0]?.url,
+        "https://github.com/recuut/platform/pull/42",
+      );
+      assert.equal(imported.providerThreads[0]?.nativeThreadRef?.nativeId, harness.input.threadId);
+      yield* threads.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("cloud-followup"),
+        threadId: first.threadId,
+        messageId: MessageId.make("cloud-followup"),
+        text: "Continue",
+        attachments: [],
+        createdBy: "user",
+        creationSource: "web",
+        dispatchMode: { type: "queue_after_active" },
+      });
+      const followup = yield* threads.getThreadProjection(first.threadId);
+      assert.equal(followup.runs.length, 2);
+      assert.equal(followup.runs[1]?.providerThreadId, imported.providerThreads[0]?.id);
+      assert.equal(followup.thread.runDestination?.existingThreadId, harness.input.threadId);
+      assert.equal(followup.checkpointScopes.length, 0);
+      assert.equal(harness.createWorktree.mock.calls.length, 0);
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
+
+it.effect("reuses an existing T3 Cloud owner rather than stealing its provider mapping", () => {
+  const harness = cloudHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const cloud = yield* CloudThreads.CloudThreadService;
+    const owner = yield* launches.launch({
+      ...launchInput({ command: "existing-owner", thread: "existing-owner" }),
+      runDestination: harness.snapshot.destination,
+      importedNativeThread: {
+        ref: {
+          driver: ProviderDriverKind.make("codex"),
+          nativeId: harness.input.threadId,
+          strength: "strong",
+        },
+      },
+    });
+    const opened = yield* cloud.open(harness.input);
+    assert.equal(opened.threadId, owner.threadId);
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    assert.equal((yield* orchestrator.getShellSnapshot()).threads.length, 1);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("preserves account-change failures and creates no local Cloud thread", () => {
+  const harness = cloudHarness();
+  harness.remote.mockImplementation(
+    () => Effect.fail(new CloudChatError({ reason: "accountChanged" })) as never,
+  );
+  return Effect.gen(function* () {
+    const cloud = yield* CloudThreads.CloudThreadService;
+    const result = yield* cloud.open(harness.input).pipe(Effect.result);
+    assert.equal(result._tag, "Failure");
+    if (result._tag === "Failure") assert.equal(result.failure.reason, "accountChanged");
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    assert.equal((yield* orchestrator.getShellSnapshot()).threads.length, 0);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("queues input behind an external active turn until Cloud reports it terminal", () => {
+  const harness = cloudHarness("inProgress");
+  return Effect.gen(function* () {
+    const cloud = yield* CloudThreads.CloudThreadService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const opened = yield* cloud.open(harness.input);
+    yield* threads.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("cloud-queued"),
+      threadId: opened.threadId,
+      messageId: MessageId.make("cloud-queued"),
+      text: "After that",
+      attachments: [],
+      createdBy: "user",
+      creationSource: "web",
+      dispatchMode: { type: "queue_after_active" },
+    });
+    const queued = yield* threads.getThreadProjection(opened.threadId);
+    assert.deepEqual(
+      queued.runs.map((run) => run.status),
+      ["running", "queued"],
+    );
+    harness.remote.mockImplementation(() =>
+      Effect.succeed({
+        ...harness.snapshot,
+        turns: harness.snapshot.turns.map((turn) => ({
+          ...turn,
+          status: "completed",
+          completedAt: 200,
+        })),
+      }),
+    );
+    const sink = yield* EventSink.EventSinkV2;
+    const started = yield* sink.stream({ threadId: opened.threadId }).pipe(
+      Stream.filter(
+        (stored) =>
+          stored.event.type === "run.updated" &&
+          stored.event.payload.id === queued.runs[1]?.id &&
+          stored.event.payload.status === "starting",
+      ),
+      Stream.runHead,
+      Effect.forkChild,
+    );
+    yield* cloud.open(harness.input);
+    yield* Fiber.join(started);
+    const completed = yield* threads.getThreadProjection(opened.threadId);
+    assert.equal(completed.runs[0]?.status, "completed");
+    // The real event listener enqueues the dispatch of the follow-up.
+    const outbox = yield* EffectOutbox.EffectOutboxV2;
+    assert.isTrue(
+      (yield* outbox.listByCommandId(
+        CommandId.make(`command:system:start-queued:${queued.runs[1]!.id}`),
+      )).some((effect) => effect.request.type === "provider-turn.start"),
+    );
+  }).pipe(Effect.scoped, Effect.provide(harness.layer));
+});
+
+it.effect("persists a remote Stop without pretending an imported Cloud turn has ended", () => {
+  const harness = cloudHarness("inProgress");
+  return Effect.gen(function* () {
+    const cloud = yield* CloudThreads.CloudThreadService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const opened = yield* cloud.open(harness.input);
+    const stopId = CommandId.make("cloud-stop");
+    yield* threads.dispatch({ type: "thread.stop", commandId: stopId, threadId: opened.threadId });
+    const outbox = yield* EffectOutbox.EffectOutboxV2;
+    const effects = yield* outbox.listByCommandId(stopId);
+    assert.deepInclude(
+      effects.find((effect) => effect.request.type === "cloud-turn.interrupt")?.request,
+      {
+        type: "cloud-turn.interrupt",
+        accountId: harness.input.accountId,
+        threadId: harness.input.threadId,
+        turnId: "external-turn",
+      },
+    );
+    assert.equal((yield* threads.getThreadProjection(opened.threadId)).runs[0]?.status, "running");
+    yield* outbox.reconcileAfterProcessLoss;
+    assert.equal(
+      (yield* outbox.listByCommandId(stopId)).find(
+        (effect) => effect.request.type === "cloud-turn.interrupt",
+      )?.status,
+      "pending",
+    );
+    harness.remote.mockImplementation(() =>
+      Effect.succeed({
+        ...harness.snapshot,
+        turns: harness.snapshot.turns.map((turn) => ({
+          ...turn,
+          status: "interrupted",
+          completedAt: 200,
+        })),
+      }),
+    );
+    yield* cloud.open(harness.input);
+    assert.equal(
+      (yield* threads.getThreadProjection(opened.threadId)).runs[0]?.status,
+      "interrupted",
+    );
+  }).pipe(Effect.scoped, Effect.provide(harness.layer));
+});
+
+it.effect("discovers a later external turn when an idle bound Cloud thread refreshes", () => {
+  const harness = cloudHarness();
+  return Effect.gen(function* () {
+    const cloud = yield* CloudThreads.CloudThreadService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const opened = yield* cloud.open(harness.input);
+    harness.remote.mockImplementation(() =>
+      Effect.succeed({
+        ...harness.snapshot,
+        turns: [
+          {
+            id: "later-turn",
+            status: "inProgress",
+            startedAt: 300,
+            items: [{ id: "later-user", type: "userMessage", content: ["External follow-up"] }],
+          },
+        ],
+      }),
+    );
+    const refreshed = yield* cloud.open(harness.input);
+    assert.equal(refreshed.threadId, opened.threadId);
+    const projection = yield* threads.getThreadProjection(opened.threadId);
+    assert.deepEqual(
+      projection.runs.map((run) => run.status),
+      ["completed", "running"],
+    );
+    assert.equal(projection.messages.at(-1)?.text, "External follow-up");
+  }).pipe(Effect.scoped, Effect.provide(harness.layer));
+});
+
+it.effect("does not import a normal turn accepted before adapter ingestion", () => {
+  const harness = cloudHarness();
+  return Effect.gen(function* () {
+    const cloud = yield* CloudThreads.CloudThreadService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const opened = yield* cloud.open(harness.input);
+    yield* threads.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("cloud-accepting"),
+      threadId: opened.threadId,
+      messageId: MessageId.make("cloud-accepting"),
+      text: "Continue",
+      attachments: [],
+      createdBy: "user",
+      creationSource: "web",
+      dispatchMode: { type: "queue_after_active" },
+    });
+    harness.remote.mockImplementation(() =>
+      Effect.succeed({
+        ...harness.snapshot,
+        turns: [
+          {
+            id: "accepted-before-ingestion",
+            status: "inProgress",
+            startedAt: 300,
+            items: [{ id: "accepted-input", type: "userMessage", content: ["Continue"] }],
+          },
+        ],
+      }),
+    );
+    yield* cloud.open(harness.input);
+    const projection = yield* threads.getThreadProjection(opened.threadId);
+    assert.equal(projection.runs.length, 2);
+    assert.isFalse(
+      projection.providerTurns.some(
+        (turn) => turn.nativeTurnRef?.nativeId === "accepted-before-ingestion",
+      ),
+    );
+    const run = projection.runs[1]!;
+    const nativeTurnId = IdAllocator.derive.providerTurn({
+      driver: ProviderDriverKind.make("codex"),
+      nativeTurnId: "accepted-before-ingestion",
+    });
+    const sink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    yield* sink.write({
+      events: [
+        {
+          id: EventId.make("normal-adapter-turn"),
+          threadId: opened.threadId,
+          runId: run.id,
+          type: "provider-turn.updated",
+          providerInstanceId: modelSelection.instanceId,
+          occurredAt: now,
+          payload: {
+            id: nativeTurnId,
+            providerThreadId: run.providerThreadId!,
+            nodeId: run.rootNodeId!,
+            runAttemptId: run.activeAttemptId,
+            nativeTurnRef: {
+              driver: ProviderDriverKind.make("codex"),
+              nativeId: "accepted-before-ingestion",
+              strength: "strong",
+            },
+            ordinal: 2,
+            status: "completed",
+            startedAt: now,
+            completedAt: now,
+          },
+        },
+        {
+          id: EventId.make("normal-adapter-completed"),
+          threadId: opened.threadId,
+          runId: run.id,
+          type: "run.updated",
+          providerInstanceId: modelSelection.instanceId,
+          occurredAt: now,
+          payload: { ...run, status: "completed", completedAt: now },
+        },
+      ],
+    });
+    yield* cloud.open(harness.input);
+    const refreshed = yield* threads.getThreadProjection(opened.threadId);
+    assert.equal(refreshed.runs.length, 2);
+    assert.equal(
+      refreshed.providerTurns.find((turn) => turn.id === nativeTurnId)?.runAttemptId,
+      run.activeAttemptId,
+    );
+  }).pipe(Effect.scoped, Effect.provide(harness.layer));
+});
+
+it.effect("preserves external active work and its queue across runtime recovery", () => {
+  const harness = cloudHarness("inProgress");
+  const layer = Layer.merge(
+    harness.layer,
+    ProviderRuntimeRecovery.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          harness.layer,
+          ServerSettings.layerTest(),
+          IdAllocator.layer,
+          ProjectionStore.layer.pipe(Layer.provide(harness.layer)),
+        ),
+      ),
+    ),
+  );
+  return Effect.gen(function* () {
+    const cloud = yield* CloudThreads.CloudThreadService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const recovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
+    const opened = yield* cloud.open(harness.input);
+    yield* threads.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("cloud-restart-queued"),
+      threadId: opened.threadId,
+      messageId: MessageId.make("cloud-restart-queued"),
+      text: "After restart",
+      attachments: [],
+      createdBy: "user",
+      creationSource: "web",
+      dispatchMode: { type: "queue_after_active" },
+    });
+    yield* recovery.reconcile("shutdown");
+    yield* recovery.recover;
+    const projection = yield* threads.getThreadProjection(opened.threadId);
+    assert.deepEqual(
+      projection.runs.map((run) => run.status),
+      ["running", "queued"],
+    );
+    assert.isNotTrue(projection.runs[1]?.queueHeld);
+    assert.equal(
+      projection.nodes.find((node) => node.runId === projection.runs[0]?.id)?.status,
+      "running",
+    );
+  }).pipe(Effect.scoped, Effect.provide(layer));
+});
+
+it.effect("restores Cloud monitoring after restart without an open client", () => {
+  const harness = cloudHarness("inProgress");
+  return Effect.gen(function* () {
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const opened = yield* Effect.gen(function* () {
+      const cloud = yield* CloudThreads.CloudThreadService;
+      return yield* cloud.open(harness.input);
+    }).pipe(Effect.provide(CloudThreads.layer), Effect.scoped);
+    yield* threads.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("cloud-boot-queued"),
+      threadId: opened.threadId,
+      messageId: MessageId.make("cloud-boot-queued"),
+      text: "After restart",
+      attachments: [],
+      createdBy: "user",
+      creationSource: "web",
+      dispatchMode: { type: "queue_after_active" },
+    });
+    const queued = (yield* threads.getThreadProjection(opened.threadId)).runs[1]!;
+    harness.remote.mockImplementation(() =>
+      Effect.succeed({
+        ...harness.snapshot,
+        turns: harness.snapshot.turns.map((turn) => ({
+          ...turn,
+          status: "completed",
+          completedAt: 200,
+        })),
+      }),
+    );
+    yield* Effect.gen(function* () {
+      yield* CloudThreads.CloudThreadService;
+      const sink = yield* EventSink.EventSinkV2;
+      const started = yield* sink.stream({ threadId: opened.threadId }).pipe(
+        Stream.filter(
+          (stored) =>
+            stored.event.type === "run.updated" &&
+            stored.event.payload.id === queued.id &&
+            stored.event.payload.status === "starting",
+        ),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("5 seconds");
+      yield* Fiber.join(started);
+      const projection = yield* threads.getThreadProjection(opened.threadId);
+      assert.deepEqual(
+        projection.runs.map((run) => run.status),
+        ["completed", "starting"],
+      );
+    }).pipe(Effect.provide(CloudThreads.layer), Effect.scoped);
+  }).pipe(Effect.provide(harness.dependencies), Effect.scoped);
+});

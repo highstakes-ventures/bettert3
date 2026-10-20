@@ -194,8 +194,20 @@ export const make = Effect.gen(function* () {
       continueAfterRestart: boolean,
     ) {
       const now = yield* DateTime.now;
+      // Imported Cloud work has no local process to lose on restart.
+      const externalRuns = new Set(
+        projection.thread.runDestination?.existingThreadId
+          ? projection.runs
+              .filter((run) => run.id.startsWith(`cloud-run:${projection.thread.id}:`))
+              .map((run) => run.id)
+          : [],
+      );
+      const externalWorkActive = projection.runs.some(
+        (run) => externalRuns.has(run.id) && run.status === "running",
+      );
       const runs = [] as Array<OrchestrationV2ThreadProjection["runs"][number]>;
       for (const run of nonterminalRuns(projection)) {
+        if (externalRuns.has(run.id)) continue;
         if (run.status === "waiting") {
           const checkpointEffects = yield* outbox
             .listByCommandId(CommandId.make(`command:effect:checkpoint.capture:${run.id}`))
@@ -314,7 +326,7 @@ export const make = Effect.gen(function* () {
           runs.push(run);
           continue;
         }
-        if (run.queueHeld === true) continue;
+        if (externalWorkActive || run.queueHeld === true) continue;
         events.push({
           id: yield* allocateEventId(),
           type: "run.updated",
@@ -478,7 +490,10 @@ export const make = Effect.gen(function* () {
       const recoveredNonterminalRunIds = new Set(runs.map((run) => run.id));
       const cancelledStaleNodeIds = new Set<string>();
       for (const item of projection.turnItems ?? []) {
-        if (item.runId !== null && recoveredNonterminalRunIds.has(item.runId)) {
+        if (
+          item.runId !== null &&
+          (externalRuns.has(item.runId) || recoveredNonterminalRunIds.has(item.runId))
+        ) {
           continue;
         }
         if (!isBackgroundCapableTurnItemType(item.type)) {

@@ -1,3 +1,4 @@
+import * as CodexCloudChats from "../../provider/CodexCloudChats.ts";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -480,6 +481,7 @@ export function layerWithRegistry<Error>(
         )
       : Layer.empty;
   const layerEffectExecutorProvided = EffectWorker.layerExecutor.pipe(
+    Layer.provide(Layer.mock(CodexCloudChats.CodexCloudChats)({})),
     Layer.provide(
       Layer.mergeAll(
         layerRunFinalizationServiceProvided,
