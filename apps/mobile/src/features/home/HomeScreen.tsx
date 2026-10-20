@@ -46,7 +46,7 @@ import { useNativeWorkspaceColumnsSupported } from "../../native/NativeWorkspace
 import { useThreadSearch } from "../../state/queries";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { usePendingThreadOrder } from "../../state/thread-order";
-import { threadListEnvironmentsAtom } from "../../state/server";
+import { threadListEnvironmentsAtom, timerThreadKeysAtom } from "../../state/server";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import {
@@ -57,6 +57,7 @@ import {
   ThreadListV2ShowMoreRow,
   ThreadListV2SnoozedShelfHeader,
   ThreadListV2WorkingShelfHeader,
+  ThreadListV2TimerShelfHeader,
 } from "../threads/thread-list-v2-items";
 import { useThreadRowProviderInstanceResolver } from "../threads/thread-provider-instance";
 import {
@@ -528,10 +529,13 @@ export function HomeScreen(props: HomeScreenProps) {
     snoozedShelfExpanded,
     workingShelfEnabled,
     workingShelfExpanded,
+    timerShelfExpanded,
+    toggleTimerShelf,
     toggleSettledShelf,
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
+  const timerThreadKeys = useAtomValue(timerThreadKeysAtom);
   // The queued-start and snooze helpers need a clock while the list stays open.
   const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16));
   // Snooze wake times are second-precise; a counter bumped exactly at the
@@ -618,12 +622,16 @@ export function HomeScreen(props: HomeScreenProps) {
       now: new Date().toISOString(),
       workingShelfEnabled,
       workingShelfExpanded,
+      timerThreadKeys,
+      timerShelfExpanded,
       inboxReturnAt: threadListInboxReturns.returnedAt,
       snoozedShelfExpanded,
       settledShelfExpanded,
       selectedThreadKey,
     });
   }, [
+    timerThreadKeys,
+    timerShelfExpanded,
     workingShelfEnabled,
     workingShelfExpanded,
     pendingOrder,
@@ -691,6 +699,9 @@ export function HomeScreen(props: HomeScreenProps) {
         items: threadListV2Layout.items,
         pendingTasks: v2PendingTasks,
         workingCount: threadListV2Layout.workingCount,
+        timerCount: threadListV2Layout.timerCount,
+        timerShelfExpanded,
+        timerShelfHeaderIndex: threadListV2Layout.timerShelfHeaderIndex,
         workingShelfExpanded,
         workingShelfHeaderIndex: threadListV2Layout.workingShelfHeaderIndex,
         snoozedCount: threadListV2Layout.snoozedCount,
@@ -714,6 +725,7 @@ export function HomeScreen(props: HomeScreenProps) {
       snoozedShelfExpanded,
       snoozeEnvironmentIds,
       threadListV2Layout,
+      timerShelfExpanded,
       props.projects,
       props.selectedEnvironmentId,
       v2ScopedProjectKeys,
@@ -754,6 +766,16 @@ export function HomeScreen(props: HomeScreenProps) {
             showTrailingDivider={item.showTrailingDivider}
             onSelectPendingTask={props.onSelectPendingTask}
             onDeletePendingTask={props.onDeletePendingTask}
+          />
+        );
+      }
+      if (item.type === "v2-timer-shelf") {
+        return (
+          <ThreadListV2TimerShelfHeader
+            count={item.count}
+            disabled={item.disabled}
+            expanded={item.expanded}
+            onToggle={toggleTimerShelf}
           />
         );
       }
@@ -896,6 +918,7 @@ export function HomeScreen(props: HomeScreenProps) {
       toggleSettledShelf,
       toggleSnoozedShelf,
       toggleWorkingShelf,
+      toggleTimerShelf,
       v2ProjectTitleByProjectKey,
       props.searchQuery,
       workingShelfEnabled,

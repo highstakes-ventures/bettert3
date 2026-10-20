@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { createTimerThreadKeysAtom } from "@t3tools/client-runtime/state/thread-inbox";
 import type { EnvironmentPresentation } from "@t3tools/client-runtime/connection";
 import {
   createEnvironmentPresentationAtoms,
@@ -19,6 +20,12 @@ export const environmentPresentations = createEnvironmentPresentationAtoms({
 export const environmentSummaries = createEnvironmentSummaryAtoms({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   presentationAtom: environmentPresentations.presentationAtom,
+});
+
+export const timerThreadKeysAtom = createTimerThreadKeysAtom({
+  environmentIdsAtom: environmentSummaries.environmentIdsAtom,
+  getTasksAtom: (environmentId) =>
+    serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
 });
 
 const EMPTY_ENVIRONMENT_PRESENTATION_ATOM = Atom.make<EnvironmentPresentation | null>(null).pipe(

@@ -1,5 +1,7 @@
 import { createServerEnvironmentAtoms } from "@t3tools/client-runtime/state/server";
 import { createEnvironmentServerConfigsAtom } from "@t3tools/client-runtime/state/shell";
+import { createTimerThreadKeysAtom } from "@t3tools/client-runtime/state/thread-inbox";
+import { Atom } from "effect/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
@@ -14,6 +16,12 @@ export const serverEnvironment = createServerEnvironmentAtoms(connectionAtomRunt
 export const environmentServerConfigsAtom = createEnvironmentServerConfigsAtom({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   serverConfigValueAtom: serverEnvironment.configValueAtom,
+});
+
+export const timerThreadKeysAtom = createTimerThreadKeysAtom({
+  environmentIdsAtom: Atom.make((get) => [...get(environmentServerConfigsAtom).keys()]),
+  getTasksAtom: (environmentId) =>
+    serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
 });
 
 export const threadListEnvironmentsAtom = createThreadListEnvironmentsAtom(

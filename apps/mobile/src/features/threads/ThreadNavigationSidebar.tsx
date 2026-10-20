@@ -32,7 +32,7 @@ import { useProjects, useNavigationThreadShells } from "../../state/entities";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
 import { usePendingThreadOrder } from "../../state/thread-order";
-import { threadListEnvironmentsAtom } from "../../state/server";
+import { threadListEnvironmentsAtom, timerThreadKeysAtom } from "../../state/server";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import { useWorkspaceState } from "../../state/workspace";
@@ -64,6 +64,7 @@ import {
   ThreadListV2ShowMoreRow,
   ThreadListV2SnoozedShelfHeader,
   ThreadListV2WorkingShelfHeader,
+  ThreadListV2TimerShelfHeader,
 } from "./thread-list-v2-items";
 import { useThreadRowProviderInstanceResolver } from "./thread-provider-instance";
 import {
@@ -300,10 +301,13 @@ function ThreadNavigationSidebarPane(
     snoozedShelfExpanded,
     workingShelfEnabled,
     workingShelfExpanded,
+    timerShelfExpanded,
+    toggleTimerShelf,
     toggleSettledShelf,
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
+  const timerThreadKeys = useAtomValue(timerThreadKeysAtom);
   // The queued-start and snooze helpers need a clock while the pane stays open.
   const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16));
   // Snooze wake times are second-precise; a counter bumped exactly at the
@@ -386,12 +390,16 @@ function ThreadNavigationSidebarPane(
       now: new Date().toISOString(),
       workingShelfEnabled,
       workingShelfExpanded,
+      timerThreadKeys,
+      timerShelfExpanded,
       inboxReturnAt: threadListInboxReturns.returnedAt,
       snoozedShelfExpanded,
       settledShelfExpanded,
       selectedThreadKey: props.selectedThreadKey ?? null,
     });
   }, [
+    timerThreadKeys,
+    timerShelfExpanded,
     workingShelfEnabled,
     workingShelfExpanded,
     pendingOrder,
@@ -455,6 +463,9 @@ function ThreadNavigationSidebarPane(
       items: threadListV2Layout.items,
       pendingTasks: v2PendingTasks,
       workingCount: threadListV2Layout.workingCount,
+      timerCount: threadListV2Layout.timerCount,
+      timerShelfExpanded,
+      timerShelfHeaderIndex: threadListV2Layout.timerShelfHeaderIndex,
       workingShelfExpanded,
       workingShelfHeaderIndex: threadListV2Layout.workingShelfHeaderIndex,
       snoozedCount: threadListV2Layout.snoozedCount,
@@ -490,6 +501,7 @@ function ThreadNavigationSidebarPane(
     snoozedShelfExpanded,
     snoozeEnvironmentIds,
     threadListV2Layout,
+    timerShelfExpanded,
     projects,
     sectionGrouping,
     collapsedThreadSections,
@@ -772,6 +784,16 @@ function ThreadNavigationSidebarPane(
             />
           );
         }
+        case "v2-timer-shelf":
+          return (
+            <ThreadListV2TimerShelfHeader
+              count={item.count}
+              disabled={item.disabled}
+              expanded={item.expanded}
+              onToggle={toggleTimerShelf}
+              pane="sidebar"
+            />
+          );
         case "v2-working-shelf":
           return (
             <ThreadListV2WorkingShelfHeader
@@ -851,6 +873,7 @@ function ThreadNavigationSidebarPane(
       toggleSettledShelf,
       toggleSnoozedShelf,
       toggleWorkingShelf,
+      toggleTimerShelf,
       unpinThread,
       unsettleThread,
       unsnoozeThread,

@@ -21,6 +21,10 @@ export function useThreadListV2ShelfPreferences() {
   const workingShelfEnabled = loaded && preferencesResult.value.workingShelfEnabled === true;
   const workingShelfExpanded =
     loaded && preferencesResult.value.threadListWorkingShelfExpanded === true;
+  const timerShelfExpanded =
+    loaded && preferencesResult.value.threadListTimerShelfExpanded === true;
+  const timerShelfExpandedRef = useRef(timerShelfExpanded);
+  timerShelfExpandedRef.current = timerShelfExpanded;
   const snoozedShelfExpandedRef = useRef(snoozedShelfExpanded);
   const settledShelfExpandedRef = useRef(settledShelfExpanded);
   const workingShelfExpandedRef = useRef(workingShelfExpanded);
@@ -46,6 +50,12 @@ export function useThreadListV2ShelfPreferences() {
     workingShelfExpandedRef.current = expanded;
     savePreferences({ threadListWorkingShelfExpanded: expanded });
   }, [loaded, savePreferences]);
+  const toggleTimerShelf = useCallback(() => {
+    if (!loaded) return;
+    const expanded = !timerShelfExpandedRef.current;
+    timerShelfExpandedRef.current = expanded;
+    savePreferences({ threadListTimerShelfExpanded: expanded });
+  }, [loaded, savePreferences]);
 
   return {
     loaded,
@@ -55,6 +65,8 @@ export function useThreadListV2ShelfPreferences() {
     snoozedShelfExpanded,
     workingShelfEnabled,
     workingShelfExpanded,
+    timerShelfExpanded,
+    toggleTimerShelf,
     toggleSettledShelf,
     toggleSnoozedShelf,
     toggleWorkingShelf,

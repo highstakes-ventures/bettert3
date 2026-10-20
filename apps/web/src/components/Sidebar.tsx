@@ -29,6 +29,7 @@ import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
+import { timerThreadKeysAtom } from "../state/presentation";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
 import {
@@ -820,7 +821,7 @@ function SidebarDragBoundary(props: {
 
 // Shelf headers stay visible and keep their measured height while dragging.
 function SidebarSectionHeader(props: {
-  marker: "working-header" | "snoozed-header" | "settled-header";
+  marker: "timer-header" | "working-header" | "snoozed-header" | "settled-header";
   label: string;
   className?: string;
   // While dragging, the settled header reads at full strength and takes the
@@ -830,11 +831,13 @@ function SidebarSectionHeader(props: {
   toggle: { expanded: boolean; onToggle: () => void };
 }) {
   const shelf =
-    props.marker === "working-header"
-      ? "working"
-      : props.marker === "snoozed-header"
-        ? "snoozed"
-        : "settled";
+    props.marker === "timer-header"
+      ? "timer"
+      : props.marker === "working-header"
+        ? "working"
+        : props.marker === "snoozed-header"
+          ? "snoozed"
+          : "settled";
   const snoozed = shelf === "snoozed";
   return (
     <SortableSidebarMarker
@@ -2464,6 +2467,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 export default function Sidebar() {
   const projects = useProjects();
   const threads = useThreadShells();
+  const timerThreadKeys = useAtomValue(timerThreadKeysAtom);
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -2882,6 +2886,7 @@ export default function Sidebar() {
     draggableThreadKeys,
     activeReorderableThreadKeys,
     activeThreads,
+    timerThreads,
     workingThreads,
     snoozedThreads,
     settledThreads,
@@ -2907,11 +2912,16 @@ export default function Sidebar() {
     inboxReturns.observe(workingShelfEnabled ? threads : null);
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
+    const timer: EnvironmentThreadShell[] = [];
     const working: EnvironmentThreadShell[] = [];
     // Working beta: only inbox threads fold away. Pins stay where the user
     // put them, and snoozed or settled threads keep their shelves.
     const inbox = (thread: EnvironmentThreadShell) =>
-      workingShelfEnabled && isSidebarThreadWorking(thread) ? working : active;
+      timerThreadKeys.has(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
+        ? timer
+        : workingShelfEnabled && isSidebarThreadWorking(thread)
+          ? working
+          : active;
     const snoozed: EnvironmentThreadShell[] = [];
     const settled: EnvironmentThreadShell[] = [];
     const draggable = new Set<string>();
@@ -2993,6 +3003,7 @@ export default function Sidebar() {
               getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
             }),
       // Newest send first; finishing and waking again do not move a row.
+      timerThreads: sortWorkingThreadsBySend(timer),
       workingThreads: sortWorkingThreadsBySend(working),
       // Soonest wake first: "what comes back next" is the shelf's question.
       snoozedThreads: snoozed.toSorted(
@@ -3012,6 +3023,7 @@ export default function Sidebar() {
     serverConfigs,
     snoozeWakeTick,
     threads,
+    timerThreadKeys,
     workingShelfEnabled,
   ]);
 
@@ -3023,11 +3035,12 @@ export default function Sidebar() {
     () => [
       ...pinnedThreads,
       ...activeThreads,
+      ...timerThreads,
       ...workingThreads,
       ...snoozedThreads,
       ...settledThreads,
     ],
-    [activeThreads, pinnedThreads, settledThreads, snoozedThreads, workingThreads],
+    [activeThreads, pinnedThreads, settledThreads, snoozedThreads, timerThreads, workingThreads],
   );
   const searchEnvironmentIds = useConnectedEnvironmentIds();
   // useThreadSearch owns the debounce and the two-character floor.
@@ -3167,6 +3180,25 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  const [timerShelfExpanded, setTimerShelfExpanded] = useLocalStorage(
+    "t3code:sidebar:timer-expanded",
+    false,
+    Schema.Boolean,
+  );
+  const toggleTimerShelf = useCallback(
+    () => setTimerShelfExpanded((value) => !value),
+    [setTimerShelfExpanded],
+  );
+  const visibleTimerThreads = useMemo(() => {
+    if (timerShelfExpanded) return timerThreads;
+    if (routeThreadKey === null) return EMPTY_THREADS;
+    const routeThread = timerThreads.find(
+      (thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+    );
+    return routeThread === undefined ? EMPTY_THREADS : [routeThread];
+  }, [routeThreadKey, timerShelfExpanded, timerThreads]);
+
   // The Working shelf (beta) collapses the same way, with the same route
   // exception: sending a message folds the open thread into the shelf, and
   // its row must stay visible there.
@@ -3193,6 +3225,7 @@ export default function Sidebar() {
     () => [
       ...pinnedThreads,
       ...activeThreads,
+      ...visibleTimerThreads,
       ...visibleWorkingThreads,
       ...visibleSnoozedThreads,
       ...renderedSettledThreads,
@@ -3200,6 +3233,7 @@ export default function Sidebar() {
     [
       pinnedThreads,
       activeThreads,
+      visibleTimerThreads,
       visibleWorkingThreads,
       visibleSnoozedThreads,
       renderedSettledThreads,
@@ -3672,7 +3706,7 @@ export default function Sidebar() {
       const viewport = list.closest('[data-slot="scroll-area-viewport"]')?.getBoundingClientRect();
       const shelf = list
         .querySelector(
-          '[data-testid="sidebar-working-header"], [data-testid="sidebar-snoozed-header"], [data-testid="sidebar-settled-header"]',
+          '[data-testid="sidebar-timer-header"], [data-testid="sidebar-working-header"], [data-testid="sidebar-snoozed-header"], [data-testid="sidebar-settled-header"]',
         )
         ?.getBoundingClientRect();
       const headings = Array.from(
@@ -3742,11 +3776,12 @@ export default function Sidebar() {
     };
     add(pinnedThreads, "pinned");
     add(activeThreads, "active");
+    add(timerThreads, "timer");
     add(workingThreads, "working");
     add(snoozedThreads, "snoozed");
     add(settledThreads, "settled");
     return map;
-  }, [activeThreads, pinnedThreads, settledThreads, snoozedThreads, workingThreads]);
+  }, [activeThreads, pinnedThreads, settledThreads, snoozedThreads, timerThreads, workingThreads]);
   const sectionByThreadKeyRef = useRef(sectionByThreadKey);
   sectionByThreadKeyRef.current = sectionByThreadKey;
   // Drag a row action to apply it to the armed rows in the same section.
@@ -3988,6 +4023,7 @@ export default function Sidebar() {
     if (
       pinnedThreads.length +
         activeThreads.length +
+        timerThreads.length +
         workingThreads.length +
         snoozedThreads.length +
         settledThreads.length ===
@@ -4003,6 +4039,10 @@ export default function Sidebar() {
     const activeRows = rowsOf(activeThreads, "active");
     items.push({ kind: "marker", marker: "active-placeholder" });
     items.push(...activeRows);
+    if (timerThreads.length > 0) {
+      items.push({ kind: "marker", marker: "timer-header" });
+      items.push(...rowsOf(visibleTimerThreads, "timer"));
+    }
     if (workingThreads.length > 0) {
       items.push({ kind: "marker", marker: "working-header" });
       items.push(...rowsOf(visibleWorkingThreads, "working"));
@@ -4024,6 +4064,8 @@ export default function Sidebar() {
     settledThreads.length,
     snoozedThreads.length,
     visibleSnoozedThreads,
+    visibleTimerThreads,
+    timerThreads.length,
     visibleWorkingThreads,
     workingThreads.length,
   ]);
@@ -5584,13 +5626,12 @@ export default function Sidebar() {
                         const threadKey = scopedThreadKey(
                           scopeThreadRef(thread.environmentId, thread.id),
                         );
-                        // Settled and snoozed are the ONLY things that collapse a
-                        // row: every other thread is a full card. Density comes
-                        // from users (or the auto rules) actually parking work,
-                        // not from the sidebar second-guessing what still matters.
-                        // Working rows stay cards so their live status shows.
+                        // Timer and Working rows keep their live status cards.
                         const isCard =
-                          section === "active" || section === "pinned" || section === "working";
+                          section === "active" ||
+                          section === "pinned" ||
+                          section === "timer" ||
+                          section === "working";
                         const rowVariant = isCard ? "card" : "slim";
                         return (
                           <SidebarThreadRow
@@ -5711,6 +5752,7 @@ export default function Sidebar() {
                             environmentId={thread.environmentId}
                             disabled={
                               renamingThreadKey === threadKey ||
+                              section === "timer" ||
                               section === "working" ||
                               !draggableThreadKeys.has(threadKey) ||
                               optimisticDrop !== null
@@ -5842,12 +5884,28 @@ export default function Sidebar() {
                               />,
                             );
                             break;
+                          case "timer-header":
+                            items.push(
+                              <SidebarSectionHeader
+                                key="timer-shelf-header"
+                                marker="timer-header"
+                                className="mt-auto"
+                                label={
+                                  timerShelfExpanded ? "Timer" : `Timer (${timerThreads.length})`
+                                }
+                                toggle={{
+                                  expanded: timerShelfExpanded,
+                                  onToggle: toggleTimerShelf,
+                                }}
+                              />,
+                            );
+                            break;
                           case "working-header":
                             items.push(
                               <SidebarSectionHeader
                                 key="working-shelf-header"
                                 marker="working-header"
-                                className="mt-auto"
+                                className={cn(timerThreads.length === 0 && "mt-auto")}
                                 label={
                                   workingShelfExpanded
                                     ? "Working"
@@ -5865,7 +5923,9 @@ export default function Sidebar() {
                               <SidebarSectionHeader
                                 key="snoozed-shelf-header"
                                 marker="snoozed-header"
-                                className={cn(workingThreads.length === 0 && "mt-auto")}
+                                className={cn(
+                                  timerThreads.length + workingThreads.length === 0 && "mt-auto",
+                                )}
                                 label={
                                   snoozedShelfExpanded
                                     ? "Snoozed"
@@ -5884,7 +5944,10 @@ export default function Sidebar() {
                                 key="settled-shelf-header"
                                 marker="settled-header"
                                 className={cn(
-                                  workingThreads.length + snoozedThreads.length === 0 && "mt-auto",
+                                  timerThreads.length +
+                                    workingThreads.length +
+                                    snoozedThreads.length ===
+                                    0 && "mt-auto",
                                 )}
                                 label={
                                   settledShelfExpanded
@@ -5951,6 +6014,7 @@ export default function Sidebar() {
           visibleDraftSessionCount === 0 &&
           pinnedThreads.length +
             activeThreads.length +
+            timerThreads.length +
             workingThreads.length +
             snoozedThreads.length +
             settledThreads.length ===
