@@ -30,7 +30,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 
 import { readEnvironmentScope } from "../../state/session";
 import { Switch } from "../ui/switch";
-import { Button } from "../ui/button";
+import { Button, type ButtonSize } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -47,9 +47,13 @@ const STATUS_DOT_CLASS: Record<ScheduledTask["lastRunStatus"], string> = {
 };
 
 /** Keeps bound schedules reachable even when the thread details card is closed or compact. */
-export function ThreadAutomationsIndicator(props: {
+export function ThreadAutomationsIndicator({
+  size = "icon-xs",
+  ...props
+}: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  readonly size?: ButtonSize;
 }) {
   const tasksQuery = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId: props.environmentId, input: {} }),
@@ -82,15 +86,19 @@ export function ThreadAutomationsIndicator(props: {
         : CalendarOffIcon;
 
   return (
-    <span className="inline-flex shrink-0" data-thread-automations-indicator>
+    <span
+      className="inline-flex shrink-0"
+      data-thread-automations-indicator
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       <Popover>
         <Tooltip>
           <TooltipTrigger
             render={
               <PopoverTrigger
-                render={
-                  <Button variant={activeCount > 0 ? "ghost" : "ghost-muted"} size="icon-xs" />
-                }
+                render={<Button variant={activeCount > 0 ? "ghost" : "ghost-muted"} size={size} />}
                 aria-label={`Show thread automations: ${label}`}
               />
             }

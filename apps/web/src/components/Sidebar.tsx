@@ -197,6 +197,7 @@ import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { ThreadExecutionIcon } from "./ThreadExecutionIcon";
+import { ThreadAutomationsIndicator } from "./chat/ThreadAutomationsPanel";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import {
   buildDraftActionMenuItems,
@@ -1878,6 +1879,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             ) : null}
             {draftIndicator}
             {title}
+            <ThreadAutomationsIndicator
+              environmentId={thread.environmentId}
+              threadId={thread.id}
+              size="icon-micro"
+            />
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -2216,6 +2222,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : null}
               {terminalStatusIcon}
               {prBadge}
+              <ThreadAutomationsIndicator
+                environmentId={thread.environmentId}
+                threadId={thread.id}
+                size="icon-micro"
+              />
               {diff ? (
                 <span className="shrink-0 font-mono">
                   <span className="text-diff-addition-foreground">
