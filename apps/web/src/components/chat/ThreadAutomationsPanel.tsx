@@ -103,7 +103,12 @@ export function ThreadAutomationsIndicator({
               />
             }
           >
-            <Icon aria-hidden />
+            <Icon
+              aria-hidden
+              className={
+                size === "icon-micro" ? "size-3.5 text-sidebar-muted-foreground/70" : undefined
+              }
+            />
           </TooltipTrigger>
           <TooltipPopup>{label}</TooltipPopup>
         </Tooltip>
