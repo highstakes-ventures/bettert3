@@ -171,10 +171,16 @@ export function AutomaticChatsSection({
   const visibleRows = rows.filter((chat, index) => index < visibleCount || chat.id === routeChatId);
   const hiddenCount = rows.length - visibleRows.length;
   const running = rows.filter((chat) => chat.status === "active").length;
-  const activityUnavailable = rows.some((chat) => chat.status === "unknown");
-  const runningLabel = activityUnavailable ? "No status" : `${running} running`;
-  const runningDescription = activityUnavailable
-    ? "Cloud activity couldn't be checked for every automatic chat."
+  const activityIncomplete = data?.hasMore || rows.some((chat) => chat.status === "unknown");
+  const runningLabel = activityIncomplete
+    ? running > 0
+      ? `${running}+ running`
+      : "No status"
+    : `${running} running`;
+  const runningDescription = activityIncomplete
+    ? running > 0
+      ? `At least ${running} running`
+      : "Cloud activity couldn't be checked for every automatic chat."
     : runningLabel;
   const isUnopened = (chat: CloudChatSummary) =>
     !!environmentId &&
@@ -238,22 +244,24 @@ export function AutomaticChatsSection({
                   ) : (
                     <span>{unopened} new</span>
                   )}
-                  {!data.hasMore ? (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <span
-                            tabIndex={0}
-                            aria-label={activityUnavailable ? "Activity unavailable" : runningLabel}
-                            className="pointer-events-auto rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-                          />
-                        }
-                      >
-                        · {runningLabel}
-                      </TooltipTrigger>
-                      <TooltipPopup>{runningDescription}</TooltipPopup>
-                    </Tooltip>
-                  ) : null}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span
+                          tabIndex={0}
+                          aria-label={
+                            activityIncomplete && running === 0
+                              ? "Activity unavailable"
+                              : runningDescription
+                          }
+                          className="pointer-events-auto rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+                        />
+                      }
+                    >
+                      · {runningLabel}
+                    </TooltipTrigger>
+                    <TooltipPopup>{runningDescription}</TooltipPopup>
+                  </Tooltip>
                 </>
               ) : (
                 "Loading…"

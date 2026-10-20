@@ -148,8 +148,8 @@ it("does not report zero running when an automatic chat's activity is unavailabl
 
   state.chats.push(chat("running"));
   await render();
-  expect(container.querySelector('[aria-label="Activity unavailable"]')).not.toBeNull();
-  expect(container.textContent).not.toContain("1 running");
+  expect(container.querySelector('[aria-label="At least 1 running"]')).not.toBeNull();
+  expect(container.textContent).toContain("· 1+ running");
 
   state.chats[0] = { ...chat("one"), status: "idle" };
   await render();
@@ -159,7 +159,8 @@ it("does not report zero running when an automatic chat's activity is unavailabl
   state.hasMore = true;
   await render(true);
   expect(container.textContent).toContain("Recent ·");
-  expect(container.textContent).not.toContain("1 running");
+  expect(container.querySelector('[aria-label="At least 1 running"]')).not.toBeNull();
+  expect(container.textContent).toContain("· 1+ running");
   const action = container.querySelector<HTMLButtonElement>(
     'button[aria-label="Mark all automatic chats as read"]',
   )!;
@@ -167,6 +168,25 @@ it("does not report zero running when an automatic chat's activity is unavailabl
   expect(useUiStateStore.getState().threadLastVisitedAtById).toHaveProperty(
     cloudChatVisitKey("env", "account", "running"),
   );
+});
+
+it("keeps the running lower bound visible when collapsed without counting user chats", async () => {
+  state.hasMore = true;
+  state.chats = [chat("one"), chat("two"), chat("user", "user")];
+  await render();
+  expect(container.querySelector('[aria-label="At least 2 running"]')).not.toBeNull();
+  expect(container.textContent).toContain("· 2+ running");
+  expect(container.querySelectorAll("a")).toHaveLength(0);
+
+  state.chats = [{ ...chat("idle"), status: "idle" }, chat("user", "user")];
+  await render();
+  expect(container.querySelector('[aria-label="Activity unavailable"]')).not.toBeNull();
+  expect(container.textContent).not.toContain("0 running");
+
+  state.hasMore = false;
+  await render();
+  expect(container.querySelector('[aria-label="0 running"]')).not.toBeNull();
+  expect(container.textContent).toContain("· 0 running");
 });
 
 it("keeps the collapsed count non-interactive while opening the section", async () => {
