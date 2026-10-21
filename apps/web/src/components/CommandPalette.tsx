@@ -1,5 +1,7 @@
 "use client";
 
+import { requestWorkflowAction } from "./workflows/workflowActions";
+
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -1804,6 +1806,18 @@ function OpenCommandPaletteDialog(props: {
   }, [clearOpenIntent, browseNavigation, openIntent, projectThreadItems, pushPaletteView]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  if (activeThread) {
+    for (const action of ["ticket", "refine"] as const)
+      actionItems.push({
+        kind: "action",
+        value: `action:workflow-${action}`,
+        title: action === "ticket" ? "Add a ticket" : "Refine tickets",
+        searchTerms: ["linear", "workflow", "ticket", "refinement"],
+        icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: action === "ticket" ? "workflow.ticket" : "workflow.refine",
+        run: async () => requestWorkflowAction(action),
+      });
+  }
 
   if (projects.length > 0) {
     const activeProjectTitle =

@@ -1,3 +1,16 @@
+import {
+  WorkflowConfiguration,
+  WorkflowConnectInput,
+  WorkflowConnection,
+  WorkflowListInput,
+  WorkflowListResult,
+  WorkflowReadInput,
+  WorkflowDetail,
+  WorkflowIntakeInput,
+  WorkflowRun,
+  WorkflowDecisionInput,
+  WorkflowError,
+} from "./workflow.ts";
 import { CloudChatDestinationsResult } from "./cloudChats.ts";
 import {
   CloudChatListInput,
@@ -523,6 +536,14 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Scheduled tasks
+  workflowsConnection: "workflows.connection",
+  workflowsConnect: "workflows.connect",
+  workflowsDisconnect: "workflows.disconnect",
+  workflowsSubscribe: "workflows.subscribe",
+  workflowsConfigure: "workflows.configure",
+  workflowsRead: "workflows.read",
+  workflowsIntake: "workflows.intake",
+  workflowsDecide: "workflows.decide",
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1785,6 +1806,48 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const WsWorkflowsConnectionRpc = Rpc.make(WS_METHODS.workflowsConnection, {
+  payload: Schema.Struct({}),
+  success: WorkflowConnection,
+  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
+});
+const WsWorkflowsConnectRpc = Rpc.make(WS_METHODS.workflowsConnect, {
+  payload: WorkflowConnectInput,
+  success: WorkflowConnection,
+  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
+});
+const WsWorkflowsDisconnectRpc = Rpc.make(WS_METHODS.workflowsDisconnect, {
+  payload: Schema.Struct({}),
+  success: Schema.Void,
+  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
+});
+const WsWorkflowsSubscribeRpc = Rpc.make(WS_METHODS.workflowsSubscribe, {
+  payload: WorkflowListInput,
+  success: WorkflowListResult,
+  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsWorkflowsConfigureRpc = Rpc.make(WS_METHODS.workflowsConfigure, {
+  payload: WorkflowConfiguration,
+  success: WorkflowListResult,
+  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
+});
+const WsWorkflowsReadRpc = Rpc.make(WS_METHODS.workflowsRead, {
+  payload: WorkflowReadInput,
+  success: WorkflowDetail,
+  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
+});
+const WsWorkflowsIntakeRpc = Rpc.make(WS_METHODS.workflowsIntake, {
+  payload: WorkflowIntakeInput,
+  success: WorkflowRun,
+  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
+});
+const WsWorkflowsDecideRpc = Rpc.make(WS_METHODS.workflowsDecide, {
+  payload: WorkflowDecisionInput,
+  success: WorkflowRun,
+  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -1886,6 +1949,17 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
+export const WorkflowRpcGroup = RpcGroup.make(
+  WsWorkflowsConnectionRpc,
+  WsWorkflowsConnectRpc,
+  WsWorkflowsDisconnectRpc,
+  WsWorkflowsSubscribeRpc,
+  WsWorkflowsConfigureRpc,
+  WsWorkflowsReadRpc,
+  WsWorkflowsIntakeRpc,
+  WsWorkflowsDecideRpc,
+).middleware(RpcScopeAuthorization);
+
 const WsCloudChatsDestinationsRpc = Rpc.make(WS_METHODS.cloudChatsDestinations, {
   payload: Schema.Struct({ instanceId: ProviderInstanceId }),
   success: CloudChatDestinationsResult,
@@ -1956,6 +2030,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
+  WsWorkflowsConnectionRpc,
+  WsWorkflowsConnectRpc,
+  WsWorkflowsDisconnectRpc,
+  WsWorkflowsSubscribeRpc,
+  WsWorkflowsConfigureRpc,
+  WsWorkflowsReadRpc,
+  WsWorkflowsIntakeRpc,
+  WsWorkflowsDecideRpc,
   WsScheduledTasksListRpc,
   WsScheduledTasksSubscribeRpc,
   WsScheduledTasksUpsertRpc,

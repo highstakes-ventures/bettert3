@@ -121,6 +121,8 @@ type WhenToken =
   | { type: "rparen" };
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
+  { key: "mod+alt+n", command: "workflow.ticket", when: "!terminalFocus" },
+  { key: "mod+alt+r", command: "workflow.refine", when: "!terminalFocus" },
   { key: "mod+b", command: "sidebar.toggle" },
   { key: "mod+[", command: "navigation.back", when: "!terminalFocus" },
   { key: "mod+]", command: "navigation.forward", when: "!terminalFocus" },

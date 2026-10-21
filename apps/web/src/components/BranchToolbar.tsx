@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import {
   type Ref,
+  type ReactNode,
   type MouseEvent as ReactMouseEvent,
   memo,
   useImperativeHandle,
@@ -80,6 +81,7 @@ export interface BranchToolbarHandle {
 }
 
 interface BranchToolbarProps {
+  workflowControls?: ReactNode;
   cloudDestinations?: readonly CodexCloudDestination[] | undefined;
   runDestination?: CodexCloudDestination | null | undefined;
   onCloudDestinationChange?: ((destination: CodexCloudDestination) => void) | undefined;
@@ -666,6 +668,7 @@ function useLabelsOverflow(element: HTMLDivElement | null): boolean {
 }
 
 export const BranchToolbar = memo(function BranchToolbar({
+  workflowControls,
   layout = "composer",
   panelSection = "all",
   forceNewWorktree = false,
@@ -952,6 +955,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
         />
       ) : null}
+      {workflowControls}
     </ComposerSurface.ContextStrip>
   );
 });

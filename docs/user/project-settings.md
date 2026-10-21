@@ -60,6 +60,30 @@ to override its environment defaults. Worktree directories keep their original n
 If generation fails, or a custom name is invalid or already taken, the temporary
 branch name remains.
 
+## Linear ticket workflows
+
+On web and desktop, open **+ Ticket → Workflow settings** in the bottom bar to
+connect Linear and choose an intake project, an implementation base branch, and
+the agent model and access mode from the current chat. The selected Linear team
+needs a **Refined** state and a canceled state. The connection stores its API key
+on the environment that runs the workflow.
+
+Add an idea with **+ Ticket**. An agent prepares it in Linear and adds it to
+**Refine**. Open that queue to discuss the ticket in chat beside its description,
+project, evidence, and ticket dependencies. **Approve** sets its target project
+and Refined state. **Reject** cancels it and removes it from the queue. Restore
+canceled tickets in Linear if needed.
+
+After approval, implementation starts in a fresh worktree when every blocker is
+completed and required code is present on the configured base branch. Canceled
+blockers keep dependent work waiting. A finished implementation waits for its
+commit to reach that branch before the workflow marks its ticket complete.
+
+Performance and refactor scanners are off initially. Enable them in Workflow
+settings to start a fresh chat daily at 07:00 Europe/Amsterdam. If the environment
+was asleep, it runs the latest missed occurrence once when it resumes. Keep the
+server running for workflows to progress.
+
 ## Scheduled tasks on mobile
 
 Open **Settings → Scheduled tasks** to create recurring tasks or manage existing

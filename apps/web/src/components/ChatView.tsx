@@ -1,3 +1,6 @@
+import { ProjectId as WorkflowProjectId } from "@t3tools/contracts";
+import { WorkflowControls } from "./workflows/WorkflowControls";
+import { WorkflowTicketPanel } from "./workflows/WorkflowTicketPanel";
 import type { CodexCloudDestination } from "@t3tools/contracts";
 import { cloudChats } from "../state/cloudChats";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";
@@ -11199,7 +11202,14 @@ export default function ChatView(props: ChatViewProps) {
   }
 
   const rightPanelContent = activeThreadRef ? (
-    renderedRightPanelSurface?.kind === "preview" ? (
+    renderedRightPanelSurface?.kind === "ticket" ? (
+      <WorkflowTicketPanel
+        environmentId={activeThread.environmentId}
+        projectId={WorkflowProjectId.make(renderedRightPanelSurface.projectId)}
+        runId={renderedRightPanelSurface.runId}
+        cwd={activeWorkspaceRoot ?? undefined}
+      />
+    ) : renderedRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
           mode="embedded"
@@ -12030,6 +12040,22 @@ export default function ChatView(props: ChatViewProps) {
                           {mountComposerContextStrip && (
                             <div className="pointer-events-auto">
                               <BranchToolbar
+                                workflowControls={
+                                  activeProject ? (
+                                    <WorkflowControls
+                                      key={`${activeThread.environmentId}:${activeProject.id}`}
+                                      environmentId={activeThread.environmentId}
+                                      projectId={activeProject.id}
+                                      threadId={activeThread.id}
+                                      modelSelection={
+                                        composerSelectedModelSelection ??
+                                        activeThread.modelSelection
+                                      }
+                                      runtimeMode={runtimeMode}
+                                      keybindings={keybindings}
+                                    />
+                                  ) : null
+                                }
                                 forceNewWorktree={multipleModelSelections !== null}
                                 ref={branchToolbarRef}
                                 environmentId={activeThread.environmentId}

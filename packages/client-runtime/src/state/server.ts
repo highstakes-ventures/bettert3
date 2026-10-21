@@ -1086,6 +1086,18 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:process-resource-history",
       tag: WS_METHODS.serverGetProcessResourceHistory,
     }),
+    workflowConnection: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:workflows:connection",
+      tag: WS_METHODS.workflowsConnection,
+    }),
+    workflowDetail: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:workflows:detail",
+      tag: WS_METHODS.workflowsRead,
+    }),
+    workflowLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:workflows:live",
+      tag: WS_METHODS.workflowsSubscribe,
+    }),
     scheduledTaskWebhookDeliveries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:scheduled-task:webhook-deliveries",
       tag: WS_METHODS.scheduledTasksListWebhookDeliveries,
@@ -1299,6 +1311,26 @@ export function createServerEnvironmentAtoms<R, E>(
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,
+    }),
+    connectWorkflow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:workflows:connect",
+      tag: WS_METHODS.workflowsConnect,
+    }),
+    disconnectWorkflow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:workflows:disconnect",
+      tag: WS_METHODS.workflowsDisconnect,
+    }),
+    configureWorkflow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:workflows:configure",
+      tag: WS_METHODS.workflowsConfigure,
+    }),
+    intakeWorkflow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:workflows:intake",
+      tag: WS_METHODS.workflowsIntake,
+    }),
+    decideWorkflow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:workflows:decide",
+      tag: WS_METHODS.workflowsDecide,
     }),
     upsertScheduledTask: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:upsert",

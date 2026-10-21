@@ -59,6 +59,32 @@ const setup = Effect.gen(function* () {
 });
 
 describe("command permissions", () => {
+  it.effect.each([
+    [WS_METHODS.workflowsConnect, AuthSettingsWriteScope],
+    [WS_METHODS.workflowsDisconnect, AuthSettingsWriteScope],
+    [WS_METHODS.workflowsConfigure, AuthOrchestrationOperateScope],
+    [WS_METHODS.workflowsIntake, AuthOrchestrationOperateScope],
+    [WS_METHODS.workflowsDecide, AuthOrchestrationOperateScope],
+  ] as const)("checks the destination grant again for %s", ([method, scope]) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const command = createCommandPermissions(runtime, method);
+        registry.set(
+          sessions(env),
+          AsyncResult.success({ ...grant(false), scopes: [scope], permissions: [scope] }),
+        );
+        expect(registry.get(command.permissionAtom(env))).toBe(true);
+        yield* command.authorize(registry, env);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(command.permissionAtom(env))).toBe(false);
+        expect((yield* command.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+      }),
+    ),
+  );
+
   it.effect("requires the destination settings grant to run storage cleanup", () =>
     Effect.scoped(
       Effect.gen(function* () {

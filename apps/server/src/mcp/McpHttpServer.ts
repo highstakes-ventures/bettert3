@@ -1,3 +1,5 @@
+import { WorkflowToolkit } from "./toolkits/workflows/tools.ts";
+import * as WorkflowHandlers from "./toolkits/workflows/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -870,6 +872,7 @@ export const layer = Layer.mergeAll(
   layerPreviewToolkit,
   layerOrchestratorToolkit,
   layerThreadToolkit,
+  toolkitRegistration(WorkflowToolkit, WorkflowHandlers.layer),
   layerAttachmentToolkit,
   layerProjectRegistration,
   layerEnvironmentToolkit,

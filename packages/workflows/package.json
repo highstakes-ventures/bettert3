@@ -1,0 +1,28 @@
+{
+  "name": "@t3tools/workflows",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tickets": "./src/tickets/workflow.ts",
+    "./tickets/panel": "./src/tickets/RefinementPanel.tsx",
+    "./performance": "./src/performance/workflow.ts",
+    "./refactor": "./src/refactor/workflow.ts",
+    "./triggers": "./src/triggers.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc-rs --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@t3tools/contracts": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "react": "19.2.6",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0"
+  }
+}

@@ -603,6 +603,8 @@ function surfaceTitle(
   switch (surface.kind) {
     case "diff":
       return "Diff";
+    case "ticket":
+      return "Refinement";
     case "files":
       return "Files";
     case "file":
@@ -676,6 +678,8 @@ function SurfaceIcon({
         favicon && url && sameOrigin(favicon.pageUrl, url) ? favicon.dataUrl : null;
       return <PreviewFavicon capturedUrl={capturedUrl} url={url} />;
     }
+    case "ticket":
+      return <Files className="size-3 shrink-0" />;
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
     case "files":
