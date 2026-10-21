@@ -31,7 +31,6 @@ import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullR
 import { useAtomValue } from "@effect/atom-react";
 import { timerThreadKeysAtom } from "../state/presentation";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
-import * as Schema from "effect/Schema";
 import {
   DndContext,
   useSensor,
@@ -165,7 +164,7 @@ import { registerSettleAndAdvance } from "../settleAndAdvance";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
-import { useLocalStorage } from "../hooks/useLocalStorage";
+import { useSidebarShelves } from "./Sidebar.shelves";
 import { useNowMinute } from "../hooks/useNowMinute";
 import {
   useEnvironmentIdentities,
@@ -324,9 +323,6 @@ const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
-const ExpandedSidebarShelf = Schema.NullOr(
-  Schema.Literals(["timer", "working", "snoozed", "settled", "automatic"]),
-);
 
 // Working beta: when this client saw each thread leave the Working shelf.
 // Module scope keeps the inbox order across routes that unmount the sidebar.
@@ -3131,36 +3127,17 @@ export default function Sidebar() {
     () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
     [],
   );
-  const [expandedShelf, setExpandedShelf] = useLocalStorage(
-    "t3code:sidebar:expanded-shelf",
-    null,
-    ExpandedSidebarShelf,
-  );
+  const { expandedShelf, toggleShelf, onThreadOpen, onMouseLeave } = useSidebarShelves(isMobile);
   const settledShelfExpanded = expandedShelf === "settled";
   const snoozedShelfExpanded = expandedShelf === "snoozed";
   const workingShelfExpanded = expandedShelf === "working";
   const timerShelfExpanded = expandedShelf === "timer";
   const automaticShelfOpen = expandedShelf === "automatic";
-  const toggleSettledShelf = useCallback(
-    () => setExpandedShelf((value) => (value === "settled" ? null : "settled")),
-    [setExpandedShelf],
-  );
-  const toggleAutomaticShelf = useCallback(
-    () => setExpandedShelf((value) => (value === "automatic" ? null : "automatic")),
-    [setExpandedShelf],
-  );
-  const toggleSnoozedShelf = useCallback(
-    () => setExpandedShelf((value) => (value === "snoozed" ? null : "snoozed")),
-    [setExpandedShelf],
-  );
-  const toggleWorkingShelf = useCallback(
-    () => setExpandedShelf((value) => (value === "working" ? null : "working")),
-    [setExpandedShelf],
-  );
-  const toggleTimerShelf = useCallback(
-    () => setExpandedShelf((value) => (value === "timer" ? null : "timer")),
-    [setExpandedShelf],
-  );
+  const toggleSettledShelf = useCallback(() => toggleShelf("settled"), [toggleShelf]);
+  const toggleAutomaticShelf = useCallback(() => toggleShelf("automatic"), [toggleShelf]);
+  const toggleSnoozedShelf = useCallback(() => toggleShelf("snoozed"), [toggleShelf]);
+  const toggleWorkingShelf = useCallback(() => toggleShelf("working"), [toggleShelf]);
+  const toggleTimerShelf = useCallback(() => toggleShelf("timer"), [toggleShelf]);
   const renderedSettledThreads = useMemo(() => {
     if (settledShelfExpanded) return visibleSettledThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
@@ -3302,6 +3279,7 @@ export default function Sidebar() {
   // starting a session un-settles server-side.
   const navigateToThread = useCallback(
     (threadRef: ScopedThreadRef) => {
+      onThreadOpen();
       if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) {
         clearSelection();
       }
@@ -3314,7 +3292,7 @@ export default function Sidebar() {
         params: buildThreadRouteParams(threadRef),
       });
     },
-    [clearSelection, isMobile, router, setOpenMobile, setSelectionAnchor],
+    [clearSelection, isMobile, onThreadOpen, router, setOpenMobile, setSelectionAnchor],
   );
 
   const queuePendingFileDrop = useSidebarPendingFileDropStore((s) => s.queuePendingFileDrop);
@@ -3346,6 +3324,7 @@ export default function Sidebar() {
 
   const navigateToDraft = useCallback(
     (draftId: DraftId) => {
+      onThreadOpen();
       // Unconditional: also drops a stale selection anchor left by
       // plain-click navigation, so a later shift-click starts fresh
       // instead of ranging from a row that is no longer the context.
@@ -3356,7 +3335,7 @@ export default function Sidebar() {
       }
       void router.navigate({ to: "/draft/$draftId", params: { draftId } });
     },
-    [clearSelection, isMobile, router, setOpenMobile],
+    [clearSelection, isMobile, onThreadOpen, router, setOpenMobile],
   );
 
   const clearThreadSearch = useCallback(() => {
@@ -5334,7 +5313,7 @@ export default function Sidebar() {
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
-    <>
+    <div className="contents" onMouseLeave={onMouseLeave}>
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
@@ -5994,6 +5973,7 @@ export default function Sidebar() {
                       expanded={automaticShelfOpen}
                       onToggle={toggleAutomaticShelf}
                       onLayoutChange={updateAutomaticListMotion}
+                      onThreadOpen={onThreadOpen}
                     />
                   </ul>
                 </SortableContext>
@@ -6032,6 +6012,6 @@ export default function Sidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarChromeFooter showUndoNotice={isSearchingThreads} />
-    </>
+    </div>
   );
 }
