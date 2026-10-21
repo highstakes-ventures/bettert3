@@ -283,3 +283,59 @@ it.effect(
     }).pipe(Effect.provide(f.layer));
   },
 );
+
+it.effect("connects within Linear's query budget without dropping paginated metadata", () => {
+  const teams = Array.from({ length: 12 }, (_, index) => ({
+    id: `team-${index}`,
+    name: `Team ${index}`,
+    states: {
+      nodes: [{ id: `refined-${index}`, name: "Refined", type: "unstarted" }],
+    },
+    labels: page([{ id: `label-${index}`, name: `Label ${index}` }], index === 0, "labels-next"),
+  }));
+  const projects = teams.map((team, index) => ({
+    id: `project-${index}`,
+    name: `Project ${index}`,
+    teams: { nodes: [{ id: team.id, name: team.name }] },
+    initiatives: { nodes: [{ id: "initiative", name: "Building" }] },
+  }));
+  const f = fixture((query, variables) => {
+    if (query.includes("team(id:"))
+      return {
+        data: {
+          team: { labels: page([{ id: "extra", name: "Extra label" }], false, "labels-end") },
+        },
+      };
+    const request = query.match(/\b(teams|projects)\(first:(\d+)/)!;
+    const size = Number(request[2]);
+    // Linear charges at least 1.2 points per nested id/name node, multiplies
+    // connection sizes, and rejects queries above 10,000 points. An omitted
+    // page size defaults to 50. This lower bound already rejects the old query.
+    // https://linear.app/developers/rate-limiting#understanding-query-complexity
+    const nested = [
+      ...query.matchAll(/\b(?:labels|states|teams|initiatives)(?:\(first:(\d+)\))?\s*\{\s*nodes/g),
+    ];
+    const minimumCost = size * nested.reduce((sum, match) => sum + Number(match[1] ?? 50) * 1.2, 0);
+    if (minimumCost > 10_000)
+      return { status: 400, errors: [{ message: "Query complexity limit exceeded" }] };
+    const values = request[1] === "teams" ? teams : projects;
+    const start = Number(variables.after ?? 0);
+    const end = start + size;
+    return {
+      data: { [request[1]!]: page(values.slice(start, end), end < values.length, String(end)) },
+    };
+  });
+  return Effect.gen(function* () {
+    const connection = yield* (yield* Linear.LinearClient).connect("secret-test-key");
+    expect(connection.connected).toBe(true);
+    expect(connection.teams.map((team) => team.id)).toEqual(teams.map((team) => team.id));
+    expect(connection.projects.map((project) => project.id)).toEqual(
+      projects.map((project) => project.id),
+    );
+    expect(connection.teams[0]?.labels.map((label) => label.id)).toEqual(["label-0", "extra"]);
+    expect(connection.teams[11]?.refinedStateId).toBe("refined-11");
+    expect(connection.projects[11]?.initiatives).toEqual(["Building"]);
+    expect(f.stored).toHaveLength(1);
+    expect(f.calls.every((call) => !call.query.includes("mutation"))).toBe(true);
+  }).pipe(Effect.provide(f.layer));
+});

@@ -1,6 +1,7 @@
 import { randomUUID } from "~/lib/utils";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { DEFAULT_MODEL, ProviderInstanceId } from "@t3tools/contracts";
 import type {
   EnvironmentId,
@@ -486,7 +487,7 @@ function WorkflowSlots({
   );
 }
 
-function WorkflowSetup(
+export function WorkflowSetup(
   props: Props & { configuration: WorkflowConfiguration | null; onSaved: () => void },
 ) {
   const connection = useEnvironmentQuery(
@@ -498,6 +499,7 @@ function WorkflowSetup(
     serverEnvironment.connectWorkflow.permissionAtom(props.environmentId),
   );
   const [apiKey, setApiKey] = useState("");
+  const [connectError, setConnectError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const keyId = useId();
   if (!connection.data?.connected)
@@ -508,15 +510,21 @@ function WorkflowSetup(
           event.preventDefault();
           if (!apiKey.trim() || busy || !canConnect) return;
           setBusy(true);
+          setConnectError(null);
           void connect({
             environmentId: props.environmentId,
             input: { apiKey: apiKey.trim() },
           }).then((result) => {
-            setApiKey("");
             setBusy(false);
             if (result._tag === "Success") {
+              setApiKey("");
               connection.refresh();
               props.onSaved();
+            } else {
+              const error = squashAtomCommandFailure(result);
+              setConnectError(
+                error instanceof Error ? error.message : "Could not connect to Linear.",
+              );
             }
           });
         }}
@@ -538,9 +546,9 @@ function WorkflowSetup(
         <Button size="sm" type="submit" disabled={busy || !canConnect || !apiKey.trim()}>
           {busy ? "Connecting…" : "Connect Linear"}
         </Button>
-        {connection.error && (
+        {(connectError ?? connection.error) && (
           <p role="alert" className="text-xs text-destructive">
-            {connection.error}
+            {connectError ?? connection.error}
           </p>
         )}
       </form>

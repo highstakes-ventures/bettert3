@@ -284,7 +284,9 @@ const make = Effect.gen(function* () {
               readonly pageInfo: typeof pageInfo.Type;
             };
           } = yield* request(
-            `query($after:String){${name}(first:100,after:$after){nodes{${fields}} ${pageFields}}}`,
+            // Nested labels, teams and initiatives multiply Linear's query
+            // complexity. Small parent pages stay below its 10,000-point cap.
+            `query($after:String){${name}(first:10,after:$after){nodes{${fields}} ${pageFields}}}`,
             { after },
             Schema.Record(Schema.String, page(schema)),
             suppliedKey,
