@@ -176,3 +176,21 @@ it("retains the ticket after a failed decision", async () => {
   expect(state.navigate).not.toHaveBeenCalled();
   expect(renderer!.root.findByType("h2").props.children).toBe("Current ticket");
 });
+it("advances after Delay even though the current ticket remains in refinement", async () => {
+  state.decision.mockResolvedValue({
+    _tag: "Success",
+    value: { ...run("current"), delayedAt: "2026-10-22" },
+  });
+  await render();
+  const button = renderer!.root
+    .findAllByType("button")
+    .find((entry) => entry.props.children === "Delay")!;
+  await act(async () => {
+    await button.props.onClick();
+  });
+  expect(state.decision.mock.calls[0]?.[0].input.decision).toBe("delay");
+  expect(state.navigate).toHaveBeenCalledWith({
+    to: "/$environmentId/$threadId",
+    params: { environmentId, threadId: "chat-next" },
+  });
+});

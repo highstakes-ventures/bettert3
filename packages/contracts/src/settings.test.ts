@@ -23,6 +23,18 @@ const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("ticket implementation slots", () => {
+  it("defaults to 8 and accepts pausing without resetting unrelated settings", () => {
+    expect(decodeServerSettings({}).ticketImplementationSlots).toBe(8);
+    expect(decodeServerSettingsPatch({ ticketImplementationSlots: 0 })).toEqual({
+      ticketImplementationSlots: 0,
+    });
+  });
+  it.each([-1, 1.5, "8"])("rejects invalid slot count %s", (ticketImplementationSlots) => {
+    expect(() => decodeServerSettingsPatch({ ticketImplementationSlots })).toThrow();
+  });
+});
+
 describe("ServerSettings response streaming", () => {
   it("defaults to paragraph buffering", () => {
     expect(decodeServerSettings({}).responseStreamingMode).toBe("paragraph");

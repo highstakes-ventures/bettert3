@@ -12,6 +12,7 @@ import type {
   WorkflowConfiguration,
   WorkflowConnection,
   WorkflowRun,
+  WorkflowListResult,
 } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
@@ -24,7 +25,8 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "~/keybindings";
 import { useShortcutModifierState } from "~/shortcutModifierState";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "~/state/server";
-import { useProject } from "~/state/entities";
+import { useProject, useProjects } from "~/state/entities";
+import { usePrimaryEnvironment } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
@@ -97,6 +99,8 @@ export function WorkflowActionShortcuts() {
 
 export function SidebarWorkflowControls() {
   const { activeThread, activeDraftThread, routeDraftId, routeThreadRef } = useHandleNewThread();
+  const primary = usePrimaryEnvironment();
+  const projects = useProjects();
   const thread = activeThread ?? activeDraftThread;
   const threadId = activeThread?.id ?? activeDraftThread?.threadId;
   const composer = useComposerDraftStore((store) => {
@@ -107,7 +111,12 @@ export function SidebarWorkflowControls() {
   const project = useProject(
     thread ? scopeProjectRef(thread.environmentId, thread.projectId) : null,
   );
-  if (!thread || !threadId || !project) return null;
+  if (!thread || !threadId || !project) {
+    const fallback = projects.find((entry) => entry.environmentId === primary?.environmentId);
+    return fallback ? (
+      <SidebarWorkflowSlots environmentId={fallback.environmentId} projectId={fallback.id} />
+    ) : null;
+  }
   return (
     <WorkflowControls
       key={`${project.environmentId}:${project.id}`}
@@ -122,6 +131,20 @@ export function SidebarWorkflowControls() {
       runtimeMode={composer?.runtimeMode ?? thread.runtimeMode}
       keybindings={keybindings}
     />
+  );
+}
+
+function SidebarWorkflowSlots(props: { environmentId: EnvironmentId; projectId: ProjectId }) {
+  const live = useEnvironmentQuery(
+    serverEnvironment.workflowLive({
+      environmentId: props.environmentId,
+      input: { projectId: props.projectId },
+    }),
+  );
+  return (
+    <SidebarMenuItem>
+      <WorkflowSlots environmentId={props.environmentId} slots={live.data?.implementationSlots} />
+    </SidebarMenuItem>
   );
 }
 
@@ -375,7 +398,91 @@ function WorkflowControls(
           </span>
         )}
       </div>
+      <WorkflowSlots environmentId={props.environmentId} slots={live.data?.implementationSlots} />
     </SidebarMenuItem>
+  );
+}
+
+function WorkflowSlots({
+  environmentId,
+  slots,
+}: {
+  environmentId: EnvironmentId;
+  slots: WorkflowListResult["implementationSlots"] | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const [limit, setLimit] = useState("");
+  const [busy, setBusy] = useState(false);
+  const canSave = useAtomValue(serverEnvironment.updateSettings.permissionAtom(environmentId));
+  const save = useAtomCommand(serverEnvironment.updateSettings);
+  const value = Number(limit);
+  const valid = limit.trim() !== "" && Number.isSafeInteger(value) && value >= 0;
+  const label = slots
+    ? `Ticket slots: ${slots.used} of ${slots.limit} in use`
+    : "Loading ticket slots";
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setLimit(String(slots?.limit ?? 8));
+        setOpen(next);
+      }}
+    >
+      <Tooltip open={open ? false : undefined}>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger render={<Button size="xs" variant="ghost" aria-label={label} />} />
+          }
+        >
+          <span className="whitespace-nowrap text-muted-foreground tabular-nums">
+            {slots ? `${slots.used} / ${slots.limit}` : "…"}
+          </span>
+        </TooltipTrigger>
+        <TooltipPopup side="top">{label}</TooltipPopup>
+      </Tooltip>
+      <PopoverPopup side="top" align="end" width="auto">
+        <form
+          className="w-64 space-y-3 p-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!valid || busy || !canSave) return;
+            setBusy(true);
+            void save({
+              environmentId,
+              input: { patch: { ticketImplementationSlots: value } },
+            }).then((result) => {
+              setBusy(false);
+              if (result._tag === "Success") setOpen(false);
+            });
+          }}
+        >
+          <h2 className="text-sm font-medium">Ticket implementation slots</h2>
+          <p className="text-xs text-muted-foreground">
+            {slots?.used ?? "…"} in use across all projects. Your own chats and other automations do
+            not count.
+          </p>
+          <label className="block space-y-1 text-xs text-muted-foreground">
+            <span>Maximum active tickets</span>
+            <Input
+              type="number"
+              min={0}
+              step={1}
+              value={limit}
+              disabled={busy || !canSave}
+              onChange={(event) => setLimit(event.target.value)}
+            />
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Set 0 to pause new starts. Existing chats can always resume.
+          </p>
+          <div className="flex justify-end">
+            <Button type="submit" size="sm" disabled={!valid || busy || !canSave}>
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </form>
+      </PopoverPopup>
+    </Popover>
   );
 }
 

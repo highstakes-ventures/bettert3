@@ -3,13 +3,19 @@ import { expect, it } from "@effect/vitest";
 import {
   ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
   WorkflowError,
   type WorkflowConfiguration,
   type WorkflowTicket,
   type WorkflowTicketDraft,
+  type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import * as Crypto from "effect/Crypto";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
@@ -21,6 +27,7 @@ import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as Linear from "./LinearClient.ts";
 import * as Workflow from "./WorkflowService.ts";
 
@@ -84,11 +91,52 @@ const draft: WorkflowTicketDraft = {
 };
 const commit = "a".repeat(40);
 
+const shell = (
+  id: ThreadId,
+  overrides: Partial<OrchestrationV2ThreadShell> = {},
+): OrchestrationV2ThreadShell => ({
+  id,
+  projectId,
+  title: "Implementation",
+  providerInstanceId: ProviderInstanceId.make("codex"),
+  modelSelection: configuration.modelSelection,
+  runtimeMode: "approval-required",
+  interactionMode: "default",
+  createdBy: "system",
+  creationSource: "server",
+  branch: null,
+  worktreePath: null,
+  lineage: { rootThreadId: id, parentThreadId: null, relationshipToParent: null },
+  forkedFrom: null,
+  activeProviderThreadId: null,
+  latestRunId: RunId.make(`run:${id}`),
+  latestRunCompletedAt: null,
+  activeRunId: RunId.make(`run:${id}`),
+  status: "running",
+  pendingRuntimeRequest: null,
+  latestVisibleMessage: null,
+  latestUserMessageAt: null,
+  hasActionableProposedPlan: false,
+  itemCount: 1,
+  visibleItemCount: 1,
+  createdAt: DateTime.makeUnsafe(0),
+  updatedAt: DateTime.makeUnsafe(0),
+  archivedAt: null,
+  settledOverride: null,
+  settledAt: null,
+  lastVisitedAt: null,
+  pinnedAt: null,
+  deletedAt: null,
+  ...overrides,
+});
+
 const harness = Effect.gen(function* () {
   const tickets = new Map<string, WorkflowTicket>();
   const launches: ThreadLaunch.ThreadLaunchInput[] = [];
   const decisions: string[] = [];
   const gitCalls: ReadonlyArray<string>[] = [];
+  const shells = new Map<ThreadId, OrchestrationV2ThreadShell>();
+  const shellReads: ThreadId[] = [];
   const switches = {
     failDecision: false,
     loseDecisionResponse: false,
@@ -97,15 +145,28 @@ const harness = Effect.gen(function* () {
     failLaunch: false,
     ancestry: true,
     saves: 0,
+    beforeBase: Effect.void,
+    beforeUuid: Effect.void,
   };
   const deps = Layer.mergeAll(
     Sqlite.layerMemory,
-    NodeCrypto.layer,
+    Layer.effect(
+      Crypto.Crypto,
+      Effect.gen(function* () {
+        const live = yield* Crypto.Crypto;
+        return Crypto.Crypto.of({
+          ...live,
+          randomUUIDv4: () =>
+            Effect.suspend(() => switches.beforeUuid.pipe(Effect.andThen(live.randomUUIDv4()))),
+        });
+      }),
+    ).pipe(Layer.provide(NodeCrypto.layer)),
+    ServerSettings.layerTest(),
     Layer.mock(ProjectStore.ProjectStoreV2)({
-      get: () =>
+      get: (id) =>
         Effect.succeed(
           Option.some({
-            projectId,
+            projectId: id,
             title: "Project",
             workspaceRoot: "/fixture",
             defaultModelSelection: null,
@@ -120,7 +181,13 @@ const harness = Effect.gen(function* () {
           }),
         ),
     }),
-    Layer.mock(ProjectionStore.ProjectionStoreV2)({ getThreadShell: () => Effect.succeed(null) }),
+    Layer.mock(ProjectionStore.ProjectionStoreV2)({
+      getThreadShell: (id) =>
+        Effect.sync(() => {
+          shellReads.push(id);
+          return shells.get(id) ?? null;
+        }),
+    }),
     Layer.mock(Scheduler.Scheduler)({ register: () => Effect.void }),
     Layer.mock(ThreadLaunch.ThreadLaunchService)({
       launch: (input) =>
@@ -139,7 +206,8 @@ const harness = Effect.gen(function* () {
     }),
     Layer.mock(ProcessRunner.ProcessRunner)({
       run: (input) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
+          if (input.args[0] === "rev-parse") yield* switches.beforeBase;
           gitCalls.push(input.args);
           return {
             code: ChildProcessSpawner.ExitCode(
@@ -213,12 +281,18 @@ const harness = Effect.gen(function* () {
   const restart = () =>
     Workflow.WorkflowService.pipe(Effect.provide(Workflow.layer), Effect.provideContext(context));
   const service = yield* restart();
+  const settings = yield* ServerSettings.ServerSettingsService.pipe(Effect.provideContext(context));
   yield* service.configure(configuration);
-  const prepare = (id: string, value = draft, existingIssueId?: string) =>
+  const prepare = (
+    id: string,
+    value = draft,
+    existingIssueId?: string,
+    workflowProjectId = projectId,
+  ) =>
     Effect.gen(function* () {
-      yield* service.intake({ projectId, requestId: id, text: `Request ${id}` });
+      yield* service.intake({ projectId: workflowProjectId, requestId: id, text: `Request ${id}` });
       yield* service.resume();
-      const run = (yield* service.list(projectId)).runs.find((entry) => entry.id === id)!;
+      const run = (yield* service.list(workflowProjectId)).runs.find((entry) => entry.id === id)!;
       return yield* service.submitResult(run.threadId!, {
         type: "prepared",
         ticket: value,
@@ -227,7 +301,31 @@ const harness = Effect.gen(function* () {
           : {}),
       });
     });
-  return { service, restart, prepare, tickets, launches, decisions, gitCalls, switches, context };
+  const approve = (id: string) =>
+    Effect.gen(function* () {
+      const ticket = (yield* service.read(id)).ticket!;
+      return yield* service.decide({
+        runId: id,
+        decision: "approve",
+        expectedUpdatedAt: ticket.updatedAt,
+        targetProjectId: "target",
+      });
+    });
+  return {
+    service,
+    restart,
+    prepare,
+    approve,
+    settings,
+    shells,
+    shellReads,
+    tickets,
+    launches,
+    decisions,
+    gitCalls,
+    switches,
+    context,
+  };
 });
 
 it.effect("persists one intake and one preparation task across retries and restart", () =>
@@ -262,6 +360,190 @@ it.effect("rejects by canceling in the original project and removing the review 
     ).toEqual([]);
     yield* h.service.resume();
     expect(h.launches).toHaveLength(1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("delays refinement durably without changing or canceling the Linear ticket", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const first = yield* h.prepare("first");
+    yield* h.prepare("second");
+    const ticket = (yield* h.service.read(first.id)).ticket!;
+    const delayed = yield* h.service.decide({
+      runId: first.id,
+      decision: "delay",
+      expectedUpdatedAt: ticket.updatedAt,
+      targetProjectId: "target",
+    });
+    expect(delayed.phase).toBe("review");
+    expect(delayed.delayedAt).toBeDefined();
+    expect(h.tickets.get(ticket.id)).toEqual(ticket);
+    expect(h.decisions).toEqual([]);
+    expect(h.switches.saves).toBe(2);
+    const restored = yield* h.restart();
+    yield* restored.resume();
+    expect(
+      (yield* restored.list(projectId)).runs
+        .filter((run) => run.phase === "review")
+        .map((run) => run.id),
+    ).toEqual(["second", "first"]);
+    expect(h.launches).toHaveLength(2);
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "shares ticket slots across projects, releases idle snoozes, and excludes unrelated chats",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      yield* h.settings.updateSettings({ ticketImplementationSlots: 1 });
+      const other = ProjectId.make("other");
+      yield* h.service.configure({ ...configuration, projectId: other });
+      for (const [id, target] of [
+        ["first", projectId],
+        ["second", other],
+        ["third", projectId],
+      ] as const) {
+        yield* h.prepare(id, draft, undefined, target);
+        // Approve after all preparation, so preparation sweeps cannot start work early.
+      }
+      for (const id of ["first", "second", "third"]) yield* h.approve(id);
+      for (const id of ["manual-chat", "sales-automation"]) {
+        const threadId = ThreadId.make(id);
+        h.shells.set(threadId, shell(threadId));
+      }
+      yield* h.service.resume();
+      expect(
+        h.launches.filter((entry) => entry.workspaceStrategy?.type === "worktree"),
+      ).toHaveLength(1);
+      const active = (yield* h.service.read("first")).run;
+      const id = active.implementationThreadId!;
+      h.shells.set(id, shell(id, { snoozedUntil: DateTime.makeUnsafe("2099-01-01T00:00:00Z") }));
+      yield* h.service.resume();
+      expect((yield* h.service.list(other)).implementationSlots).toEqual({ used: 1, limit: 1 });
+      expect((yield* h.service.read("second")).run.phase).toBe("approved");
+      expect(h.gitCalls.filter((args) => args[0] === "fetch")).toHaveLength(1);
+      h.shells.set(
+        id,
+        shell(id, {
+          activeRunId: null,
+          status: "interrupted",
+          snoozedUntil: DateTime.makeUnsafe("2099-01-01T00:00:00Z"),
+        }),
+      );
+      const restored = yield* h.restart();
+      yield* restored.resume();
+      expect(
+        h.launches.filter((entry) => entry.workspaceStrategy?.type === "worktree"),
+      ).toHaveLength(2);
+      expect((yield* restored.read("second")).run.phase).toBe("implementing");
+      // Resuming an existing chat is allowed to exceed the launch limit.
+      h.shells.set(id, shell(id));
+      expect((yield* restored.list(projectId)).implementationSlots).toEqual({ used: 2, limit: 1 });
+      yield* restored.resume();
+      expect((yield* restored.read("third")).run.phase).toBe("approved");
+      expect(h.shellReads).not.toContain("manual-chat");
+      expect(h.shellReads).not.toContain("sales-automation");
+      yield* h.settings.updateSettings({ ticketImplementationSlots: 3 });
+      yield* restored.resume();
+      expect(
+        h.launches.filter((entry) => entry.workspaceStrategy?.type === "worktree"),
+      ).toHaveLength(3);
+      yield* h.settings.updateSettings({ ticketImplementationSlots: 0 });
+      yield* h.prepare("paused");
+      yield* h.approve("paused");
+      yield* restored.resume();
+      expect((yield* restored.read("paused")).run.phase).toBe("approved");
+      expect((yield* restored.list(projectId)).implementationSlots).toEqual({ used: 3, limit: 0 });
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "keeps failed launch reservations across restart without filling the queue with agents",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      yield* h.settings.updateSettings({ ticketImplementationSlots: 1 });
+      yield* h.prepare("first");
+      yield* h.prepare("second");
+      yield* h.approve("first");
+      yield* h.approve("second");
+      h.switches.failLaunch = true;
+      yield* h.service.resume();
+      expect((yield* h.service.read("first")).run.phase).toBe("implementing");
+      expect((yield* h.service.read("second")).run.phase).toBe("approved");
+      h.switches.failLaunch = false;
+      const restored = yield* h.restart();
+      yield* restored.resume();
+      yield* restored.resume();
+      expect(
+        h.launches.filter((entry) => entry.workspaceStrategy?.type === "worktree"),
+      ).toHaveLength(1);
+      expect((yield* restored.list(projectId)).implementationSlots).toEqual({ used: 1, limit: 1 });
+    }).pipe(Effect.scoped),
+);
+
+it.effect.each(["completed", "failed", "interrupted", "cancelled"] as const)(
+  "releases an inactive %s implementation even while a pull request watch remains",
+  (status) =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      yield* h.settings.updateSettings({ ticketImplementationSlots: 1 });
+      yield* h.prepare("first");
+      yield* h.prepare("second");
+      yield* h.approve("first");
+      yield* h.approve("second");
+      yield* h.service.resume();
+      const id = (yield* h.service.read("first")).run.implementationThreadId!;
+      h.shells.set(
+        id,
+        shell(id, {
+          status,
+          activeRunId: null,
+          pendingBackgroundTasks: [
+            { taskId: "pr-watch", kind: "monitor" },
+            { taskId: "dev-server", kind: "command" },
+          ],
+        }),
+      );
+      yield* h.service.resume();
+      expect(
+        h.launches.filter((entry) => entry.workspaceStrategy?.type === "worktree"),
+      ).toHaveLength(2);
+      expect((yield* h.service.list(projectId)).implementationSlots.used).toBe(1);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("reserves shared capacity atomically when two projects become ready concurrently", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    yield* h.settings.updateSettings({ ticketImplementationSlots: 1 });
+    const other = ProjectId.make("other");
+    yield* h.service.configure({ ...configuration, projectId: other });
+    yield* h.prepare("first", draft, undefined, other);
+    yield* h.prepare("second");
+    yield* h.approve("second");
+    const firstAtBase = yield* Deferred.make<void>();
+    const secondAtBase = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    h.switches.beforeUuid = Effect.yieldNow;
+    let checks = 0;
+    h.switches.beforeBase = Effect.gen(function* () {
+      yield* Deferred.succeed(++checks === 1 ? firstAtBase : secondAtBase, undefined);
+      yield* Deferred.await(release);
+    });
+    const first = yield* h.service.resume().pipe(Effect.forkChild);
+    yield* Deferred.await(firstAtBase);
+    yield* h.approve("first");
+    const second = yield* h.service.resume().pipe(Effect.forkChild);
+    yield* Deferred.await(secondAtBase);
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(first);
+    yield* Fiber.join(second);
+    expect(h.launches.filter((entry) => entry.workspaceStrategy?.type === "worktree")).toHaveLength(
+      1,
+    );
+    expect((yield* h.service.list(other)).implementationSlots).toEqual({ used: 1, limit: 1 });
   }).pipe(Effect.scoped),
 );
 

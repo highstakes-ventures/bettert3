@@ -30,6 +30,7 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
@@ -37,6 +38,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as LinearClient from "./LinearClient.ts";
 
 const Record = Schema.Struct({
@@ -113,7 +115,9 @@ const make = Effect.gen(function* () {
   const linear = yield* LinearClient.LinearClient;
   const processes = yield* ProcessRunner.ProcessRunner;
   const scheduler = yield* Scheduler.Scheduler;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const locks = yield* KeyedLock.make<ProjectId>();
+  const admission = yield* Semaphore.make(1);
   const changes = yield* PubSub.sliding<void>(1);
   const lastTick = yield* Ref.make(0);
   const changed = PubSub.publish(changes, undefined).pipe(Effect.asVoid);
@@ -197,7 +201,47 @@ const make = Effect.gen(function* () {
     error: record.error,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+    ...(record.delayedAt === undefined ? {} : { delayedAt: record.delayedAt }),
   });
+  const implementationSlots = () =>
+    Effect.gen(function* () {
+      const current = yield* settings.getSettings.pipe(
+        Effect.mapError(
+          (cause) => new WorkflowError({ message: "Could not read ticket slot settings.", cause }),
+        ),
+      );
+      let used = 0;
+      for (const record of yield* all()) {
+        if (record.phase !== "implementing") continue;
+        if (!record.implementationLaunched || record.implementationThreadId === null) {
+          used++;
+          continue;
+        }
+        const shell = yield* projections.getThreadShell(record.implementationThreadId).pipe(
+          Effect.mapError(
+            (cause) =>
+              new WorkflowError({
+                message: "Could not read a ticket implementation chat.",
+                cause,
+              }),
+          ),
+        );
+        // Snooze changes visibility, not execution. Keep running and reserved
+        // work counted even while hidden, and release idle chats awaiting landing.
+        if (
+          shell === null ||
+          shell.latestRunId === null ||
+          shell.activeRunId !== null ||
+          shell.status === "queued" ||
+          shell.pendingRuntimeRequest !== null ||
+          shell.pendingBackgroundTasks?.some(
+            (task) => task.kind !== "command" && task.kind !== "monitor",
+          )
+        )
+          used++;
+      }
+      return { used, limit: current.ticketImplementationSlots };
+    });
   const list = (projectId: ProjectId) =>
     Effect.gen(function* () {
       yield* requireProject(projectId);
@@ -207,6 +251,7 @@ const make = Effect.gen(function* () {
       return {
         configuration: yield* configuration(projectId),
         connected: yield* linear.connected,
+        implementationSlots: yield* implementationSlots(),
         runs: [...waiting, ...runs.filter((run) => run.phase !== "review")],
       } satisfies WorkflowListResult;
     });
@@ -625,6 +670,14 @@ const make = Effect.gen(function* () {
         record.phase === "approved" ||
         (record.phase === "implementing" && !record.implementationLaunched)
       ) {
+        if (record.phase === "approved") {
+          const slots = yield* implementationSlots();
+          if (slots.used >= slots.limit) {
+            if (record.error !== "Waiting for a ticket implementation slot.")
+              yield* save({ ...record, error: "Waiting for a ticket implementation slot." });
+            return;
+          }
+        }
         const ticket = yield* linear.read(record.issueId!);
         if (ticket.teamId !== config.linearTeamId)
           return yield* new WorkflowError({
@@ -678,13 +731,26 @@ const make = Effect.gen(function* () {
               });
           }
         }
-        const next = yield* save({
-          ...ticketRecord(record, ticket),
-          phase: "implementing",
-          baseCommit: baseline.commit,
-          implementationThreadId: record.implementationThreadId ?? ThreadId.make(yield* uuid),
-          error: null,
-        });
+        // Project locks do not protect shared capacity. Reserve durably before
+        // dispatch so another project or a restart cannot reuse the same slot.
+        const next = yield* admission.withPermit(
+          Effect.gen(function* () {
+            const slots = yield* implementationSlots();
+            if (record.phase === "approved" && slots.used >= slots.limit) {
+              if (record.error !== "Waiting for a ticket implementation slot.")
+                yield* save({ ...record, error: "Waiting for a ticket implementation slot." });
+              return null;
+            }
+            return yield* save({
+              ...ticketRecord(record, ticket),
+              phase: "implementing",
+              baseCommit: baseline.commit,
+              implementationThreadId: record.implementationThreadId ?? ThreadId.make(yield* uuid),
+              error: null,
+            });
+          }),
+        );
+        if (next === null) return;
         yield* Tickets.implement(ticket, (goal) => launchTask(next, config, goal, true));
         yield* save({ ...next, implementationLaunched: true });
         return;
@@ -783,6 +849,8 @@ const make = Effect.gen(function* () {
           ].includes(value.phase) || value.pendingResult !== null,
       ))
         yield* resumeRecord(record.id);
+      // Chat activity can change without a workflow transition.
+      yield* changed;
     });
   yield* scheduler.register(
     "workflows",
@@ -803,9 +871,13 @@ const make = Effect.gen(function* () {
       Stream.unwrap(
         Effect.gen(function* () {
           const queue = yield* PubSub.subscribe(changes);
+          const settingsChanges = yield* settings.subscribeChanges;
           return Stream.concat(
             Stream.fromEffect(list(projectId)),
-            Stream.fromSubscription(queue).pipe(Stream.mapEffect(() => list(projectId))),
+            Stream.merge(
+              Stream.fromSubscription(queue),
+              settingsChanges.pipe(Stream.map(() => undefined)),
+            ).pipe(Stream.mapEffect(() => list(projectId))),
           );
         }),
       ),
@@ -868,7 +940,8 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const record = yield* load(input.runId);
             if (
-              record.phase === (input.decision === "approve" ? "approved" : "rejected") ||
+              (input.decision !== "delay" &&
+                record.phase === (input.decision === "approve" ? "approved" : "rejected")) ||
               (input.decision === "approve" && ["implementing", "done"].includes(record.phase))
             )
               return summary(record);
@@ -881,6 +954,14 @@ const make = Effect.gen(function* () {
               return yield* new WorkflowError({
                 message: "The ticket changed. Refresh it before deciding.",
               });
+            if (input.decision === "delay")
+              return summary(
+                yield* save({
+                  ...ticketRecord(record, ticket),
+                  delayedAt: yield* now,
+                  error: null,
+                }),
+              );
             const config = yield* requireConfiguration(record.projectId);
             const unresolvedQuestions =
               input.decision === "approve" ? yield* questions(record, ticket) : [];

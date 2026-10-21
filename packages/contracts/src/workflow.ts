@@ -109,12 +109,14 @@ export const WorkflowRun = Schema.Struct({
   error: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
+  delayedAt: Schema.optionalKey(Schema.String),
 });
 export type WorkflowRun = typeof WorkflowRun.Type;
 export const WorkflowListInput = Schema.Struct({ projectId: ProjectId });
 export const WorkflowListResult = Schema.Struct({
   configuration: Schema.NullOr(WorkflowConfiguration),
   connected: Schema.Boolean,
+  implementationSlots: Schema.Struct({ used: Schema.Int, limit: Schema.Int }),
   runs: Schema.Array(WorkflowRun),
 });
 export type WorkflowListResult = typeof WorkflowListResult.Type;
@@ -136,7 +138,7 @@ export const WorkflowIntakeInput = Schema.Struct({
 });
 export const WorkflowDecisionInput = Schema.Struct({
   runId: Id,
-  decision: Schema.Literals(["approve", "reject"]),
+  decision: Schema.Literals(["approve", "reject", "delay"]),
   expectedUpdatedAt: Schema.String,
   targetProjectId: Schema.NullOr(Id),
 });

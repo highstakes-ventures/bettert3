@@ -71,13 +71,21 @@ on the environment that runs the workflow.
 Add an idea with **+ Ticket**. An agent prepares it in Linear and adds it to
 **Refine**. Open that queue to discuss the ticket in chat beside its description,
 project, evidence, and ticket dependencies. **Approve** sets its target project
-and Refined state. **Reject** cancels it and removes it from the queue. Restore
+and Refined state. **Delay** moves it and its dependents behind ready tickets for
+later refinement. **Reject** cancels it and removes it from the queue. Restore
 canceled tickets in Linear if needed.
 
 After approval, implementation starts in a fresh worktree when every blocker is
 completed and required code is present on the configured base branch. Canceled
 blockers keep dependent work waiting. A finished implementation waits for its
 commit to reach that branch before the workflow marks its ticket complete.
+
+Ticket implementations share eight slots across the environment. Click the slot
+counter in the sidebar's bottom bar to change the limit, or set it to zero to
+pause new starts. Your own chats, scanners, preparation, and other automations
+do not count. Idle snoozed or finished chats free a slot. Snoozing a running
+agent does not stop it, so it keeps its slot. Existing implementation chats can
+always resume, even above the limit; new tickets wait until capacity is available.
 
 Performance and refactor scanners are off initially. Enable them in Workflow
 settings to start a fresh chat daily at 07:00 Europe/Amsterdam. If the environment

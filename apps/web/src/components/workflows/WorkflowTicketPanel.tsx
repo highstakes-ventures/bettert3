@@ -1,5 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ProjectId, WorkflowDetail, WorkflowRun } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  WorkflowDecisionInput,
+  WorkflowDetail,
+  WorkflowRun,
+} from "@t3tools/contracts";
+import { orderRefinementQueue } from "@t3tools/workflows/tickets";
 import { RefinementPanel } from "@t3tools/workflows/tickets/panel";
 import { useNavigate } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -76,7 +83,7 @@ function Ticket({
   const canDecide = useAtomValue(serverEnvironment.decideWorkflow.permissionAtom(environmentId));
   const decide = useAtomCommand(serverEnvironment.decideWorkflow);
   const navigate = useNavigate();
-  async function submit(decision: "approve" | "reject") {
+  async function submit(decision: WorkflowDecisionInput["decision"]) {
     if (busy || !canDecide || !detail.ticket) return;
     setBusy(true);
     const result = await decide({
@@ -94,14 +101,20 @@ function Ticket({
       return;
     }
     if (
-      result.value.phase === "review" ||
+      (result.value.phase === "review" && decision !== "delay") ||
       result.value.phase === "approving" ||
       result.value.phase === "rejecting"
     ) {
       refresh();
       return;
     }
-    const next = queue.find(
+    const nextQueue =
+      decision === "delay"
+        ? orderRefinementQueue(
+            queue.map((run) => (run.id === result.value.id ? result.value : run)),
+          )
+        : queue;
+    const next = nextQueue.find(
       (run) => run.phase === "review" && run.id !== detail.run.id && run.threadId !== null,
     );
     if (next?.threadId) {
@@ -170,6 +183,14 @@ function Ticket({
             </Button>
             <Button
               size="sm"
+              variant="outline"
+              disabled={busy || !canDecide}
+              onClick={() => void submit("delay")}
+            >
+              Delay
+            </Button>
+            <Button
+              size="sm"
               disabled={busy || !canDecide || detail.questions.length > 0}
               onClick={() => void submit("approve")}
             >
@@ -181,7 +202,7 @@ function Ticket({
             {detail.run.phase === "rejected"
               ? "Canceled"
               : detail.run.phase === "approved"
-                ? "Waiting for dependencies"
+                ? "Waiting to implement"
                 : detail.run.phase}
           </span>
         )

@@ -38,6 +38,15 @@ const ticket: WorkflowTicket = {
 };
 
 describe("refinement ordering and approval", () => {
+  it("moves delayed tickets and their dependents behind ready work while preserving dependencies", () =>
+    expect(
+      orderRefinementQueue([
+        { ...run("delayed", [], 1), delayedAt: "2026-10-21T09:00:00Z" },
+        run("dependent", ["delayed"], 1),
+        { ...run("older-delay", [], 4), delayedAt: "2026-10-20T09:00:00Z" },
+        run("ready", [], 4),
+      ]).map((entry) => entry.id),
+    ).toEqual(["ready", "older-delay", "delayed", "dependent"]));
   it("puts prerequisites first even when their dependents have higher priority", () =>
     expect(
       orderRefinementQueue([

@@ -27,7 +27,25 @@ export function orderRefinementQueue(runs: ReadonlyArray<WorkflowRun>): Workflow
   );
   const remaining = new Set(waiting.map((run) => run.id));
   const result: WorkflowRun[] = [];
+  // A delayed prerequisite takes its dependents with it; otherwise they would
+  // pull the delayed ticket straight back to the front of the queue.
+  const delayed = new Map(waiting.map((run) => [run.id, run.delayedAt ?? ""]));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const run of waiting) {
+      const rank = run.blockerIds.reduce((latest, id) => {
+        const blocker = byIssue.get(id);
+        const value = blocker ? delayed.get(blocker.id)! : "";
+        return value > latest ? value : latest;
+      }, delayed.get(run.id)!);
+      if (rank !== delayed.get(run.id)) {
+        delayed.set(run.id, rank);
+        changed = true;
+      }
+    }
+  }
   const compare = (a: WorkflowRun, b: WorkflowRun) =>
+    delayed.get(a.id)!.localeCompare(delayed.get(b.id)!) ||
     (a.priority || 5) - (b.priority || 5) ||
     a.createdAt.localeCompare(b.createdAt) ||
     a.id.localeCompare(b.id);
