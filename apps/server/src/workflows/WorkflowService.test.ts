@@ -144,9 +144,12 @@ const harness = Effect.gen(function* () {
     loseSaveResponse: false,
     failLaunch: false,
     ancestry: true,
+    baseCommit: commit,
+    historicalCommit: null as string | null,
     saves: 0,
     beforeBase: Effect.void,
     beforeUuid: Effect.void,
+    beforeSave: Effect.void,
   };
   const deps = Layer.mergeAll(
     Sqlite.layerMemory,
@@ -211,9 +214,14 @@ const harness = Effect.gen(function* () {
           gitCalls.push(input.args);
           return {
             code: ChildProcessSpawner.ExitCode(
-              input.args[0] === "merge-base" && !switches.ancestry ? 1 : 0,
+              input.args[0] === "merge-base" &&
+                !(input.args[3] === commit && input.args[2] !== commit
+                  ? input.args[2] === switches.historicalCommit
+                  : switches.ancestry)
+                ? 1
+                : 0,
             ),
-            stdout: input.args[0] === "rev-parse" ? commit + "\n" : "",
+            stdout: input.args[0] === "rev-parse" ? switches.baseCommit + "\n" : "",
             stderr: "",
             timedOut: false,
             stdoutTruncated: false,
@@ -234,6 +242,7 @@ const harness = Effect.gen(function* () {
         ),
       save: ({ id, draft: value }) =>
         Effect.gen(function* () {
+          yield* switches.beforeSave;
           switches.saves++;
           const next = {
             ...(tickets.get(id) ?? makeTicket(id)),
@@ -708,6 +717,69 @@ it.effect("keeps one canonical issue owner when duplicate intakes merge", () =>
   }).pipe(Effect.scoped),
 );
 
+it.effect("rejects a merge owned by another project's implementation before changing Linear", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const other = ProjectId.make("other");
+    yield* h.service.configure({ ...configuration, projectId: other });
+    const first = yield* h.prepare("first");
+    yield* h.approve(first.id);
+    yield* h.service.resume();
+    const ticket = h.tickets.get(first.issueId!)!;
+    const saves = h.switches.saves;
+    const result = yield* h
+      .prepare("second", { ...draft, description: "Unapproved replacement" }, ticket.id, other)
+      .pipe(Effect.result);
+    expect(result._tag).toBe("Failure");
+    expect(h.tickets.get(ticket.id)).toEqual(ticket);
+    expect(h.switches.saves).toBe(saves);
+    expect((yield* h.service.list(other)).runs.every((run) => run.issueId !== ticket.id)).toBe(
+      true,
+    );
+  }).pipe(Effect.scoped),
+);
+
+it.effect("serializes concurrent claims of one external issue across projects", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const other = ProjectId.make("other");
+    yield* h.service.configure({ ...configuration, projectId: other });
+    const ticket = makeTicket("shared");
+    h.tickets.set(ticket.id, ticket);
+    for (const [requestId, target] of [
+      ["first", projectId],
+      ["second", other],
+    ] as const)
+      yield* h.service.intake({ projectId: target, requestId, text: requestId });
+    yield* h.service.resume();
+    const runs = [
+      ...(yield* h.service.list(projectId)).runs,
+      ...(yield* h.service.list(other)).runs,
+    ];
+    h.switches.beforeSave = Effect.yieldNow;
+    const results = yield* Effect.all(
+      runs.map((run) =>
+        h.service
+          .submitResult(run.threadId!, {
+            type: "prepared",
+            existingIssueId: ticket.id,
+            expectedUpdatedAt: ticket.updatedAt,
+            ticket: draft,
+          })
+          .pipe(Effect.result),
+      ),
+      { concurrency: "unbounded" },
+    );
+    expect(results.filter((result) => result._tag === "Success")).toHaveLength(1);
+    expect(h.switches.saves).toBe(1);
+    const owners = [
+      ...(yield* h.service.list(projectId)).runs,
+      ...(yield* h.service.list(other)).runs,
+    ].filter((run) => run.issueId === ticket.id);
+    expect(owners).toHaveLength(1);
+  }).pipe(Effect.scoped),
+);
+
 it.effect(
   "preserves native edits on a persisted merge retry and accepts a freshly read correction",
   () =>
@@ -771,10 +843,73 @@ it.effect("waits for a distinct implementation commit to land before completing 
     h.switches.ancestry = false;
     yield* h.service.resume();
     expect(h.decisions).toEqual(["refined"]);
+    h.switches.baseCommit = "c".repeat(40);
     h.switches.ancestry = true;
     yield* (yield* h.restart()).resume();
     expect(h.decisions).toEqual(["refined", "done"]);
     expect((yield* h.service.list(projectId)).runs[0]?.phase).toBe("done");
+  }).pipe(Effect.scoped),
+);
+
+it.effect("rejects a historical ancestor of the launch base as implementation evidence", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    yield* h.prepare("idea");
+    yield* h.approve("idea");
+    yield* h.service.resume();
+    const run = (yield* h.service.read("idea")).run;
+    h.switches.historicalCommit = "f".repeat(40);
+    const result = yield* h.service
+      .submitResult(run.implementationThreadId!, {
+        type: "implementation",
+        commit: h.switches.historicalCommit,
+      })
+      .pipe(Effect.result);
+    expect(result._tag).toBe("Failure");
+    yield* h.service.resume();
+    expect((yield* h.service.read("idea")).run.phase).toBe("implementing");
+    expect(h.decisions).toEqual(["refined"]);
+    // A rejected result must not prevent the agent from reporting its actual work.
+    yield* h.service.submitResult(run.implementationThreadId!, {
+      type: "implementation",
+      commit: "b".repeat(40),
+    });
+  }).pipe(Effect.scoped),
+);
+
+it.effect("keeps a completed ticket's running chat and subagents in capacity until idle", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    yield* h.settings.updateSettings({ ticketImplementationSlots: 1 });
+    yield* h.prepare("first");
+    yield* h.prepare("second");
+    yield* h.approve("first");
+    yield* h.approve("second");
+    yield* h.service.resume();
+    const id = (yield* h.service.read("first")).run.implementationThreadId!;
+    h.shells.set(id, shell(id));
+    yield* h.service.submitResult(id, { type: "implementation", commit: "b".repeat(40) });
+    h.switches.baseCommit = "c".repeat(40);
+    yield* h.service.resume();
+    expect((yield* h.service.read("first")).run.phase).toBe("done");
+    expect((yield* h.service.list(projectId)).implementationSlots.used).toBe(1);
+    expect((yield* h.service.read("second")).run.phase).toBe("approved");
+    h.shells.set(
+      id,
+      shell(id, {
+        status: "completed",
+        activeRunId: null,
+        pendingBackgroundTasks: [{ taskId: "review", kind: "subagent" }],
+      }),
+    );
+    yield* h.service.resume();
+    expect((yield* h.service.read("second")).run.phase).toBe("approved");
+    h.shells.set(id, shell(id, { status: "completed", activeRunId: null }));
+    yield* h.service.resume();
+    expect((yield* h.service.read("second")).run.phase).toBe("implementing");
+    expect(h.launches.filter((entry) => entry.workspaceStrategy?.type === "worktree")).toHaveLength(
+      2,
+    );
   }).pipe(Effect.scoped),
 );
 

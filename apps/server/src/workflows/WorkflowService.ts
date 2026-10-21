@@ -117,6 +117,7 @@ const make = Effect.gen(function* () {
   const scheduler = yield* Scheduler.Scheduler;
   const settings = yield* ServerSettings.ServerSettingsService;
   const locks = yield* KeyedLock.make<ProjectId>();
+  const issueLocks = yield* KeyedLock.make<string>();
   const admission = yield* Semaphore.make(1);
   const changes = yield* PubSub.sliding<void>(1);
   const lastTick = yield* Ref.make(0);
@@ -212,7 +213,7 @@ const make = Effect.gen(function* () {
       );
       let used = 0;
       for (const record of yield* all()) {
-        if (record.phase !== "implementing") continue;
+        if (record.phase !== "implementing" && !record.implementationLaunched) continue;
         if (!record.implementationLaunched || record.implementationThreadId === null) {
           used++;
           continue;
@@ -226,8 +227,8 @@ const make = Effect.gen(function* () {
               }),
           ),
         );
-        // Snooze changes visibility, not execution. Keep running and reserved
-        // work counted even while hidden, and release idle chats awaiting landing.
+        // Workflow completion and snooze do not stop execution. Count the chat
+        // until it and its subagents are idle, even after the ticket is done.
         if (
           shell === null ||
           shell.latestRunId === null ||
@@ -495,67 +496,80 @@ const make = Effect.gen(function* () {
           pendingResult: null,
           error: "Waiting for the implementation commit to reach the base branch.",
         });
-      yield* validateTarget(config, result.ticket.targetProjectId);
       const issueId = result.existingIssueId ?? record.issueId!;
-      const others = yield* all(record.projectId);
-      const existing = others.find(
-        (run) => run.id !== record.id && run.issueId === issueId && run.phase !== "rejected",
-      );
-      if (existing && existing.phase !== "review")
-        return yield* new WorkflowError({
-          message:
-            "This issue already has approved or active work. Prepare a distinct follow-up instead.",
-        });
-      if (result.existingIssueId) {
-        const issue = yield* linear.read(issueId);
-        if (
-          issue.teamId !== config.linearTeamId ||
-          ["completed", "canceled"].includes(issue.stateType)
-        )
-          return yield* new WorkflowError({
-            message: "Only open issues in this workflow's Linear team can be merged.",
-          });
-        if (result.expectedUpdatedAt === undefined || issue.updatedAt !== result.expectedUpdatedAt)
-          return yield* new WorkflowError({
-            message:
-              "The existing ticket changed. Read it and submit a corrected result with its current revision.",
-          });
-      }
-      for (const id of result.ticket.blockedBy) {
-        const dependency = yield* linear.read(id);
-        if (dependency.id === issueId)
-          return yield* new WorkflowError({ message: "A ticket cannot depend on itself." });
-      }
-      const ticket = yield* linear.save({
-        id: issueId,
-        teamId: config.linearTeamId,
-        draft: result.ticket,
-        create: result.existingIssueId === undefined,
-        ...(result.expectedUpdatedAt === undefined
-          ? {}
-          : { expectedUpdatedAt: result.expectedUpdatedAt }),
-      });
-      if (existing) {
-        yield* save({
-          ...ticketRecord(existing, ticket),
-          dependencyEvidence: result.ticket.dependencyEvidence,
-        });
-        return yield* save({
-          ...record,
-          phase: "done",
-          issueId: null,
-          pendingResult: null,
-          error: null,
-        });
-      }
-      return yield* save({
-        ...ticketRecord(record, ticket),
+      return yield* issueLocks.withLock(
         issueId,
-        phase: "review",
-        dependencyEvidence: result.ticket.dependencyEvidence,
-        pendingResult: null,
-        error: null,
-      });
+        Effect.gen(function* () {
+          yield* validateTarget(config, result.ticket.targetProjectId);
+          const others = yield* all();
+          const existing = others.find(
+            (run) => run.id !== record.id && run.issueId === issueId && run.phase !== "rejected",
+          );
+          if (existing && existing.projectId !== record.projectId)
+            return yield* new WorkflowError({
+              message:
+                "This issue belongs to another BetterT3 project. Continue its existing workflow.",
+            });
+          if (existing && existing.phase !== "review")
+            return yield* new WorkflowError({
+              message:
+                "This issue already has approved or active work. Prepare a distinct follow-up instead.",
+            });
+          if (result.existingIssueId) {
+            const issue = yield* linear.read(issueId);
+            if (
+              issue.teamId !== config.linearTeamId ||
+              ["completed", "canceled"].includes(issue.stateType)
+            )
+              return yield* new WorkflowError({
+                message: "Only open issues in this workflow's Linear team can be merged.",
+              });
+            if (
+              result.expectedUpdatedAt === undefined ||
+              issue.updatedAt !== result.expectedUpdatedAt
+            )
+              return yield* new WorkflowError({
+                message:
+                  "The existing ticket changed. Read it and submit a corrected result with its current revision.",
+              });
+          }
+          for (const id of result.ticket.blockedBy) {
+            const dependency = yield* linear.read(id);
+            if (dependency.id === issueId)
+              return yield* new WorkflowError({ message: "A ticket cannot depend on itself." });
+          }
+          const ticket = yield* linear.save({
+            id: issueId,
+            teamId: config.linearTeamId,
+            draft: result.ticket,
+            create: result.existingIssueId === undefined,
+            ...(result.expectedUpdatedAt === undefined
+              ? {}
+              : { expectedUpdatedAt: result.expectedUpdatedAt }),
+          });
+          if (existing) {
+            yield* save({
+              ...ticketRecord(existing, ticket),
+              dependencyEvidence: result.ticket.dependencyEvidence,
+            });
+            return yield* save({
+              ...record,
+              phase: "done",
+              issueId: null,
+              pendingResult: null,
+              error: null,
+            });
+          }
+          return yield* save({
+            ...ticketRecord(record, ticket),
+            issueId,
+            phase: "review",
+            dependencyEvidence: result.ticket.dependencyEvidence,
+            pendingResult: null,
+            error: null,
+          });
+        }),
+      );
     });
   const applyDecision = (record: Record, config: WorkflowConfiguration) =>
     Effect.gen(function* () {
@@ -1057,9 +1071,15 @@ const make = Effect.gen(function* () {
                 return yield* new WorkflowError({
                   message: "This task is not implementing the ticket.",
                 });
-              if (result.commit === record.baseCommit)
+              const project = yield* requireProject(record.projectId);
+              if (
+                record.baseCommit === null ||
+                result.commit === record.baseCommit ||
+                (yield* isAncestor(project.workspaceRoot, result.commit, record.baseCommit))
+              )
                 return yield* new WorkflowError({
-                  message: "Report the implementation commit, not the unchanged base commit.",
+                  message:
+                    "Report a new implementation commit that was not already on the launch base.",
                 });
             } else if (
               record.phase !== "preparing" ||
