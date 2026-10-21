@@ -1,5 +1,4 @@
 import { ProjectId as WorkflowProjectId } from "@t3tools/contracts";
-import { WorkflowControls } from "./workflows/WorkflowControls";
 import { WorkflowTicketPanel } from "./workflows/WorkflowTicketPanel";
 import type { CodexCloudDestination } from "@t3tools/contracts";
 import { cloudChats } from "../state/cloudChats";
@@ -11818,11 +11817,7 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   >
                     <ComposerSurface.Shell
-                      contextStrip={
-                        showComposerContextStrip ||
-                        showComposerModelStrip ||
-                        (activeProject !== null && !showProviderSubagentBar)
-                      }
+                      contextStrip={showComposerContextStrip || showComposerModelStrip}
                     >
                       <ComposerSurface.Host
                         inert={isSavingQueuedEdit}
@@ -12085,21 +12080,6 @@ export default function ChatView(props: ChatViewProps) {
                               />
                             </div>
                           )}
-                          {activeProject && !showProviderSubagentBar ? (
-                            <ComposerSurface.ContextStrip>
-                              <WorkflowControls
-                                key={`${activeThread.environmentId}:${activeProject.id}`}
-                                environmentId={activeThread.environmentId}
-                                projectId={activeProject.id}
-                                threadId={activeThread.id}
-                                modelSelection={
-                                  composerSelectedModelSelection ?? activeThread.modelSelection
-                                }
-                                runtimeMode={runtimeMode}
-                                keybindings={keybindings}
-                              />
-                            </ComposerSurface.ContextStrip>
-                          ) : null}
                         </div>
                       </div>
                     </ComposerSurface.Shell>

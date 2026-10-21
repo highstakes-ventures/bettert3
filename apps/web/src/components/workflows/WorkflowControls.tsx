@@ -1,6 +1,7 @@
 import { randomUUID } from "~/lib/utils";
 import { useAtomValue } from "@effect/atom-react";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { DEFAULT_MODEL, ProviderInstanceId } from "@t3tools/contracts";
 import type {
   EnvironmentId,
   ModelSelection,
@@ -12,12 +13,17 @@ import type {
   WorkflowConnection,
   WorkflowRun,
 } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { useComposerDraftStore } from "~/composerDraftStore";
+import { useHandleNewThread } from "~/hooks/useHandleNewThread";
+import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "~/keybindings";
 import { useShortcutModifierState } from "~/shortcutModifierState";
 import { useRightPanelStore } from "~/rightPanelStore";
-import { serverEnvironment } from "~/state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "~/state/server";
+import { useProject } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
@@ -26,7 +32,12 @@ import { Textarea } from "../ui/textarea";
 import { Kbd } from "../ui/kbd";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { WORKFLOW_ACTION_EVENT } from "./workflowActions";
+import { useSidebar } from "../ui/sidebar";
+import {
+  requestWorkflowAction,
+  takeWorkflowAction,
+  WORKFLOW_ACTION_EVENT,
+} from "./workflowActions";
 
 type Props = {
   environmentId: EnvironmentId;
@@ -36,7 +47,100 @@ type Props = {
   runtimeMode: RuntimeMode;
   keybindings: ResolvedKeybindingsConfig;
 };
-export function WorkflowControls(props: Props) {
+
+export function WorkflowActionShortcuts() {
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const { isMobile, setOpenMobile, setOpen } = useSidebar();
+  const route = useParams({
+    strict: false,
+    select: (params) =>
+      params.draftId ??
+      (params.environmentId && params.threadId
+        ? `${params.environmentId}:${params.threadId}`
+        : null),
+  });
+  useEffect(() => {
+    const showControls = () => {
+      if (!route) {
+        takeWorkflowAction();
+        return;
+      }
+      if (isMobile) setOpenMobile(true);
+      else setOpen(true);
+    };
+    const keydown = (event: KeyboardEvent) => {
+      if (!route || event.defaultPrevented || event.repeat) return;
+      const terminalFocus =
+        event.target instanceof Element && event.target.closest(".xterm") !== null;
+      const command = resolveShortcutCommand(event, keybindings, { context: { terminalFocus } });
+      if (command !== "workflow.ticket" && command !== "workflow.refine") return;
+      event.preventDefault();
+      requestWorkflowAction(command === "workflow.ticket" ? "ticket" : "refine");
+    };
+    window.addEventListener("keydown", keydown);
+    window.addEventListener(WORKFLOW_ACTION_EVENT, showControls);
+    return () => {
+      window.removeEventListener("keydown", keydown);
+      window.removeEventListener(WORKFLOW_ACTION_EVENT, showControls);
+    };
+  }, [keybindings, isMobile, route, setOpen, setOpenMobile]);
+  useEffect(() => {
+    if (!route) takeWorkflowAction();
+    return () => {
+      takeWorkflowAction();
+    };
+  }, [route]);
+  return null;
+}
+
+export function SidebarWorkflowControls() {
+  const { activeThread, activeDraftThread, routeDraftId, routeThreadRef } = useHandleNewThread();
+  const thread = activeThread ?? activeDraftThread;
+  const threadId = activeThread?.id ?? activeDraftThread?.threadId;
+  const composer = useComposerDraftStore((store) => {
+    const target = routeDraftId ?? routeThreadRef;
+    return target ? store.getComposerDraft(target) : null;
+  });
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const project = useProject(
+    thread ? scopeProjectRef(thread.environmentId, thread.projectId) : null,
+  );
+  if (!thread || !threadId || !project) return null;
+  return (
+    <WorkflowControls
+      key={`${project.environmentId}:${project.id}`}
+      environmentId={project.environmentId}
+      projectId={project.id}
+      threadId={threadId}
+      modelSelection={
+        (composer?.activeProvider
+          ? composer.modelSelectionByProvider[composer.activeProvider]
+          : null) ?? activeThread?.modelSelection
+      }
+      runtimeMode={composer?.runtimeMode ?? thread.runtimeMode}
+      keybindings={keybindings}
+    />
+  );
+}
+
+function WorkflowControls(
+  input: Omit<Props, "modelSelection"> & { modelSelection: ModelSelection | undefined },
+) {
+  const environmentSettings = useEnvironmentSettings(input.environmentId);
+  const project = useProject(scopeProjectRef(input.environmentId, input.projectId));
+  const defaults = resolveProjectSettings(
+    environmentSettings,
+    input.projectId,
+    project ?? undefined,
+  ).settings;
+  const props = {
+    ...input,
+    modelSelection: input.modelSelection ??
+      defaults.defaultModelSelection ?? {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_MODEL,
+      },
+  };
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState(false);
   const [text, setText] = useState("");
@@ -53,6 +157,7 @@ export function WorkflowControls(props: Props) {
   );
   const intake = useAtomCommand(serverEnvironment.intakeWorkflow);
   const navigate = useNavigate();
+  const { isMobile, setOpenMobile, setOpen: setSidebarOpen } = useSidebar();
   const modifiers = useShortcutModifierState();
   const queue = live.data?.runs.filter((run) => run.phase === "review") ?? [];
   const configured = live.data?.connected && live.data.configuration !== null;
@@ -64,39 +169,33 @@ export function WorkflowControls(props: Props) {
         .getState()
         .openTicket(scopeThreadRef(props.environmentId, threadId), run.id, props.projectId);
     setOpen(false);
+    if (isMobile) setOpenMobile(false);
     await navigate({
       to: "/$environmentId/$threadId",
       params: { environmentId: props.environmentId, threadId },
     });
   }
+  const openIntake = () => {
+    if (isMobile) setOpenMobile(true);
+    else setSidebarOpen(true);
+    setOpen(true);
+  };
   const refine = () => {
     const run = queue.find((entry) => entry.threadId === props.threadId) ?? queue[0];
     if (run) void openRun(run);
-    else setOpen(true);
+    else openIntake();
   };
   useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat) return;
-      const terminalFocus =
-        event.target instanceof Element && event.target.closest(".xterm") !== null;
-      const command = resolveShortcutCommand(event, props.keybindings, {
-        context: { terminalFocus },
-      });
-      if (command !== "workflow.ticket" && command !== "workflow.refine") return;
-      event.preventDefault();
-      if (command === "workflow.ticket") setOpen(true);
-      else refine();
+    const handleAction = () => {
+      if (!live.data) return;
+      const action = takeWorkflowAction();
+      if (action === "ticket") openIntake();
+      else if (action === "refine") refine();
     };
-    const action = (event: Event) => {
-      if (!(event instanceof CustomEvent)) return;
-      if (event.detail === "ticket") setOpen(true);
-      else if (event.detail === "refine") refine();
-    };
-    window.addEventListener("keydown", keydown);
-    window.addEventListener(WORKFLOW_ACTION_EVENT, action);
+    window.addEventListener(WORKFLOW_ACTION_EVENT, handleAction);
+    handleAction();
     return () => {
-      window.removeEventListener("keydown", keydown);
-      window.removeEventListener(WORKFLOW_ACTION_EVENT, action);
+      window.removeEventListener(WORKFLOW_ACTION_EVENT, handleAction);
     };
   });
   async function submit() {
@@ -120,7 +219,7 @@ export function WorkflowControls(props: Props) {
       <Kbd>{shortcutLabelForCommand(props.keybindings, command)}</Kbd>
     ) : null;
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    <div className="flex min-w-0 flex-wrap items-center gap-1">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger render={<Button size="xs" variant="ghost" data-workflow-action="ticket" />}>
           + Ticket {hint("workflow.ticket")}
