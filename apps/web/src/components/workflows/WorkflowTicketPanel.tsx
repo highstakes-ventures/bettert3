@@ -112,8 +112,16 @@ function Ticket({
       decision === "delay"
         ? orderRefinementQueue(
             queue.map((run) => (run.id === result.value.id ? result.value : run)),
+            Date.parse(result.value.updatedAt),
           )
         : queue;
+    if (decision === "delay" && detail.run.threadId)
+      useRightPanelStore
+        .getState()
+        .closeSurface(
+          scopeThreadRef(environmentId, detail.run.threadId),
+          `ticket:${detail.run.id}`,
+        );
     const next = nextQueue.find(
       (run) => run.phase === "review" && run.id !== detail.run.id && run.threadId !== null,
     );

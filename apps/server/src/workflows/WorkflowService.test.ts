@@ -372,7 +372,7 @@ it.effect("rejects by canceling in the original project and removing the review 
   }).pipe(Effect.scoped),
 );
 
-it.effect("delays refinement durably without changing or canceling the Linear ticket", () =>
+it.effect("hides refinement for five days across restart without changing the Linear ticket", () =>
   Effect.gen(function* () {
     const h = yield* harness;
     const first = yield* h.prepare("first");
@@ -395,8 +395,40 @@ it.effect("delays refinement durably without changing or canceling the Linear ti
       (yield* restored.list(projectId)).runs
         .filter((run) => run.phase === "review")
         .map((run) => run.id),
-    ).toEqual(["second", "first"]);
+    ).toEqual(["second"]);
+    expect((yield* restored.read(first.id)).run.delayedAt).toBe(delayed.delayedAt);
+    yield* TestClock.adjust(5 * 24 * 60 * 60 * 1_000 - 1);
+    expect((yield* restored.list(projectId)).runs.map((run) => run.id)).toEqual(["second"]);
+    yield* TestClock.adjust(1);
+    expect((yield* restored.list(projectId)).runs.map((run) => run.id)).toEqual([
+      "second",
+      "first",
+    ]);
     expect(h.launches).toHaveLength(2);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("preserves a delayed ticket's deadline when preparation merges new intake into it", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const first = yield* h.prepare("first");
+    const ticket = (yield* h.service.read(first.id)).ticket!;
+    const delayed = yield* h.service.decide({
+      runId: first.id,
+      decision: "delay",
+      expectedUpdatedAt: ticket.updatedAt,
+      targetProjectId: "target",
+    });
+    yield* TestClock.adjust(24 * 60 * 60 * 1_000);
+    yield* h.prepare(
+      "duplicate",
+      { ...draft, description: "Additional intake evidence" },
+      ticket.id,
+    );
+    expect((yield* h.service.read(first.id)).run.delayedAt).toBe(delayed.delayedAt);
+    expect((yield* h.service.list(projectId)).runs.some((run) => run.phase === "review")).toBe(
+      false,
+    );
   }).pipe(Effect.scoped),
 );
 

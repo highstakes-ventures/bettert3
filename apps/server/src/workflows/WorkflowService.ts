@@ -248,7 +248,10 @@ const make = Effect.gen(function* () {
       yield* requireProject(projectId);
       const records = yield* all(projectId);
       const runs = records.map(summary);
-      const waiting = Tickets.orderRefinementQueue(runs);
+      const waiting = Tickets.orderRefinementQueue(
+        runs,
+        DateTime.toEpochMillis(yield* DateTime.now),
+      );
       return {
         configuration: yield* configuration(projectId),
         connected: yield* linear.connected,

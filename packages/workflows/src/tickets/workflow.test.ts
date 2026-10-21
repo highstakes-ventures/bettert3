@@ -38,31 +38,34 @@ const ticket: WorkflowTicket = {
 };
 
 describe("refinement ordering and approval", () => {
-  it("moves delayed tickets and their dependents behind ready work while preserving dependencies", () =>
+  it("hides delayed tickets and their transitive dependents until five days have elapsed", () => {
+    const runs = [
+      { ...run("delayed", [], 1), delayedAt: "2026-10-21T09:00:00Z" },
+      run("dependent", ["delayed"], 1),
+      run("transitive", ["dependent"], 1),
+      { ...run("older-delay", [], 4), delayedAt: "2026-10-20T09:00:00Z" },
+      run("ready", [], 4),
+    ];
     expect(
-      orderRefinementQueue([
-        { ...run("delayed", [], 1), delayedAt: "2026-10-21T09:00:00Z" },
-        run("dependent", ["delayed"], 1),
-        { ...run("older-delay", [], 4), delayedAt: "2026-10-20T09:00:00Z" },
-        run("ready", [], 4),
-      ]).map((entry) => entry.id),
-    ).toEqual(["ready", "older-delay", "delayed", "dependent"]));
+      orderRefinementQueue(runs, Date.parse("2026-10-26T08:59:59.999Z")).map((entry) => entry.id),
+    ).toEqual(["ready", "older-delay"]);
+    expect(
+      orderRefinementQueue(runs, Date.parse("2026-10-26T09:00:00Z")).map((entry) => entry.id),
+    ).toEqual(["ready", "older-delay", "delayed", "dependent", "transitive"]);
+  });
   it("puts prerequisites first even when their dependents have higher priority", () =>
     expect(
-      orderRefinementQueue([
-        run("c", ["b"], 1),
-        run("b", ["a"], 2),
-        run("a", [], 4),
-        run("d", [], 3),
-      ]).map((entry) => entry.id),
+      orderRefinementQueue(
+        [run("c", ["b"], 1), run("b", ["a"], 2), run("a", [], 4), run("d", [], 3)],
+        0,
+      ).map((entry) => entry.id),
     ).toEqual(["d", "a", "b", "c"]));
   it("keeps cycle members visible and excludes approved work from the counter", () =>
     expect(
-      orderRefinementQueue([
-        run("a", ["b"]),
-        run("b", ["a"]),
-        { ...run("done"), phase: "approved" },
-      ]).map((entry) => entry.id),
+      orderRefinementQueue(
+        [run("a", ["b"]), run("b", ["a"]), { ...run("done"), phase: "approved" }],
+        0,
+      ).map((entry) => entry.id),
     ).toEqual(["a", "b"]));
   it("detects a dependency cycle through several tickets", () =>
     expect(

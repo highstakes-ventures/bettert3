@@ -258,6 +258,12 @@ Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it
 finishes; the call's own result shows its status.
 
+## Delay ticket refinement
+
+During Linear ticket refinement, **Delay** hides the ticket for five days.
+Tickets that depend on it wait too. Delayed tickets stay out of the refinement
+count and return to the queue automatically when the delay expires.
+
 ## Snooze until later
 
 Choose **Snooze → Custom…** from a thread's menu to pick a date and time in your

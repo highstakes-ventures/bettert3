@@ -19,13 +19,12 @@ export function implement<A, E, R>(
   );
 }
 
-/** Prerequisites precede dependents. Cyclic tickets stay visible for human resolution. */
-export function orderRefinementQueue(runs: ReadonlyArray<WorkflowRun>): WorkflowRun[] {
+/** Five-day delays also postpone dependent tickets. Eligible prerequisites come first. */
+export function orderRefinementQueue(runs: ReadonlyArray<WorkflowRun>, now: number): WorkflowRun[] {
   const waiting = runs.filter((run) => run.kind === "tickets" && run.phase === "review");
   const byIssue = new Map(
     waiting.flatMap((run) => (run.issueId === null ? [] : [[run.issueId, run] as const])),
   );
-  const remaining = new Set(waiting.map((run) => run.id));
   const result: WorkflowRun[] = [];
   // A delayed prerequisite takes its dependents with it; otherwise they would
   // pull the delayed ticket straight back to the front of the queue.
@@ -44,6 +43,14 @@ export function orderRefinementQueue(runs: ReadonlyArray<WorkflowRun>): Workflow
       }
     }
   }
+  const remaining = new Set(
+    waiting
+      .filter((run) => {
+        const delayedAt = delayed.get(run.id)!;
+        return delayedAt === "" || Date.parse(delayedAt) + 5 * 24 * 60 * 60 * 1_000 <= now;
+      })
+      .map((run) => run.id),
+  );
   const compare = (a: WorkflowRun, b: WorkflowRun) =>
     delayed.get(a.id)!.localeCompare(delayed.get(b.id)!) ||
     (a.priority || 5) - (b.priority || 5) ||

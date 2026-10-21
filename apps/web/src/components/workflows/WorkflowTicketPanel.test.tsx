@@ -176,7 +176,8 @@ it("retains the ticket after a failed decision", async () => {
   expect(state.navigate).not.toHaveBeenCalled();
   expect(renderer!.root.findByType("h2").props.children).toBe("Current ticket");
 });
-it("advances after Delay even though the current ticket remains in refinement", async () => {
+it("advances after Delay without selecting tickets that depend on the delayed ticket", async () => {
+  state.queue = [run("current"), { ...run("dependent"), blockerIds: ["current"] }, run("next")];
   state.decision.mockResolvedValue({
     _tag: "Success",
     value: { ...run("current"), delayedAt: "2026-10-22" },
@@ -193,4 +194,26 @@ it("advances after Delay even though the current ticket remains in refinement", 
     to: "/$environmentId/$threadId",
     params: { environmentId, threadId: "chat-next" },
   });
+});
+
+it("closes the delayed ticket when there is nothing else eligible to refine", async () => {
+  state.queue = [run("current")];
+  state.decision.mockResolvedValue({
+    _tag: "Success",
+    value: { ...run("current"), delayedAt: "2026-10-22" },
+  });
+  const ref = scopeThreadRef(environmentId, ThreadId.make("chat-current"));
+  useRightPanelStore.getState().openTicket(ref, "current", projectId);
+  await render();
+  const button = renderer!.root
+    .findAllByType("button")
+    .find((entry) => entry.props.children === "Delay")!;
+  await act(async () => {
+    await button.props.onClick();
+  });
+  expect(state.navigate).not.toHaveBeenCalled();
+  expect(
+    useRightPanelStore.getState().byThreadKey[`${ref.environmentId}:${ref.threadId}`]?.surfaces ??
+      [],
+  ).not.toContainEqual(expect.objectContaining({ id: "ticket:current" }));
 });
