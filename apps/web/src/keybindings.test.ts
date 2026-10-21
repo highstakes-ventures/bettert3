@@ -1028,6 +1028,41 @@ describe("resolveChatShortcutCommand", () => {
 });
 
 describe("resolveShortcutCommand", () => {
+  it.each(["MacIntel", "Linux"])(
+    "keeps workflow shortcuts reachable without overriding new chat on %s",
+    (platform) => {
+      const primaryModifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
+      for (const command of ["workflow.ticket", "workflow.refine"] as const) {
+        const binding = DEFAULT_RESOLVED_KEYBINDINGS.find((entry) => entry.command === command)!;
+        const input = event({
+          ...binding.shortcut,
+          ...primaryModifier,
+        });
+        assert.strictEqual(
+          resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform,
+            context: { terminalFocus: false },
+          }),
+          command,
+        );
+        assert.isNull(
+          resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform,
+            context: { terminalFocus: true },
+          }),
+        );
+      }
+      assert.strictEqual(
+        resolveShortcutCommand(
+          event({ key: "n", altKey: true, ...primaryModifier }),
+          DEFAULT_RESOLVED_KEYBINDINGS,
+          { platform, context: { terminalFocus: false } },
+        ),
+        "chat.newWithoutProject",
+      );
+    },
+  );
+
   it("resolves a custom stop-thread shortcut", () => {
     const keybindings = compile([{ shortcut: modShortcut("escape"), command: "thread.stop" }]);
 

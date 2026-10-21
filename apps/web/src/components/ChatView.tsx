@@ -11818,7 +11818,11 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   >
                     <ComposerSurface.Shell
-                      contextStrip={showComposerContextStrip || showComposerModelStrip}
+                      contextStrip={
+                        showComposerContextStrip ||
+                        showComposerModelStrip ||
+                        (activeProject !== null && !showProviderSubagentBar)
+                      }
                     >
                       <ComposerSurface.Host
                         inert={isSavingQueuedEdit}
@@ -12040,22 +12044,6 @@ export default function ChatView(props: ChatViewProps) {
                           {mountComposerContextStrip && (
                             <div className="pointer-events-auto">
                               <BranchToolbar
-                                workflowControls={
-                                  activeProject ? (
-                                    <WorkflowControls
-                                      key={`${activeThread.environmentId}:${activeProject.id}`}
-                                      environmentId={activeThread.environmentId}
-                                      projectId={activeProject.id}
-                                      threadId={activeThread.id}
-                                      modelSelection={
-                                        composerSelectedModelSelection ??
-                                        activeThread.modelSelection
-                                      }
-                                      runtimeMode={runtimeMode}
-                                      keybindings={keybindings}
-                                    />
-                                  ) : null
-                                }
                                 forceNewWorktree={multipleModelSelections !== null}
                                 ref={branchToolbarRef}
                                 environmentId={activeThread.environmentId}
@@ -12097,6 +12085,21 @@ export default function ChatView(props: ChatViewProps) {
                               />
                             </div>
                           )}
+                          {activeProject && !showProviderSubagentBar ? (
+                            <ComposerSurface.ContextStrip>
+                              <WorkflowControls
+                                key={`${activeThread.environmentId}:${activeProject.id}`}
+                                environmentId={activeThread.environmentId}
+                                projectId={activeProject.id}
+                                threadId={activeThread.id}
+                                modelSelection={
+                                  composerSelectedModelSelection ?? activeThread.modelSelection
+                                }
+                                runtimeMode={runtimeMode}
+                                keybindings={keybindings}
+                              />
+                            </ComposerSurface.ContextStrip>
+                          ) : null}
                         </div>
                       </div>
                     </ComposerSurface.Shell>
