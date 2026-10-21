@@ -25,12 +25,14 @@ function AutomaticChatRow({
   accountId,
   unopened,
   normalThreadId,
+  onThreadOpen,
 }: {
   chat: CloudChatSummary;
   environmentId: string;
   accountId: string;
   unopened: boolean;
   normalThreadId: string | undefined;
+  onThreadOpen: (() => void) | undefined;
 }) {
   const params = useParams({ strict: false });
   const { setOpenMobile } = useSidebar();
@@ -60,7 +62,10 @@ function AutomaticChatRow({
               to: "/cloud/$cloudEnvironmentId/$cloudThreadId",
               params: { cloudEnvironmentId: environmentId, cloudThreadId: chat.id },
             })}
-        onClick={() => {
+        onClick={(event) => {
+          if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+            onThreadOpen?.();
+          }
           setOpenMobile(false);
           if (normalThreadId)
             markThreadVisited(
@@ -130,10 +135,12 @@ export function AutomaticChatsSection({
   expanded,
   onToggle,
   onLayoutChange,
+  onThreadOpen,
 }: {
   expanded: boolean;
   onToggle: () => void;
   onLayoutChange: () => void;
+  onThreadOpen?: () => void;
 }) {
   const environmentId = usePrimaryEnvironmentId();
   const params = useParams({ strict: false });
@@ -290,6 +297,7 @@ export function AutomaticChatsSection({
                   environmentId={environmentId}
                   accountId={data.accountId}
                   unopened={isUnopened(chat)}
+                  onThreadOpen={onThreadOpen}
                   normalThreadId={
                     threads.find(
                       (thread) =>
