@@ -324,10 +324,9 @@ const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
-// Fresh keys deliberately reset both shelves to collapsed for existing users.
-const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
-const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
-const WORKING_SHELF_EXPANDED_KEY = "t3code:sidebar:working-expanded";
+const ExpandedSidebarShelf = Schema.NullOr(
+  Schema.Literals(["timer", "working", "snoozed", "settled", "automatic"]),
+);
 
 // Working beta: when this client saw each thread leave the Working shelf.
 // Module scope keeps the inbox order across routes that unmount the sidebar.
@@ -3132,25 +3131,36 @@ export default function Sidebar() {
     () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
     [],
   );
-  const [settledShelfExpanded, setSettledShelfExpanded] = useLocalStorage(
-    SETTLED_SHELF_EXPANDED_KEY,
-    false,
-    Schema.Boolean,
+  const [expandedShelf, setExpandedShelf] = useLocalStorage(
+    "t3code:sidebar:expanded-shelf",
+    null,
+    ExpandedSidebarShelf,
   );
-  const [automaticShelfExpanded, setAutomaticShelfExpanded] = useLocalStorage(
-    "t3code:sidebar:automatic-shelf-expanded",
-    false,
-    Schema.Boolean,
+  const settledShelfExpanded = expandedShelf === "settled";
+  const snoozedShelfExpanded = expandedShelf === "snoozed";
+  const workingShelfExpanded = expandedShelf === "working";
+  const timerShelfExpanded = expandedShelf === "timer";
+  const automaticShelfOpen = expandedShelf === "automatic";
+  const toggleSettledShelf = useCallback(
+    () => setExpandedShelf((value) => (value === "settled" ? null : "settled")),
+    [setExpandedShelf],
   );
-  const automaticShelfOpen = automaticShelfExpanded && !settledShelfExpanded;
-  const toggleSettledShelf = useCallback(() => {
-    setAutomaticShelfExpanded(false);
-    setSettledShelfExpanded((value) => !value);
-  }, [setAutomaticShelfExpanded, setSettledShelfExpanded]);
-  const toggleAutomaticShelf = useCallback(() => {
-    setSettledShelfExpanded(false);
-    setAutomaticShelfExpanded(!automaticShelfOpen);
-  }, [automaticShelfOpen, setAutomaticShelfExpanded, setSettledShelfExpanded]);
+  const toggleAutomaticShelf = useCallback(
+    () => setExpandedShelf((value) => (value === "automatic" ? null : "automatic")),
+    [setExpandedShelf],
+  );
+  const toggleSnoozedShelf = useCallback(
+    () => setExpandedShelf((value) => (value === "snoozed" ? null : "snoozed")),
+    [setExpandedShelf],
+  );
+  const toggleWorkingShelf = useCallback(
+    () => setExpandedShelf((value) => (value === "working" ? null : "working")),
+    [setExpandedShelf],
+  );
+  const toggleTimerShelf = useCallback(
+    () => setExpandedShelf((value) => (value === "timer" ? null : "timer")),
+    [setExpandedShelf],
+  );
   const renderedSettledThreads = useMemo(() => {
     if (settledShelfExpanded) return visibleSettledThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
@@ -3164,15 +3174,6 @@ export default function Sidebar() {
   // The snoozed shelf is collapsed by default: out of the way, never gone.
   // Collapsed threads don't render (and so don't participate in jump
   // shortcuts or multi-select), matching the settled tail's paging model.
-  const [snoozedShelfExpanded, setSnoozedShelfExpanded] = useLocalStorage(
-    SNOOZED_SHELF_EXPANDED_KEY,
-    false,
-    Schema.Boolean,
-  );
-  const toggleSnoozedShelf = useCallback(
-    () => setSnoozedShelfExpanded((value) => !value),
-    [setSnoozedShelfExpanded],
-  );
   const visibleSnoozedThreads = useMemo(() => {
     if (snoozedShelfExpanded) return snoozedThreads;
     // The open thread must never vanish behind the collapsed shelf: a
@@ -3187,15 +3188,6 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
-  const [timerShelfExpanded, setTimerShelfExpanded] = useLocalStorage(
-    "t3code:sidebar:timer-expanded",
-    false,
-    Schema.Boolean,
-  );
-  const toggleTimerShelf = useCallback(
-    () => setTimerShelfExpanded((value) => !value),
-    [setTimerShelfExpanded],
-  );
   const visibleTimerThreads = useMemo(() => {
     if (timerShelfExpanded) return timerThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
@@ -3209,15 +3201,6 @@ export default function Sidebar() {
   // The Working shelf (beta) collapses the same way, with the same route
   // exception: sending a message folds the open thread into the shelf, and
   // its row must stay visible there.
-  const [workingShelfExpanded, setWorkingShelfExpanded] = useLocalStorage(
-    WORKING_SHELF_EXPANDED_KEY,
-    false,
-    Schema.Boolean,
-  );
-  const toggleWorkingShelf = useCallback(
-    () => setWorkingShelfExpanded((value) => !value),
-    [setWorkingShelfExpanded],
-  );
   const visibleWorkingThreads = useMemo(() => {
     if (workingShelfExpanded) return workingThreads;
     if (routeThreadKey === null) return EMPTY_THREADS;
