@@ -76,7 +76,12 @@ function layout(
   const rects = items.map((item) => {
     const height =
       item.kind === "thread"
-        ? (item.section === "pinned" || item.section === "active" ? cardHeight : 36) * scale
+        ? (item.section === "pinned" ||
+          item.section === "active" ||
+          item.section === "timer" ||
+          item.section === "working"
+            ? cardHeight
+            : 36) * scale
         : item.marker === "pinned-header" || item.marker === "pinned-divider"
           ? 0
           : (item.marker.endsWith("placeholder") ? 0 : 32) * scale;
@@ -704,6 +709,8 @@ describe("sidebar drag projection", () => {
       divider,
       thread("a1", "active"),
       thread("a2", "active"),
+      marker("timer-header"),
+      thread("t", "timer"),
       marker("working-header"),
       thread("w", "working"),
       settledHeader,
@@ -717,6 +724,8 @@ describe("sidebar drag projection", () => {
     expect(byTime.get("a2")?.y).toBe(-83);
     expect(byTime.get(sidebarMarkerId("working-header"))).toEqual(stationary);
     expect(byTime.get("w")).toEqual(stationary);
+    expect(byTime.get(sidebarMarkerId("timer-header"))).toEqual(stationary);
+    expect(byTime.get("t")).toEqual(stationary);
   });
 
   it("derives missing card geometry from the measured root scale", () => {

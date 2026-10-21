@@ -92,6 +92,7 @@ export interface Preferences {
   readonly threadListSettledShelfExpanded?: boolean;
   readonly threadListSnoozedShelfExpanded?: boolean;
   readonly threadListWorkingShelfExpanded?: boolean;
+  readonly threadListTimerShelfExpanded?: boolean;
   readonly threadSectionGrouping?: boolean;
   readonly collapsedThreadSections?: readonly string[];
   /** Home list filters, restored on the next launch. */
@@ -163,6 +164,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     threadListSettledShelfExpanded?: boolean;
     threadListSnoozedShelfExpanded?: boolean;
     threadListWorkingShelfExpanded?: boolean;
+    threadListTimerShelfExpanded?: boolean;
     threadSectionGrouping?: boolean;
     collapsedThreadSections?: readonly string[];
     threadListFilters?: ThreadListFilters;
@@ -286,6 +288,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     );
   if (typeof parsed.threadListWorkingShelfExpanded === "boolean") {
     preferences.threadListWorkingShelfExpanded = parsed.threadListWorkingShelfExpanded;
+  }
+  if (typeof parsed.threadListTimerShelfExpanded === "boolean") {
+    preferences.threadListTimerShelfExpanded = parsed.threadListTimerShelfExpanded;
   }
   if (isThreadListFilters(parsed.threadListFilters)) {
     preferences.threadListFilters = parsed.threadListFilters;

@@ -22,11 +22,8 @@ const normalizeAvailability = (
   typeof availability === "boolean" ? { browser: availability, device: false } : availability;
 
 /**
- * Each block is omitted entirely when its tools aren't attached. Describing
- * `preview_*` or `device_*` tools that aren't in the turn's tool list would be
- * worse than saying nothing: the instructions actively steer the model away
- * from Playwright, agent-browser, and raw simctl/adb, so leaving them in would
- * talk it out of the only automation it still has.
+ * Omit each block when its tools aren't attached so instructions describe
+ * only the preview and device tools available in this turn.
  */
 const toolInstructions = (availability: boolean | T3CodeToolAvailability): string => {
   const tools = normalizeAvailability(availability);

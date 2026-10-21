@@ -2923,6 +2923,12 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
 
   it.effect.each([
     { type: "terminal.cleanup" },
+    {
+      type: "cloud-turn.interrupt",
+      accountId: "account",
+      threadId: "native-thread",
+      turnId: "native-turn",
+    },
     { type: "provider-runtime.continue", sourceRunId: RunId.make("run:restart-replay") },
   ] as const)(
     "retires live provider effects and requeues $type after process loss",

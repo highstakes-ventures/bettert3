@@ -1,5 +1,35 @@
+import type { EnvironmentId, ScheduledTask } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom } from "effect/reactivity";
+
 import { threadRuntimeIsActive, type EnvironmentThreadShell } from "./models.ts";
 import { toSortableTimestamp } from "./threadSort.ts";
+
+/** Follows existing schedule subscriptions, including changes while shelves are collapsed. */
+export function createTimerThreadKeysAtom<E>(input: {
+  readonly environmentIdsAtom: Atom.Atom<ReadonlyArray<EnvironmentId>>;
+  readonly getTasksAtom: (
+    environmentId: EnvironmentId,
+  ) => Atom.Atom<
+    AsyncResult.AsyncResult<
+      { readonly tasks: ReadonlyArray<Pick<ScheduledTask, "threadId" | "enabled" | "schedule">> },
+      E
+    >
+  >;
+}) {
+  return Atom.make((get): ReadonlySet<string> => {
+    const keys = new Set<string>();
+    for (const environmentId of get(input.environmentIdsAtom)) {
+      const tasks = Option.getOrNull(AsyncResult.value(get(input.getTasksAtom(environmentId))));
+      for (const task of tasks?.tasks ?? []) {
+        if (task.enabled && task.threadId !== null && task.schedule.type !== "webhook") {
+          keys.add(`${environmentId}:${task.threadId}`);
+        }
+      }
+    }
+    return keys;
+  });
+}
 
 // Working section beta, shared so web and mobile fold and order the inbox the
 // same way. Off by default; each client owns its own toggle.

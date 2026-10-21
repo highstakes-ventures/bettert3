@@ -5,6 +5,7 @@ import {
   RuntimeRequestId,
   TurnItemId,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ProjectedTurnItem,
   ThreadId,
   RunId,
   MessageId,
@@ -32,6 +33,146 @@ function threadState(
 }
 
 describe("createEnvironmentThreadDetailAtoms", () => {
+  it("shows an automatic Cloud completion report from cached history without changing the stored output", () => {
+    const report =
+      "## Result\n\nFixed the audit.\n\n| Before | After |\n| --- | --- |\n| 1.15s | 0.53s |";
+    const envelope = JSON.stringify({
+      agentContextJson: JSON.stringify({ version: 5, problem: "Slow audit" }),
+      candidatePatch: "diff --git a/audit.ts b/audit.ts",
+      completion: { status: "completed", report, blocker: null, nextAction: null },
+    });
+    const item: OrchestrationV2ProjectedTurnItem = {
+      position: 0,
+      visibility: "local",
+      sourceThreadId: ref.threadId,
+      sourceItemId: TurnItemId.make("completion"),
+      item: {
+        id: TurnItemId.make("completion"),
+        threadId: ref.threadId,
+        runId: null,
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 1,
+        status: "completed",
+        title: null,
+        startedAt: v2Now,
+        completedAt: v2Now,
+        updatedAt: v2Now,
+        type: "assistant_message",
+        messageId: MessageId.make("completion"),
+        text: envelope,
+        streaming: false,
+      },
+    };
+    const projection: OrchestrationV2ThreadProjection = {
+      ...v2Projection,
+      thread: {
+        ...v2Projection.thread,
+        runDestination: {
+          kind: "codexCloud",
+          accountId: "account",
+          existingThreadId: "native",
+          cwd: "/workspace/project",
+          name: "Nightly",
+          origin: "automatic",
+        },
+      },
+      visibleTurnItems: [item],
+    };
+    const source = Atom.make(
+      AsyncResult.success(
+        threadState({ data: Option.some(projection), status: "cached", error: Option.none() }),
+      ),
+    );
+    const details = createEnvironmentThreadDetailAtoms(() => source);
+    const registry = AtomRegistry.make();
+    const dispose = registry.mount(details.visibleTurnItemsAtom(ref));
+    try {
+      const displayed = registry.get(details.visibleTurnItemsAtom(ref));
+      expect(displayed[0]?.item).toMatchObject({ text: report });
+      expect(registry.get(details.threadAtom(ref))?.projection).toBe(projection);
+      expect(projection.visibleTurnItems[0]?.item).toMatchObject({ text: envelope });
+      registry.set(
+        source,
+        AsyncResult.success(
+          threadState({
+            data: Option.some({ ...projection, updatedAt: v2Now }),
+            status: "live",
+            error: Option.none(),
+          }),
+        ),
+      );
+      expect(registry.get(details.visibleTurnItemsAtom(ref))).toBe(displayed);
+
+      for (const text of [
+        "A normal assistant answer",
+        JSON.stringify({ completion: { report: "Example data" } }),
+        JSON.stringify({ agentContextJson: "{}", completion: { report: "" } }),
+        JSON.stringify({ agentContextJson: "{}", completion: { report: "  " } }),
+        JSON.stringify({ agentContextJson: "{}", completion: { report: 42 } }),
+        envelope.slice(0, -1),
+      ]) {
+        const rows = [{ ...item, item: { ...item.item, text } }];
+        registry.set(
+          source,
+          AsyncResult.success(
+            threadState({
+              data: Option.some({ ...projection, visibleTurnItems: rows }),
+              status: "live",
+              error: Option.none(),
+            }),
+          ),
+        );
+        expect(registry.get(details.visibleTurnItemsAtom(ref))).toBe(rows);
+      }
+
+      const assistant = item.item;
+      if (assistant.type !== "assistant_message") throw new Error("Expected assistant fixture");
+      for (const message of [
+        { ...assistant, streaming: true },
+        {
+          ...assistant,
+          type: "user_message" as const,
+          createdBy: "user" as const,
+          creationSource: "provider" as const,
+          inputIntent: "turn_start" as const,
+          attachments: [],
+        },
+      ]) {
+        const rows = [{ ...item, item: message }];
+        registry.set(
+          source,
+          AsyncResult.success(
+            threadState({
+              data: Option.some({ ...projection, visibleTurnItems: rows }),
+              status: "live",
+              error: Option.none(),
+            }),
+          ),
+        );
+        expect(registry.get(details.visibleTurnItemsAtom(ref))).toBe(rows);
+      }
+
+      registry.set(
+        source,
+        AsyncResult.success(
+          threadState({
+            data: Option.some({ ...projection, thread: v2Projection.thread }),
+            status: "live",
+            error: Option.none(),
+          }),
+        ),
+      );
+      expect(registry.get(details.visibleTurnItemsAtom(ref))).toBe(projection.visibleTurnItems);
+    } finally {
+      dispose();
+      registry.dispose();
+    }
+  });
+
   it("adds environment scope while preserving the pristine projection", () => {
     const initial: AsyncResult.AsyncResult<EnvironmentThreadState, never> = AsyncResult.success(
       threadState({

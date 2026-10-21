@@ -292,6 +292,8 @@ export interface ThreadListV2Item {
 
 export interface ThreadListV2Layout {
   readonly items: ThreadListV2Item[];
+  readonly timerCount: number;
+  readonly timerShelfHeaderIndex: number | null;
   /** Settled threads beyond the render limit (behind "Show more"). */
   readonly hiddenSettledCount: number;
   /** Working threads folded away by the Working section beta. */
@@ -397,6 +399,13 @@ export type ThreadListV2ListItem =
   | { readonly type: "v2-section-view"; readonly key: string; readonly grouped: boolean }
   | ThreadListV2ThreadListItem
   | ThreadListV2PendingListItem
+  | {
+      readonly type: "v2-timer-shelf";
+      readonly key: "v2-timer-shelf";
+      readonly count: number;
+      readonly expanded: boolean;
+      readonly disabled: boolean;
+    }
   | ThreadListV2WorkingShelfListItem
   | ThreadListV2SnoozedShelfListItem
   | ThreadListV2SettledShelfListItem;
@@ -411,6 +420,7 @@ export function isThreadListV2ListItem(value: {
     value.type === "v2-section-view" ||
     value.type === "v2-thread" ||
     value.type === "v2-pending" ||
+    value.type === "v2-timer-shelf" ||
     value.type === "v2-working-shelf" ||
     value.type === "v2-snoozed-shelf" ||
     value.type === "v2-settled-shelf"
@@ -463,6 +473,13 @@ export function threadListV2ListItemsAreEqual(
         previous.pendingTask === item.pendingTask &&
         previous.showPendingDivider === item.showPendingDivider &&
         previous.showTrailingDivider === item.showTrailingDivider
+      );
+    case "v2-timer-shelf":
+      return (
+        previous.type === "v2-timer-shelf" &&
+        previous.count === item.count &&
+        previous.expanded === item.expanded &&
+        previous.disabled === item.disabled
       );
     case "v2-working-shelf":
       return (
@@ -523,6 +540,9 @@ export function buildThreadListV2ListItems(input: {
   readonly items: ReadonlyArray<ThreadListV2Item>;
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
   readonly workingCount?: number;
+  readonly timerCount?: number;
+  readonly timerShelfExpanded?: boolean;
+  readonly timerShelfHeaderIndex?: number | null;
   readonly workingShelfExpanded?: boolean;
   readonly workingShelfHeaderIndex?: number | null;
   readonly snoozedCount?: number;
@@ -594,6 +614,7 @@ export function buildThreadListV2ListItems(input: {
     showTrailingDivider: false,
   }));
   const workingCount = input.workingCount ?? 0;
+  const timerCount = input.timerCount ?? 0;
   const workingShelfHeaderIndex = input.workingShelfHeaderIndex ?? null;
   const snoozedCount = input.snoozedCount ?? 0;
   const snoozedShelfHeaderIndex = input.snoozedShelfHeaderIndex ?? null;
@@ -601,7 +622,9 @@ export function buildThreadListV2ListItems(input: {
   const settledShelfHeaderIndex = input.settledShelfHeaderIndex ?? null;
   const snoozedEnd = settledShelfHeaderIndex ?? threadItems.length;
   const workingEnd = snoozedShelfHeaderIndex ?? snoozedEnd;
-  const activeEnd = workingShelfHeaderIndex ?? workingEnd;
+  const timerEnd = workingShelfHeaderIndex ?? workingEnd;
+  const timerShelfHeaderIndex = input.timerShelfHeaderIndex ?? null;
+  const activeEnd = timerShelfHeaderIndex ?? timerEnd;
   const activeItems = threadItems.slice(0, activeEnd);
   const result: ThreadListV2ListItem[] = [];
   if (input.sectionProjects?.some((project) => project.sections !== undefined)) {
@@ -650,6 +673,16 @@ export function buildThreadListV2ListItems(input: {
   } else result.push(...activeItems);
   result.push(...pendingItems);
   const shelfDisabled = input.shelfPreferencesLoading === true;
+  if (timerShelfHeaderIndex !== null && timerCount > 0) {
+    result.push({
+      type: "v2-timer-shelf",
+      key: "v2-timer-shelf",
+      count: timerCount,
+      expanded: input.timerShelfExpanded === true,
+      disabled: shelfDisabled,
+    });
+    result.push(...threadItems.slice(timerShelfHeaderIndex, timerEnd));
+  }
   if (workingShelfHeaderIndex !== null && workingCount > 0) {
     result.push({
       type: "v2-working-shelf",
@@ -748,6 +781,8 @@ export function buildThreadListV2Items(input: {
       shelf, and the inbox orders by when each thread came back to the user
       instead of the saved arrangement. */
   readonly workingShelfEnabled?: boolean;
+  readonly timerThreadKeys?: ReadonlySet<string>;
+  readonly timerShelfExpanded?: boolean;
   /** Expands the Working shelf into rows. Collapsed is the default. */
   readonly workingShelfExpanded?: boolean;
   /** Returns this device observed but the server does not stamp, such as an
@@ -785,6 +820,7 @@ export function buildThreadListV2Items(input: {
   const workingShelfEnabled = input.workingShelfEnabled === true;
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
+  const timer: EnvironmentThreadShell[] = [];
   const working: EnvironmentThreadShell[] = [];
   const settled: EnvironmentThreadShell[] = [];
   const snoozed: EnvironmentThreadShell[] = [];
@@ -833,6 +869,11 @@ export function buildThreadListV2Items(input: {
       settled.push(thread);
     } else if (thread.pinnedAt != null) {
       pinned.push(thread);
+    } else if (
+      !isThreadWorking(thread) &&
+      input.timerThreadKeys?.has(`${thread.environmentId}:${thread.id}`)
+    ) {
+      timer.push(thread);
     } else if (workingShelfEnabled && isThreadWorking(thread)) {
       working.push(thread);
     } else {
@@ -847,11 +888,18 @@ export function buildThreadListV2Items(input: {
     : applyPendingThreadOrder(sortThreadsForListV2(active), "active", pending);
   // Newest send first; finishing and waking again do not move a row.
   const orderedWorking = sortWorkingThreadsBySend(working);
+  const orderedTimer = sortWorkingThreadsBySend(timer);
   const orderedSnoozed = [...snoozed].sort(
     (left, right) =>
       parseTimestampMs(left.snoozedUntil ?? "") - parseTimestampMs(right.snoozedUntil ?? ""),
   );
   const selectedThreadKey = input.selectedThreadKey ?? null;
+  const visibleTimer =
+    input.timerShelfExpanded === true
+      ? orderedTimer
+      : orderedTimer.filter(
+          (thread) => `${thread.environmentId}:${thread.id}` === selectedThreadKey,
+        );
   const visibleWorking =
     input.workingShelfExpanded === true
       ? orderedWorking
@@ -906,6 +954,10 @@ export function buildThreadListV2Items(input: {
       isLast: false,
     });
   }
+  const timerShelfHeaderIndex = orderedTimer.length > 0 ? items.length : null;
+  for (const thread of visibleTimer) {
+    items.push({ thread, variant: "card", snoozed: false, pinned: false, isLast: false });
+  }
   const workingShelfHeaderIndex = orderedWorking.length > 0 ? items.length : null;
   for (const thread of visibleWorking) {
     items.push({
@@ -942,6 +994,8 @@ export function buildThreadListV2Items(input: {
   }
   return {
     items,
+    timerCount: orderedTimer.length,
+    timerShelfHeaderIndex,
     hiddenSettledCount: orderedSettled.length - pagedSettled.length,
     workingCount: orderedWorking.length,
     workingShelfHeaderIndex,

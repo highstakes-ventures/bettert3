@@ -139,6 +139,11 @@ rename a thread, regenerate its title, or link and unlink a pull request. These 
 appear on web, desktop, and mobile without requiring the originating browser to remain
 open.
 
+Chats with an enabled interval or fixed-time schedule appear in the collapsible **Timer**
+section above Working while they are not working. Busy chats stay in Working and return to
+Timer when their work ends. Pausing or deleting the schedule returns the chat to its usual section.
+Pinned, snoozed, and settled chats keep their sections.
+
 ### Fold working threads (beta)
 
 Turn on **Settings → General → Working section (beta)** on web and desktop, or **Settings →

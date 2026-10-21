@@ -1,9 +1,85 @@
-import { EnvironmentId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
+  type ScheduledTask,
+} from "@t3tools/contracts";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
-import { createInboxReturnTracker, sortWorkingThreadsBySend } from "./threadInbox.ts";
+import {
+  createInboxReturnTracker,
+  createTimerThreadKeysAtom,
+  sortWorkingThreadsBySend,
+} from "./threadInbox.ts";
 
 const environmentId = EnvironmentId.make("environment-1");
+
+it("tracks enabled timed schedules per environment and removes paused or deleted timers", () => {
+  const otherEnvironmentId = EnvironmentId.make("environment-2");
+  const sharedThreadId = ThreadId.make("shared");
+  const timer = {
+    threadId: sharedThreadId,
+    enabled: true,
+    schedule: { type: "interval", everyMs: 60_000 },
+  } as const;
+  type Tasks = {
+    readonly tasks: ReadonlyArray<Pick<ScheduledTask, "threadId" | "enabled" | "schedule">>;
+  };
+  const tasks = Atom.family((_environmentId: EnvironmentId) =>
+    Atom.make(AsyncResult.success<Tasks>({ tasks: [] })),
+  );
+  const environments = Atom.make<ReadonlyArray<EnvironmentId>>([environmentId, otherEnvironmentId]);
+  const timers = createTimerThreadKeysAtom({
+    environmentIdsAtom: environments,
+    getTasksAtom: tasks,
+  });
+  const registry = AtomRegistry.make();
+  const unmount = registry.mount(timers);
+  try {
+    registry.set(
+      tasks(environmentId),
+      AsyncResult.success({
+        tasks: [
+          timer,
+          timer,
+          { ...timer, threadId: ThreadId.make("paused"), enabled: false },
+          {
+            ...timer,
+            threadId: ThreadId.make("webhook"),
+            schedule: { type: "webhook", signature: null },
+          },
+          { ...timer, threadId: null },
+        ],
+      }),
+    );
+    registry.set(
+      tasks(otherEnvironmentId),
+      AsyncResult.success({
+        tasks: [{ ...timer, schedule: { type: "fixed_time", timeOfDay: "09:00" } }],
+      }),
+    );
+    expect([...registry.get(timers)]).toEqual([
+      `${environmentId}:shared`,
+      `${otherEnvironmentId}:shared`,
+    ]);
+
+    registry.set(
+      tasks(environmentId),
+      AsyncResult.success({ tasks: [{ ...timer, enabled: false }] }),
+    );
+    expect([...registry.get(timers)]).toEqual([`${otherEnvironmentId}:shared`]);
+    registry.set(tasks(otherEnvironmentId), AsyncResult.success({ tasks: [] }));
+    expect(registry.get(timers).size).toBe(0);
+    registry.set(tasks(environmentId), AsyncResult.success({ tasks: [timer] }));
+    registry.set(environments, [otherEnvironmentId]);
+    expect(registry.get(timers).size).toBe(0);
+  } finally {
+    unmount();
+    registry.dispose();
+  }
+});
 
 function thread(id: string, working: boolean) {
   return {

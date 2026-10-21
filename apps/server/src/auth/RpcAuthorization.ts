@@ -127,6 +127,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.cloudChatsDestinations]: AuthOrchestrationReadScope,
   [WS_METHODS.cloudChatsList]: AuthOrchestrationReadScope,
   [WS_METHODS.cloudChatsRead]: AuthOrchestrationReadScope,
+  [WS_METHODS.cloudChatsOpen]: AuthOrchestrationOperateScope,
   [WS_METHODS.pullRequestsList]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsListStats]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsSummary]: AuthOrchestrationReadScope,
