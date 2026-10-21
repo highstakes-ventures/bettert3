@@ -15,6 +15,7 @@ import type {
 } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
+import { ListFilterIcon, TicketPlusIcon } from "lucide-react";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { useHandleNewThread } from "~/hooks/useHandleNewThread";
@@ -32,7 +33,8 @@ import { Textarea } from "../ui/textarea";
 import { Kbd } from "../ui/kbd";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { useSidebar } from "../ui/sidebar";
+import { SidebarMenuButton, SidebarMenuItem, useSidebar } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   requestWorkflowAction,
   takeWorkflowAction,
@@ -214,17 +216,53 @@ function WorkflowControls(
       setOpen(false);
     }
   }
-  const hint = (command: "workflow.ticket" | "workflow.refine") =>
-    modifiers.metaKey || modifiers.ctrlKey ? (
-      <Kbd>{shortcutLabelForCommand(props.keybindings, command)}</Kbd>
-    ) : null;
+  const showShortcuts = modifiers.metaKey || modifiers.ctrlKey;
+  const ticketShortcut = shortcutLabelForCommand(props.keybindings, "workflow.ticket");
+  const refineShortcut = shortcutLabelForCommand(props.keybindings, "workflow.refine");
+  const refineLabel = `Refine ${queue.length} ${queue.length === 1 ? "ticket" : "tickets"}`;
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1">
+    <SidebarMenuItem className="flex shrink-0 items-center">
+      <span aria-hidden="true" className="mr-2 ml-1 h-3.5 w-px bg-sidebar-border" />
+      {showShortcuts && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute right-0 bottom-full z-50 mb-2 space-y-1 whitespace-nowrap rounded-md border border-sidebar-border bg-sidebar p-2 text-xs text-sidebar-foreground shadow-sm"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <span>+ Ticket</span>
+            <Kbd>{ticketShortcut}</Kbd>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <span>Refine</span>
+            <Kbd>{refineShortcut}</Kbd>
+          </div>
+        </div>
+      )}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger render={<Button size="xs" variant="ghost" data-workflow-action="ticket" />}>
-          + Ticket {hint("workflow.ticket")}
-        </PopoverTrigger>
-        <PopoverPopup side="top" align="end" width="auto">
+        <Tooltip open={showShortcuts || open ? false : undefined}>
+          <TooltipTrigger
+            render={
+              <PopoverTrigger
+                render={
+                  <SidebarMenuButton
+                    size="icon"
+                    className="mr-1"
+                    aria-label="Add ticket"
+                    data-workflow-action="ticket"
+                  />
+                }
+              />
+            }
+          >
+            <TicketPlusIcon />
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            <span className="flex items-center gap-2">
+              + Ticket <Kbd>{ticketShortcut}</Kbd>
+            </span>
+          </TooltipPopup>
+        </Tooltip>
+        <PopoverPopup side="top" align="start" width="auto">
           <div className="w-80 max-w-full space-y-3 p-3">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-medium">Add a ticket</h2>
@@ -308,15 +346,36 @@ function WorkflowControls(
           </div>
         </PopoverPopup>
       </Popover>
-      <Button
-        size="xs"
-        variant="ghost"
-        onClick={refine}
-        aria-label={`Refine ${queue.length} tickets`}
-      >
-        Refine · {queue.length} {hint("workflow.refine")}
-      </Button>
-    </div>
+      <div className="relative">
+        <Tooltip open={showShortcuts ? false : undefined}>
+          <TooltipTrigger
+            render={
+              <SidebarMenuButton
+                size="icon"
+                onClick={refine}
+                aria-label={refineLabel}
+                data-workflow-action="refine"
+              />
+            }
+          >
+            <ListFilterIcon />
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            <span className="flex items-center gap-2">
+              {refineLabel} <Kbd>{refineShortcut}</Kbd>
+            </span>
+          </TooltipPopup>
+        </Tooltip>
+        {queue.length > 0 && (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-sidebar-control-surface px-0.5 text-3xs font-medium text-sidebar-foreground tabular-nums"
+          >
+            {queue.length > 99 ? "99+" : queue.length}
+          </span>
+        )}
+      </div>
+    </SidebarMenuItem>
   );
 }
 

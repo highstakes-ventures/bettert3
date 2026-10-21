@@ -169,7 +169,11 @@ function SidebarUtilityItem({
   );
 }
 
-export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
+export const SidebarUtilityMenu = memo(function SidebarUtilityMenu({
+  children,
+}: {
+  children?: ReactNode;
+}) {
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -236,6 +240,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           />
         </>
       )}
+      {children}
       <SidebarUpdatePill />
     </SidebarMenu>
   );
@@ -251,8 +256,9 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter({
       {showUndoNotice ? <SidebarThreadUndoNotice /> : null}
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      <SidebarWorkflowControls />
-      <SidebarUtilityMenu />
+      <SidebarUtilityMenu>
+        <SidebarWorkflowControls />
+      </SidebarUtilityMenu>
     </SidebarFooter>
   );
 });
