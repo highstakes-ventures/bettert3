@@ -435,7 +435,7 @@ function WorkflowSlots({
             <PopoverTrigger render={<Button size="xs" variant="ghost" aria-label={label} />} />
           }
         >
-          <span className="whitespace-nowrap text-muted-foreground tabular-nums">
+          <span className="whitespace-nowrap text-(--sidebar-icon-color) tabular-nums">
             {slots ? `${slots.used} / ${slots.limit}` : "…"}
           </span>
         </TooltipTrigger>
