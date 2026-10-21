@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scan performance"
+  short_description: "Find evidenced performance costs worth ticketing"
+  default_prompt: "Use $scan-performance to inspect this repository for actionable performance findings."

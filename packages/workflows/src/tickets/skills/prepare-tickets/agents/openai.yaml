@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prepare tickets"
+  short_description: "Normalize intake into a grounded Linear proposal"
+  default_prompt: "Use $prepare-tickets to prepare this intake for human refinement."

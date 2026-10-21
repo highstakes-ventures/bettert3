@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scan refactors"
+  short_description: "Find bounded refactors with a concrete maintenance benefit"
+  default_prompt: "Use $scan-refactor to find justified structural improvements in this repository."

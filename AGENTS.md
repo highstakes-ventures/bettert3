@@ -158,6 +158,18 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 ## Taste
 
+### Workflow skills
+
+Skill sources are colocated with their workflows and linked from `.agents/skills`:
+
+- [prepare-tickets](.agents/skills/prepare-tickets/SKILL.md): normalize intake, native metadata, and dependencies before human refinement.
+- [refine-tickets](.agents/skills/refine-tickets/SKILL.md): agree on architecture, behavior, verification, and PR delivery with the user.
+- [scan-performance](.agents/skills/scan-performance/SKILL.md): produce evidenced performance findings for ticket preparation.
+- [scan-refactor](.agents/skills/scan-refactor/SKILL.md): produce bounded maintenance improvements for ticket preparation.
+- [audit-ticket-pr](.agents/skills/audit-ticket-pr/SKILL.md): independently compare an exact PR revision with its approved ticket.
+
+### Code conventions
+
 - Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
 - Client mutations use `createEnvironmentRpcCommand`. Add protected methods to `CLIENT_GUARDED_RPC_SCOPES` in contracts and use the command's `permissionAtom` for UI availability. Grants are checked at execution against the destination environment; the server remains authoritative. Keep raw RPC clients inside `rpc/`, and extend the permission behavior tests when adding a protected method.
 - Server features are services; transports stay thin. A `ws.ts` RPC handler, HTTP route, or MCP tool decodes input, calls one service method, and maps errors. See [Effect services](docs/internals/effect-services.md).

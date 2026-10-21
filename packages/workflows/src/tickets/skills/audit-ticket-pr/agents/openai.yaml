@@ -1,0 +1,4 @@
+interface:
+  display_name: "Audit ticket PR"
+  short_description: "Compare an exact PR revision with the approved ticket"
+  default_prompt: "Use $audit-ticket-pr to independently audit this PR against its preserved approved ticket."

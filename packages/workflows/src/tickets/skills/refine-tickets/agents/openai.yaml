@@ -1,0 +1,4 @@
+interface:
+  display_name: "Refine tickets"
+  short_description: "Settle the design and delivery brief with the user"
+  default_prompt: "Use $refine-tickets to make this ticket ready for implementation."
