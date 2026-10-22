@@ -552,7 +552,10 @@ const make = Effect.gen(function* () {
           const ticket = yield* linear.save({
             id: issueId,
             teamId: config.linearTeamId,
-            draft: result.ticket,
+            draft: {
+              ...result.ticket,
+              targetProjectId: result.ticket.targetProjectId ?? config.intakeProjectId,
+            },
             create: result.existingIssueId === undefined,
             ...(result.expectedUpdatedAt === undefined
               ? {}
@@ -988,6 +991,13 @@ const make = Effect.gen(function* () {
                 }),
               );
             const config = yield* requireConfiguration(record.projectId);
+            if (
+              input.decision === "approve" &&
+              (input.targetProjectId === null || input.targetProjectId === config.intakeProjectId)
+            )
+              return yield* new WorkflowError({
+                message: "Choose a delivery project other than the intake project before approval.",
+              });
             const unresolvedQuestions =
               input.decision === "approve" ? yield* questions(record, ticket) : [];
             if (unresolvedQuestions.length)

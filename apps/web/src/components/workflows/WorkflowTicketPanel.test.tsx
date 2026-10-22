@@ -14,6 +14,11 @@ const state = vi.hoisted(() => ({
   decision: vi.fn(),
   navigate: vi.fn(),
   refresh: vi.fn(),
+  projects: [
+    { id: "intake", name: "BACKLOG", teamIds: ["team"], initiatives: [] },
+    { id: "target", name: "Delivery", teamIds: ["team"], initiatives: [] },
+    { id: "other-team", name: "Other team", teamIds: ["other-team"], initiatives: [] },
+  ],
 }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => true }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => state.navigate }));
@@ -33,13 +38,14 @@ vi.mock("~/state/query", () => ({
     data:
       typeof key !== "string"
         ? {
+            configuration: { intakeProjectId: "intake" },
             runs: state.queue.filter(
               (run) => key.input.includeAllProjects || run.projectId === key.input.projectId,
             ),
           }
         : key === "detail"
           ? state.detail
-          : { projects: [] },
+          : { projects: state.projects },
     refresh: state.refresh,
     error: null,
   }),
@@ -47,11 +53,31 @@ vi.mock("~/state/query", () => ({
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => state.decision }));
 vi.mock("../ChatMarkdown", () => ({ default: ({ text }: { text: string }) => <p>{text}</p> }));
 vi.mock("../ui/select", () => ({
-  Select: ({ children }: { children: React.ReactNode }) => children,
-  SelectItem: () => null,
-  SelectPopup: () => null,
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-  SelectValue: () => <span>No project</span>,
+  Select: ({
+    children,
+    value,
+    onValueChange,
+    disabled,
+  }: {
+    children: React.ReactNode;
+    value: string;
+    onValueChange: (value: string) => void;
+    disabled: boolean;
+  }) => (
+    <select
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onValueChange(event.currentTarget.value)}
+    >
+      {children}
+    </select>
+  ),
+  SelectItem: ({ children, value }: { children: React.ReactNode; value: string }) => (
+    <option value={value}>{children}</option>
+  ),
+  SelectPopup: ({ children }: { children: React.ReactNode }) => children,
+  SelectTrigger: () => null,
+  SelectValue: () => null,
 }));
 vi.mock("../ui/button", () => ({
   Button: (props: React.ComponentProps<"button">) => <button {...props} />,
@@ -94,7 +120,7 @@ beforeEach(() => {
       updatedAt: "native-revision",
       description: "Problem",
       teamId: "team",
-      project: null,
+      project: state.projects[1]!,
       priority: 3,
       estimate: null,
       dueDate: null,
@@ -158,7 +184,7 @@ it("keeps the current ticket while the queue reorders and opens the new first ti
       runId: "current",
       decision: "approve",
       expectedUpdatedAt: "native-revision",
-      targetProjectId: null,
+      targetProjectId: "target",
     },
   });
   expect(state.navigate).toHaveBeenCalledWith({
@@ -170,6 +196,43 @@ it("keeps the current ticket while the queue reorders and opens the new first ti
     [`${ref.environmentId}:${ref.threadId}`]: { activeSurfaceId: "ticket:priority-prerequisite" },
   });
 });
+it.each([{ id: null }, { id: "intake" }])(
+  "requires a delivery project when the current project is $id",
+  async ({ id }) => {
+    state.detail = {
+      ...state.detail!,
+      ticket: {
+        ...state.detail!.ticket!,
+        project: state.projects.find((project) => project.id === id) ?? null,
+      },
+    };
+    await render();
+    const button = () =>
+      renderer!.root.findAllByType("button").find((entry) => entry.props.children === "Approve")!;
+    expect(button().props.disabled).toBe(true);
+    await approve();
+    expect(state.decision).not.toHaveBeenCalled();
+    expect(renderer!.root.findByType("select").props.value).toBe("");
+    expect(renderer!.root.findAllByType("option").map((option) => option.props.value)).toEqual([
+      "",
+      "target",
+    ]);
+    await act(async () => {
+      renderer!.root.findByType("select").props.onChange({ currentTarget: { value: "target" } });
+    });
+    expect(button().props.disabled).toBe(false);
+    await approve();
+    expect(state.decision).toHaveBeenCalledWith({
+      environmentId,
+      input: {
+        runId: "current",
+        decision: "approve",
+        expectedUpdatedAt: "native-revision",
+        targetProjectId: "target",
+      },
+    });
+  },
+);
 it("stays on the ticket when recovery withdraws approval after a concurrent edit", async () => {
   state.decision.mockResolvedValue({
     _tag: "Success",

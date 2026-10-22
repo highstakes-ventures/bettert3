@@ -42,6 +42,12 @@ a conflict and preserve newer edits. Keep project, supported labels and priority
 and native blocker IDs aligned with the chosen solution. Search for real issues
 when a prerequisite changes; do not replace native dependencies with prose.
 
+Resolve the delivery project before approval. The configured `intakeProjectId`
+is an inbox, not a valid delivery target. If the ticket is still in intake or
+has no project, propose an existing project that fits its purpose and scope.
+If none fits, ask the user to choose or configure one. Keep the choice open
+instead of inventing a project or treating intake as the destination.
+
 If distinct outcomes need separate PRs, propose a split with clear boundaries
 and dependencies and let the user decide. If the current toolkit cannot create
 the agreed split, report that capability gap and retain it as blocking work.

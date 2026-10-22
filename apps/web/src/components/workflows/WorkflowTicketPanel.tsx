@@ -56,6 +56,7 @@ export function WorkflowTicketPanel(props: {
       {...props}
       detail={detail.data}
       projects={connection.data?.projects ?? []}
+      intakeProjectId={live.data?.configuration?.intakeProjectId}
       queue={live.data?.runs ?? []}
       refresh={detail.refresh}
     />
@@ -65,6 +66,7 @@ function Ticket({
   environmentId,
   detail,
   projects,
+  intakeProjectId,
   queue,
   cwd,
   refresh,
@@ -72,17 +74,26 @@ function Ticket({
   environmentId: EnvironmentId;
   detail: WorkflowDetail;
   projects: ReadonlyArray<{ id: string; name: string; teamIds: ReadonlyArray<string> }>;
+  intakeProjectId: string | null | undefined;
   queue: ReadonlyArray<WorkflowRun>;
   cwd: string | undefined;
   refresh: () => void;
 }) {
   const [target, setTarget] = useState(detail.ticket?.project?.id ?? "");
+  const deliveryProjects = projects.filter(
+    (project) =>
+      project.id !== intakeProjectId && project.teamIds.includes(detail.ticket?.teamId ?? ""),
+  );
+  const selectedTarget =
+    intakeProjectId === undefined
+      ? undefined
+      : deliveryProjects.find((project) => project.id === target);
   const [busy, setBusy] = useState(false);
   const canDecide = useAtomValue(serverEnvironment.decideWorkflow.permissionAtom(environmentId));
   const decide = useAtomCommand(serverEnvironment.decideWorkflow);
   const navigate = useNavigate();
   async function submit(decision: WorkflowDecisionInput["decision"]) {
-    if (busy || !canDecide || !detail.ticket) return;
+    if (busy || !canDecide || !detail.ticket || (decision === "approve" && !selectedTarget)) return;
     setBusy(true);
     const result = await decide({
       environmentId,
@@ -90,7 +101,7 @@ function Ticket({
         runId: detail.run.id,
         decision,
         expectedUpdatedAt: detail.ticket.updatedAt,
-        targetProjectId: target || null,
+        targetProjectId: selectedTarget?.id ?? null,
       },
     });
     setBusy(false);
@@ -135,7 +146,14 @@ function Ticket({
   }
   return (
     <RefinementPanel
-      detail={detail}
+      detail={
+        detail.run.phase === "review" && !selectedTarget
+          ? {
+              ...detail,
+              questions: ["Choose a delivery project before approval.", ...detail.questions],
+            }
+          : detail
+      }
       renderMarkdown={(text) => (
         <ChatMarkdown
           text={text}
@@ -153,26 +171,27 @@ function Ticket({
       }
       projectControl={
         <Select
-          value={target}
+          value={selectedTarget?.id ?? ""}
           onValueChange={(value) => setTarget(value ?? "")}
-          disabled={busy || detail.run.phase !== "review" || !canDecide}
+          disabled={
+            busy || detail.run.phase !== "review" || !canDecide || intakeProjectId === undefined
+          }
         >
           <SelectTrigger size="sm" aria-label="Target project">
             <SelectValue>
               {(value: string) =>
-                projects.find((project) => project.id === value)?.name ?? "No project"
+                deliveryProjects.find((project) => project.id === value)?.name ??
+                "Choose delivery project"
               }
             </SelectValue>
           </SelectTrigger>
           <SelectPopup>
-            <SelectItem value="">No project</SelectItem>
-            {projects
-              .filter((project) => project.teamIds.includes(detail.ticket?.teamId ?? ""))
-              .map((project) => (
-                <SelectItem key={project.id} value={project.id}>
-                  {project.name}
-                </SelectItem>
-              ))}
+            <SelectItem value="">Choose delivery project</SelectItem>
+            {deliveryProjects.map((project) => (
+              <SelectItem key={project.id} value={project.id}>
+                {project.name}
+              </SelectItem>
+            ))}
           </SelectPopup>
         </Select>
       }
@@ -197,7 +216,7 @@ function Ticket({
             </Button>
             <Button
               size="sm"
-              disabled={busy || !canDecide || detail.questions.length > 0}
+              disabled={busy || !canDecide || !selectedTarget || detail.questions.length > 0}
               onClick={() => void submit("approve")}
             >
               {busy ? "Saving…" : "Approve"}

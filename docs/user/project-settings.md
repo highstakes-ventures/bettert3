@@ -74,7 +74,9 @@ Add an idea with **+ Ticket**. An agent prepares it in Linear and adds it to
 delayed tickets. Implementation chats appear in the regular list. Open **Refine**
 to discuss the ticket in chat beside its description, project, evidence, and
 ticket dependencies. **Approve** sets its target project
-and Refined state. **Delay** moves it and its dependents behind ready tickets for
+and Refined state. The intake project is an inbox. Preparation proposes a delivery
+project; if the choice is unclear, select one during refinement before approval.
+**Delay** moves it and its dependents behind ready tickets for
 later refinement. **Reject** cancels it and removes it from the queue. Restore
 canceled tickets in Linear if needed.
 

@@ -35,6 +35,11 @@ and use its current revision. Existing-issue binding does not itself perform a
 native duplicate merge or transfer attachments. Report that distinction accurately.
 
 Choose an existing target Linear project from its actual purpose and scope.
+The configured `intakeProjectId` is an inbox, never a delivery target. Do not
+preserve it as the target because the incoming ticket is assigned there. If no
+existing delivery project clearly fits, return `targetProjectId: null` and flag
+the choice for refinement. The workflow keeps that ticket in intake. Do not
+invent a project or select an unrelated one to complete the metadata.
 Use the project's native ID, not the BetterT3 workspace project's ID. Resolve
 supported labels and priority from available metadata. Leave uncertain choices
 visible for refinement instead of creating projects or labels. Preserve other

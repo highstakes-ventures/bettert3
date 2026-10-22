@@ -361,7 +361,7 @@ it.effect("rejects by canceling in the original project and removing the review 
       runId: run.id,
       decision: "reject",
       expectedUpdatedAt: ticket.updatedAt,
-      targetProjectId: "target",
+      targetProjectId: null,
     });
     expect(h.decisions).toEqual(["canceled"]);
     expect(h.tickets.get(ticket.id)?.project?.id).toBe("intake");
@@ -371,6 +371,43 @@ it.effect("rejects by canceling in the original project and removing the review 
     yield* h.service.resume();
     expect(h.launches).toHaveLength(1);
   }).pipe(Effect.scoped),
+);
+
+it.effect("keeps prepared tickets with no delivery project in intake for refinement", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const run = yield* h.prepare("unresolved", { ...draft, targetProjectId: null });
+    const detail = yield* h.service.read(run.id);
+    expect(detail.run.phase).toBe("review");
+    expect(detail.ticket?.project?.id).toBe("intake");
+    expect(h.decisions).toEqual([]);
+    expect(h.launches).toHaveLength(1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect.each([{ targetProjectId: null }, { targetProjectId: "intake" }])(
+  "requires a delivery project before approval when the selected target is $targetProjectId",
+  ({ targetProjectId }) =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      const run = yield* h.prepare("unresolved");
+      const ticket = (yield* h.service.read(run.id)).ticket!;
+      const error = yield* h.service
+        .decide({
+          runId: run.id,
+          decision: "approve",
+          expectedUpdatedAt: ticket.updatedAt,
+          targetProjectId,
+        })
+        .pipe(Effect.flip);
+      expect(error.message).toContain("delivery project");
+      expect((yield* h.service.read(run.id)).run.phase).toBe("review");
+      expect(h.tickets.get(ticket.id)).toEqual(ticket);
+      expect(h.decisions).toEqual([]);
+      yield* h.approve(run.id);
+      expect(h.tickets.get(ticket.id)?.project?.id).toBe("target");
+      expect(h.decisions).toEqual(["refined"]);
+    }).pipe(Effect.scoped),
 );
 
 it.effect("hides refinement for five days across restart without changing the Linear ticket", () =>
@@ -383,7 +420,7 @@ it.effect("hides refinement for five days across restart without changing the Li
       runId: first.id,
       decision: "delay",
       expectedUpdatedAt: ticket.updatedAt,
-      targetProjectId: "target",
+      targetProjectId: null,
     });
     expect(delayed.phase).toBe("review");
     expect(delayed.delayedAt).toBeDefined();
