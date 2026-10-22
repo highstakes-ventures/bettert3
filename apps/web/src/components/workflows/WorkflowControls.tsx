@@ -176,7 +176,7 @@ function WorkflowControls(
   const live = useEnvironmentQuery(
     serverEnvironment.workflowLive({
       environmentId: props.environmentId,
-      input: { projectId: props.projectId },
+      input: { projectId: props.projectId, includeAllProjects: true },
     }),
   );
   const canIntake = useAtomValue(
@@ -194,7 +194,7 @@ function WorkflowControls(
     if (run.phase === "review")
       useRightPanelStore
         .getState()
-        .openTicket(scopeThreadRef(props.environmentId, threadId), run.id, props.projectId);
+        .openTicket(scopeThreadRef(props.environmentId, threadId), run.id, run.projectId);
     setOpen(false);
     if (isMobile) setOpenMobile(false);
     await navigate({

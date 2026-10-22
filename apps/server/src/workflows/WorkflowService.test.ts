@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -411,6 +412,50 @@ it.effect("hides refinement for five days across restart without changing the Li
     ]);
     expect(h.launches).toHaveLength(2);
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "lists one environment refinement queue across repositories while retaining scoped lists",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      const other = ProjectId.make("other-repository");
+      yield* h.service.configure({ ...configuration, projectId: other });
+      const prerequisite = yield* h.prepare(
+        "prerequisite",
+        { ...draft, priority: 4 },
+        undefined,
+        other,
+      );
+      yield* h.prepare("dependent", { ...draft, priority: 1, blockedBy: [prerequisite.issueId!] });
+      const delayed = yield* h.prepare("delayed");
+      const ticket = (yield* h.service.read(delayed.id)).ticket!;
+      yield* h.service.decide({
+        runId: delayed.id,
+        decision: "delay",
+        expectedUpdatedAt: ticket.updatedAt,
+        targetProjectId: "target",
+      });
+      yield* h.prepare("waiting-on-delayed", { ...draft, blockedBy: [delayed.issueId!] });
+
+      const global = Option.getOrThrow(
+        yield* h.service.subscribe(projectId, false, true).pipe(Stream.runHead),
+      );
+      expect(global.configuration?.projectId).toBe(projectId);
+      expect(global.runs.map((run) => [run.id, run.projectId])).toEqual([
+        ["prerequisite", other],
+        ["dependent", projectId],
+      ]);
+      expect((yield* h.service.list(other)).runs.map((run) => run.id)).toEqual(["prerequisite"]);
+      const withoutConfiguration = yield* h.service.list(
+        ProjectId.make("unconfigured"),
+        false,
+        true,
+      );
+      expect(withoutConfiguration.configuration).toBeNull();
+      expect(withoutConfiguration.runs.map((run) => run.id)).toEqual(["prerequisite", "dependent"]);
+      expect((yield* h.service.list(projectId, true, true)).runs).toHaveLength(4);
+    }).pipe(Effect.scoped),
 );
 
 it.effect("preserves a delayed ticket's deadline when preparation merges new intake into it", () =>

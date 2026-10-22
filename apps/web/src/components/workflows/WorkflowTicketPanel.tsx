@@ -28,7 +28,7 @@ export function WorkflowTicketPanel(props: {
   const live = useEnvironmentQuery(
     serverEnvironment.workflowLive({
       environmentId: props.environmentId,
-      input: { projectId: props.projectId },
+      input: { projectId: props.projectId, includeAllProjects: true },
     }),
   );
   const run = live.data?.runs.find((entry) => entry.id === props.runId);
@@ -63,7 +63,6 @@ export function WorkflowTicketPanel(props: {
 }
 function Ticket({
   environmentId,
-  projectId,
   detail,
   projects,
   queue,
@@ -71,7 +70,6 @@ function Ticket({
   refresh,
 }: {
   environmentId: EnvironmentId;
-  projectId: ProjectId;
   detail: WorkflowDetail;
   projects: ReadonlyArray<{ id: string; name: string; teamIds: ReadonlyArray<string> }>;
   queue: ReadonlyArray<WorkflowRun>;
@@ -128,7 +126,7 @@ function Ticket({
     if (next?.threadId) {
       useRightPanelStore
         .getState()
-        .openTicket(scopeThreadRef(environmentId, next.threadId), next.id, projectId);
+        .openTicket(scopeThreadRef(environmentId, next.threadId), next.id, next.projectId);
       await navigate({
         to: "/$environmentId/$threadId",
         params: { environmentId, threadId: next.threadId },

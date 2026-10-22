@@ -71,10 +71,12 @@ export class WorkflowService extends Context.Service<
     readonly list: (
       projectId: ProjectId,
       includeDelayed?: boolean,
+      includeAllProjects?: boolean,
     ) => Effect.Effect<WorkflowListResult, WorkflowError>;
     readonly subscribe: (
       projectId: ProjectId,
       includeDelayed?: boolean,
+      includeAllProjects?: boolean,
     ) => Stream.Stream<WorkflowListResult, WorkflowError>;
     readonly configure: (
       input: WorkflowConfiguration,
@@ -249,10 +251,10 @@ const make = Effect.gen(function* () {
       }
       return { used, limit: current.ticketImplementationSlots };
     });
-  const list = (projectId: ProjectId, includeDelayed = false) =>
+  const list = (projectId: ProjectId, includeDelayed = false, includeAllProjects = false) =>
     Effect.gen(function* () {
       yield* requireProject(projectId);
-      const records = yield* all(projectId);
+      const records = yield* all(includeAllProjects ? undefined : projectId);
       const runs = records.map(summary);
       const waiting = Tickets.orderRefinementQueue(
         runs,
@@ -890,17 +892,17 @@ const make = Effect.gen(function* () {
     connection: linear.connection,
     connect: (key) => linear.connect(key).pipe(Effect.tap(() => changed)),
     disconnect: linear.disconnect.pipe(Effect.andThen(changed)),
-    subscribe: (projectId, includeDelayed) =>
+    subscribe: (projectId, includeDelayed, includeAllProjects) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const queue = yield* PubSub.subscribe(changes);
           const settingsChanges = yield* settings.subscribeChanges;
           return Stream.concat(
-            Stream.fromEffect(list(projectId, includeDelayed)),
+            Stream.fromEffect(list(projectId, includeDelayed, includeAllProjects)),
             Stream.merge(
               Stream.fromSubscription(queue),
               settingsChanges.pipe(Stream.map(() => undefined)),
-            ).pipe(Stream.mapEffect(() => list(projectId, includeDelayed))),
+            ).pipe(Stream.mapEffect(() => list(projectId, includeDelayed, includeAllProjects))),
           );
         }),
       ),

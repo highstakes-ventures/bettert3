@@ -19,16 +19,27 @@ vi.mock("@effect/atom-react", () => ({ useAtomValue: () => true }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => state.navigate }));
 vi.mock("~/state/server", () => ({
   serverEnvironment: {
-    workflowLive: () => "live",
+    workflowLive: (input: { input: { projectId: ProjectId; includeAllProjects?: boolean } }) =>
+      input,
     workflowDetail: () => "detail",
     workflowConnection: () => "connection",
     decideWorkflow: { permissionAtom: () => null },
   },
 }));
 vi.mock("~/state/query", () => ({
-  useEnvironmentQuery: (key: string) => ({
+  useEnvironmentQuery: (
+    key: string | { input: { projectId: ProjectId; includeAllProjects?: boolean } },
+  ) => ({
     data:
-      key === "live" ? { runs: state.queue } : key === "detail" ? state.detail : { projects: [] },
+      typeof key !== "string"
+        ? {
+            runs: state.queue.filter(
+              (run) => key.input.includeAllProjects || run.projectId === key.input.projectId,
+            ),
+          }
+        : key === "detail"
+          ? state.detail
+          : { projects: [] },
     refresh: state.refresh,
     error: null,
   }),
@@ -168,6 +179,25 @@ it("stays on the ticket when recovery withdraws approval after a concurrent edit
   await approve();
   expect(state.navigate).not.toHaveBeenCalled();
   expect(state.refresh).toHaveBeenCalled();
+});
+it("opens the next repository's refinement chat with its own project binding", async () => {
+  const other = ProjectId.make("other-repository");
+  state.queue = [run("current"), { ...run("other"), projectId: other }];
+  await render();
+  await approve();
+  expect(state.navigate).toHaveBeenCalledWith({
+    to: "/$environmentId/$threadId",
+    params: { environmentId, threadId: "chat-other" },
+  });
+  const ref = scopeThreadRef(environmentId, ThreadId.make("chat-other"));
+  expect(
+    useRightPanelStore.getState().byThreadKey[`${ref.environmentId}:${ref.threadId}`]?.surfaces,
+  ).toContainEqual({
+    id: "ticket:other",
+    kind: "ticket",
+    runId: "other",
+    projectId: other,
+  });
 });
 it("retains the ticket after a failed decision", async () => {
   state.decision.mockResolvedValue({ _tag: "Failure" });

@@ -115,6 +115,7 @@ export type WorkflowRun = typeof WorkflowRun.Type;
 export const WorkflowListInput = Schema.Struct({
   projectId: ProjectId,
   includeDelayed: Schema.optional(Schema.Boolean),
+  includeAllProjects: Schema.optional(Schema.Boolean),
 });
 export const WorkflowListResult = Schema.Struct({
   configuration: Schema.NullOr(WorkflowConfiguration),

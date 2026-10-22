@@ -18,7 +18,7 @@ export function WorkflowActivity({
     expanded
       ? serverEnvironment.workflowLive({
           environmentId,
-          input: { projectId, includeDelayed: true },
+          input: { projectId, includeDelayed: true, includeAllProjects: true },
         })
       : null,
   );
