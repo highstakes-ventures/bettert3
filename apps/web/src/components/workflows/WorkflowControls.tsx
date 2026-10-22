@@ -38,6 +38,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SidebarMenuButton, SidebarMenuItem, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { WorkflowActivity } from "./WorkflowActivity";
 import {
   requestWorkflowAction,
   takeWorkflowAction,
@@ -188,7 +189,7 @@ function WorkflowControls(
   const queue = live.data?.runs.filter((run) => run.phase === "review") ?? [];
   const configured = live.data?.connected && live.data.configuration !== null;
   async function openRun(run: WorkflowRun) {
-    const threadId = run.phase === "implementing" ? run.implementationThreadId : run.threadId;
+    const threadId = run.threadId ?? run.implementationThreadId;
     if (!threadId) return;
     if (run.phase === "review")
       useRightPanelStore
@@ -338,35 +339,11 @@ function WorkflowControls(
                 {live.error}
               </p>
             )}
-            {live.data?.runs.some(
-              (run) => run.phase === "queued" || run.phase === "preparing" || run.error !== null,
-            ) && (
-              <details className="border-t pt-2 text-xs">
-                <summary className="cursor-pointer text-muted-foreground">
-                  Workflow activity
-                </summary>
-                <div className="mt-2 max-h-48 space-y-2 overflow-y-auto">
-                  {live.data.runs
-                    .filter(
-                      (run) =>
-                        run.phase === "queued" || run.phase === "preparing" || run.error !== null,
-                    )
-                    .map((run) => (
-                      <div key={run.id}>
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          disabled={!run.threadId}
-                          onClick={() => void openRun(run)}
-                        >
-                          {run.title}
-                        </Button>
-                        <p className="text-muted-foreground">{run.error ?? run.phase}</p>
-                      </div>
-                    ))}
-                </div>
-              </details>
-            )}
+            <WorkflowActivity
+              environmentId={props.environmentId}
+              projectId={props.projectId}
+              onOpenRun={(run) => void openRun(run)}
+            />
           </div>
         </PopoverPopup>
       </Popover>

@@ -700,7 +700,11 @@ function OpenCommandPaletteDialog(props: {
     }
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const threads = useThreadShells();
+  const allThreads = useThreadShells();
+  const threads = useMemo(
+    () => allThreads.filter((thread) => thread.source.backgroundWorkflowId === undefined),
+    [allThreads],
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const {
     theme,

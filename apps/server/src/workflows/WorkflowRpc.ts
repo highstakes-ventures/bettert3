@@ -10,7 +10,8 @@ export const layer = WorkflowRpcGroup.middleware(RpcInstrumentation).toLayer(
       [WS_METHODS.workflowsConnection]: () => workflows.connection(),
       [WS_METHODS.workflowsConnect]: (input) => workflows.connect(input.apiKey),
       [WS_METHODS.workflowsDisconnect]: () => workflows.disconnect,
-      [WS_METHODS.workflowsSubscribe]: (input) => workflows.subscribe(input.projectId),
+      [WS_METHODS.workflowsSubscribe]: (input) =>
+        workflows.subscribe(input.projectId, input.includeDelayed),
       [WS_METHODS.workflowsConfigure]: (input) => workflows.configure(input),
       [WS_METHODS.workflowsRead]: (input) => workflows.read(input.runId),
       [WS_METHODS.workflowsIntake]: (input) => workflows.intake(input),

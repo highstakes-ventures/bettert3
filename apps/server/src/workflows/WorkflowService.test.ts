@@ -397,6 +397,11 @@ it.effect("hides refinement for five days across restart without changing the Li
         .map((run) => run.id),
     ).toEqual(["second"]);
     expect((yield* restored.read(first.id)).run.delayedAt).toBe(delayed.delayedAt);
+    // Activity retains delayed history without returning it to the refinement queue.
+    expect((yield* restored.list(projectId, true)).runs.map((run) => run.id)).toEqual([
+      "first",
+      "second",
+    ]);
     yield* TestClock.adjust(5 * 24 * 60 * 60 * 1_000 - 1);
     expect((yield* restored.list(projectId)).runs.map((run) => run.id)).toEqual(["second"]);
     yield* TestClock.adjust(1);

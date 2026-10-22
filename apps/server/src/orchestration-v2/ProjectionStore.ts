@@ -1026,6 +1026,7 @@ type PayloadRow = {
 
 type ShellThreadRow = {
   readonly thread_id: string;
+  readonly background_workflow_id: string | null;
   readonly payload_json: string;
   readonly forked_from_run_source_thread_id: string | null;
   readonly latest_run_id: string | null;
@@ -1680,6 +1681,7 @@ function isActivityRunForShell(
 }
 
 type ShellThreadState = {
+  readonly backgroundWorkflowId: string | null;
   readonly executionDestination: OrchestrationV2ThreadShell["executionDestination"];
   readonly thread: OrchestrationV2ThreadProjection["thread"];
   readonly latestRunId: RunId | null;
@@ -1813,6 +1815,9 @@ function shellFromState(input: {
   readonly visibleItemCount: number;
 }): OrchestrationV2ThreadShell {
   return {
+    ...(input.state.backgroundWorkflowId === null
+      ? {}
+      : { backgroundWorkflowId: input.state.backgroundWorkflowId }),
     ...(input.state.executionDestination === undefined
       ? {}
       : { executionDestination: input.state.executionDestination }),
@@ -5344,6 +5349,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             SELECT
               t.thread_id,
               t.payload_json,
+              (
+                SELECT workflow.id FROM workflow_runs workflow
+                WHERE json_extract(workflow.run_json, '$.threadId') = t.thread_id
+                LIMIT 1
+              ) AS background_workflow_id,
               CASE
                 WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
                   THEN json_extract(t.payload_json, '$.forkedFrom.threadId')
@@ -5921,6 +5931,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           }),
         ];
         return {
+          backgroundWorkflowId: row.background_workflow_id,
           executionDestination:
             row.execution_destination_json === null
               ? undefined

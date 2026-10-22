@@ -91,17 +91,26 @@ describe("v2 thread shell lists", () => {
       id: ThreadId.make("fork"),
       lineage: { ...child.lineage, relationshipToParent: "fork" as const },
     };
-    const snapshot = { ...v2ShellSnapshot, threads: [root, child, fork] };
+    const workflow = { ...root, id: ThreadId.make("scan"), backgroundWorkflowId: "daily-scan" };
+    const snapshot = { ...v2ShellSnapshot, threads: [root, child, fork, workflow] };
     registry.set(snapshotAtom(environmentId), snapshot);
     const dispose = registry.mount(threads.navigationThreadShellsAtom);
     const before = registry.get(threads.navigationThreadShellsAtom);
     expect(before.map((thread) => thread.id)).toEqual([root.id, fork.id]);
     registry.set(snapshotAtom(environmentId), {
       ...snapshot,
-      threads: [root, { ...child, title: "Child streaming" }, fork],
+      threads: [
+        root,
+        { ...child, title: "Child streaming" },
+        fork,
+        { ...workflow, title: "Scan streaming" },
+      ],
     });
     expect(registry.get(threads.navigationThreadShellsAtom)).toBe(before);
-    expect(registry.get(threads.threadShellsAtom)).toHaveLength(3);
+    expect(registry.get(threads.threadShellsAtom)).toHaveLength(4);
+    expect(
+      registry.get(threads.threadShellAtom({ environmentId, threadId: workflow.id }))?.title,
+    ).toBe("Scan streaming");
     dispose();
     registry.dispose();
   });

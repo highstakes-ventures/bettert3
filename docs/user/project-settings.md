@@ -62,15 +62,18 @@ branch name remains.
 
 ## Linear ticket workflows
 
-On web and desktop, open **+ Ticket → Workflow settings** in the bottom bar to
+On web and desktop, open **+ Ticket → Workflow settings** in the sidebar footer to
 connect Linear and choose an intake project, an implementation base branch, and
 the agent model and access mode from the current chat. The selected Linear team
 needs a **Refined** state and a canceled state. The connection stores its API key
 on the environment that runs the workflow.
 
 Add an idea with **+ Ticket**. An agent prepares it in Linear and adds it to
-**Refine**. Open that queue to discuss the ticket in chat beside its description,
-project, evidence, and ticket dependencies. **Approve** sets its target project
+**Refine**. Scans and preparation stay out of the regular chat list. Open
+**+ Ticket → Workflow activity** to read their logs, including completed runs and
+delayed tickets. Implementation chats appear in the regular list. Open **Refine**
+to discuss the ticket in chat beside its description, project, evidence, and
+ticket dependencies. **Approve** sets its target project
 and Refined state. **Delay** moves it and its dependents behind ready tickets for
 later refinement. **Reject** cancels it and removes it from the queue. Restore
 canceled tickets in Linear if needed.

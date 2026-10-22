@@ -441,7 +441,23 @@ describe("sidebar thread lineage helpers", () => {
 
     expect(
       filterSidebarV2VisibleThreads(
-        [root, subagent, fork, archived, otherProject],
+        [
+          root,
+          subagent,
+          fork,
+          archived,
+          otherProject,
+          {
+            ...root,
+            id: ThreadId.make("workflow-scan"),
+            source: { ...root.source, backgroundWorkflowId: "scan" },
+          },
+          {
+            ...root,
+            id: ThreadId.make("workflow-preparation"),
+            source: { ...root.source, backgroundWorkflowId: "ticket" },
+          },
+        ],
         new Set([`${environmentId}:${projectId}`]),
       ).map((thread) => thread.id),
     ).toEqual([parentId, fork.id]);

@@ -1943,6 +1943,8 @@ export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
 export const OrchestrationV2ThreadShell = Schema.Struct({
+  /** Scan/preparation conversation owned by this workflow, derived from its record. */
+  backgroundWorkflowId: Schema.optional(TrimmedNonEmptyString),
   /** Actual attached runtime, not the thread's requested runDestination. */
   executionDestination: Schema.optional(Schema.NullOr(CodexCloudDestination)),
   runDestination: Schema.optional(CodexCloudDestination),

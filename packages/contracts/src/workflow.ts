@@ -112,7 +112,10 @@ export const WorkflowRun = Schema.Struct({
   delayedAt: Schema.optionalKey(Schema.String),
 });
 export type WorkflowRun = typeof WorkflowRun.Type;
-export const WorkflowListInput = Schema.Struct({ projectId: ProjectId });
+export const WorkflowListInput = Schema.Struct({
+  projectId: ProjectId,
+  includeDelayed: Schema.optional(Schema.Boolean),
+});
 export const WorkflowListResult = Schema.Struct({
   configuration: Schema.NullOr(WorkflowConfiguration),
   connected: Schema.Boolean,

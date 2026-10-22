@@ -575,11 +575,13 @@ export function filterSidebarV2VisibleThreads<
   T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage"> & {
     environmentId: string;
     projectId: string;
+    source?: SidebarThreadSummary["source"];
   },
 >(threads: readonly T[], scopedProjectKeys: ReadonlySet<string> | null): T[] {
   return threads.filter(
     (thread) =>
       thread.archivedAt === null &&
+      thread.source?.backgroundWorkflowId === undefined &&
       !isSidebarSubagentThread(thread) &&
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),

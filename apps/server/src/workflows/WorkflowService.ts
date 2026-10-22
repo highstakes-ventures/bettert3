@@ -68,8 +68,14 @@ export class WorkflowService extends Context.Service<
     readonly connection: () => Effect.Effect<WorkflowConnection, WorkflowError>;
     readonly connect: (key: string) => Effect.Effect<WorkflowConnection, WorkflowError>;
     readonly disconnect: Effect.Effect<void, WorkflowError>;
-    readonly list: (projectId: ProjectId) => Effect.Effect<WorkflowListResult, WorkflowError>;
-    readonly subscribe: (projectId: ProjectId) => Stream.Stream<WorkflowListResult, WorkflowError>;
+    readonly list: (
+      projectId: ProjectId,
+      includeDelayed?: boolean,
+    ) => Effect.Effect<WorkflowListResult, WorkflowError>;
+    readonly subscribe: (
+      projectId: ProjectId,
+      includeDelayed?: boolean,
+    ) => Stream.Stream<WorkflowListResult, WorkflowError>;
     readonly configure: (
       input: WorkflowConfiguration,
     ) => Effect.Effect<WorkflowListResult, WorkflowError>;
@@ -243,7 +249,7 @@ const make = Effect.gen(function* () {
       }
       return { used, limit: current.ticketImplementationSlots };
     });
-  const list = (projectId: ProjectId) =>
+  const list = (projectId: ProjectId, includeDelayed = false) =>
     Effect.gen(function* () {
       yield* requireProject(projectId);
       const records = yield* all(projectId);
@@ -256,7 +262,7 @@ const make = Effect.gen(function* () {
         configuration: yield* configuration(projectId),
         connected: yield* linear.connected,
         implementationSlots: yield* implementationSlots(),
-        runs: [...waiting, ...runs.filter((run) => run.phase !== "review")],
+        runs: includeDelayed ? runs : [...waiting, ...runs.filter((run) => run.phase !== "review")],
       } satisfies WorkflowListResult;
     });
   const ticketRecord = (record: Record, ticket: WorkflowTicket): Record => ({
@@ -396,7 +402,7 @@ const make = Effect.gen(function* () {
         ),
         threadId: (implementation ? record.implementationThreadId : record.threadId)!,
         projectId: record.projectId,
-        title: `${implementation ? "Implement" : record.kind === "tickets" ? "Refine" : "Scan"}: ${record.title}`,
+        title: `${implementation ? "Implement" : record.kind === "tickets" ? "Prepare" : "Scan"}: ${record.title}`,
         modelSelection: config.modelSelection,
         runtimeMode: config.runtimeMode,
         interactionMode: "default",
@@ -884,17 +890,17 @@ const make = Effect.gen(function* () {
     connection: linear.connection,
     connect: (key) => linear.connect(key).pipe(Effect.tap(() => changed)),
     disconnect: linear.disconnect.pipe(Effect.andThen(changed)),
-    subscribe: (projectId) =>
+    subscribe: (projectId, includeDelayed) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const queue = yield* PubSub.subscribe(changes);
           const settingsChanges = yield* settings.subscribeChanges;
           return Stream.concat(
-            Stream.fromEffect(list(projectId)),
+            Stream.fromEffect(list(projectId, includeDelayed)),
             Stream.merge(
               Stream.fromSubscription(queue),
               settingsChanges.pipe(Stream.map(() => undefined)),
-            ).pipe(Stream.mapEffect(() => list(projectId))),
+            ).pipe(Stream.mapEffect(() => list(projectId, includeDelayed))),
           );
         }),
       ),
