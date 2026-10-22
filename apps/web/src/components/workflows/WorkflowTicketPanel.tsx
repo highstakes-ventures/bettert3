@@ -6,7 +6,6 @@ import type {
   WorkflowDetail,
   WorkflowRun,
 } from "@t3tools/contracts";
-import { orderRefinementQueue } from "@t3tools/workflows/tickets";
 import { RefinementPanel } from "@t3tools/workflows/tickets/panel";
 import { useNavigate } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -18,6 +17,12 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import ChatMarkdown from "../ChatMarkdown";
+import {
+  refinementQueueWithPendingDecisions,
+  stageWorkflowDecision,
+  hasPendingWorkflowDecision,
+  useWorkflowDecisions,
+} from "./workflowActions";
 
 export function WorkflowTicketPanel(props: {
   environmentId: EnvironmentId;
@@ -88,52 +93,55 @@ function Ticket({
     intakeProjectId === undefined
       ? undefined
       : deliveryProjects.find((project) => project.id === target);
-  const [busy, setBusy] = useState(false);
+  const busy = useWorkflowDecisions((state) =>
+    hasPendingWorkflowDecision(environmentId, detail.run, state.decisions),
+  );
   const canDecide = useAtomValue(serverEnvironment.decideWorkflow.permissionAtom(environmentId));
   const decide = useAtomCommand(serverEnvironment.decideWorkflow);
   const navigate = useNavigate();
   async function submit(decision: WorkflowDecisionInput["decision"]) {
     if (busy || !canDecide || !detail.ticket || (decision === "approve" && !selectedTarget)) return;
-    setBusy(true);
-    const result = await decide({
+    const ticket = detail.ticket;
+    const staged = stageWorkflowDecision({
       environmentId,
-      input: {
-        runId: detail.run.id,
-        decision,
-        expectedUpdatedAt: detail.ticket.updatedAt,
-        targetProjectId: selectedTarget?.id ?? null,
+      run: detail.run,
+      decision,
+      commit: () =>
+        decide({
+          environmentId,
+          input: {
+            runId: detail.run.id,
+            decision,
+            expectedUpdatedAt: ticket.updatedAt,
+            targetProjectId: selectedTarget?.id ?? null,
+          },
+        }),
+      restore: async () => {
+        refresh();
+        if (!detail.run.threadId) return;
+        useRightPanelStore
+          .getState()
+          .openTicket(
+            scopeThreadRef(environmentId, detail.run.threadId),
+            detail.run.id,
+            detail.run.projectId,
+          );
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: { environmentId, threadId: detail.run.threadId },
+        });
       },
     });
-    setBusy(false);
-    if (result._tag !== "Success") {
-      refresh();
-      return;
-    }
-    if (
-      (result.value.phase === "review" && decision !== "delay") ||
-      result.value.phase === "approving" ||
-      result.value.phase === "rejecting"
-    ) {
-      refresh();
-      return;
-    }
-    const nextQueue =
-      decision === "delay"
-        ? orderRefinementQueue(
-            queue.map((run) => (run.id === result.value.id ? result.value : run)),
-            Date.parse(result.value.updatedAt),
-          )
-        : queue;
-    if (decision === "delay" && detail.run.threadId)
+    if (!staged) return;
+    const nextQueue = refinementQueueWithPendingDecisions(environmentId, queue);
+    if (detail.run.threadId)
       useRightPanelStore
         .getState()
         .closeSurface(
           scopeThreadRef(environmentId, detail.run.threadId),
           `ticket:${detail.run.id}`,
         );
-    const next = nextQueue.find(
-      (run) => run.phase === "review" && run.id !== detail.run.id && run.threadId !== null,
-    );
+    const next = nextQueue.find((run) => run.threadId !== null);
     if (next?.threadId) {
       useRightPanelStore
         .getState()
@@ -219,7 +227,7 @@ function Ticket({
               disabled={busy || !canDecide || !selectedTarget || detail.questions.length > 0}
               onClick={() => void submit("approve")}
             >
-              {busy ? "Saving…" : "Approve"}
+              {busy ? "Pending…" : "Approve"}
             </Button>
           </>
         ) : (

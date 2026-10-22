@@ -12,7 +12,8 @@ export function SidebarThreadUndoNotice() {
 
   if (!notice) return null;
   const shortcut = shortcutLabelForCommand(keybindings, "thread.undo");
-  const noun = `${notice.action === "Discarded" ? "draft" : "thread"}${notice.count === 1 ? "" : "s"}`;
+  const ticketDecision = ["Approved", "Rejected", "Delayed"].includes(notice.action);
+  const noun = `${notice.action === "Discarded" ? "draft" : ticketDecision ? "ticket" : "thread"}${notice.count === 1 ? "" : "s"}`;
 
   return (
     <Alert role="status" variant="sidebar">

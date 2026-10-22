@@ -86,6 +86,12 @@ vi.mock("../ui/button", () => ({
 import { WorkflowTicketPanel } from "./WorkflowTicketPanel";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { undoLatestThreadAction, useThreadUndoNotice } from "~/hooks/showThreadUndoNotice";
+import {
+  refinementQueueWithPendingDecisions,
+  useRefinementQueue,
+  useWorkflowDecisions,
+} from "./workflowActions";
 const environmentId = EnvironmentId.make("test");
 const projectId = ProjectId.make("project");
 const run = (id: string): WorkflowRun => ({
@@ -105,6 +111,8 @@ const run = (id: string): WorkflowRun => ({
 });
 let renderer: ReactTestRenderer | undefined;
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-22T12:00:00Z"));
   const current = run("current");
   state.detail = {
     run: current,
@@ -142,6 +150,9 @@ beforeEach(() => {
 afterEach(async () => {
   if (renderer) await act(async () => renderer!.unmount());
   renderer = undefined;
+  await vi.runAllTimersAsync();
+  useWorkflowDecisions.setState({ decisions: [] });
+  vi.useRealTimers();
 });
 const render = async () =>
   act(async () => {
@@ -154,14 +165,20 @@ const render = async () =>
       />,
     );
   });
-const approve = async () => {
+const click = async (label: string) => {
   const button = renderer!.root
     .findAllByType("button")
-    .find((entry) => entry.props.children === "Approve")!;
+    .find((entry) => entry.props.children === label)!;
   await act(async () => {
     await button.props.onClick();
   });
 };
+const approve = () => click("Approve");
+const expire = async () =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+const currentQueue = () => refinementQueueWithPendingDecisions(environmentId, state.queue);
 it("keeps the current ticket while the queue reorders and opens the new first ticket after approval", async () => {
   await render();
   state.queue = [run("priority-prerequisite"), run("next"), run("current")];
@@ -178,6 +195,7 @@ it("keeps the current ticket while the queue reorders and opens the new first ti
   expect(renderer!.root.findByType("h2").props.children).toBe("Current ticket");
   expect(state.navigate).not.toHaveBeenCalled();
   await approve();
+  await expire();
   expect(state.decision).toHaveBeenCalledWith({
     environmentId,
     input: {
@@ -222,6 +240,7 @@ it.each([{ id: null }, { id: "intake" }])(
     });
     expect(button().props.disabled).toBe(false);
     await approve();
+    await expire();
     expect(state.decision).toHaveBeenCalledWith({
       environmentId,
       input: {
@@ -240,7 +259,14 @@ it("stays on the ticket when recovery withdraws approval after a concurrent edit
   });
   await render();
   await approve();
-  expect(state.navigate).not.toHaveBeenCalled();
+  expect(state.navigate).toHaveBeenLastCalledWith(
+    expect.objectContaining({ params: { environmentId, threadId: "chat-next" } }),
+  );
+  await expire();
+  expect(state.navigate).toHaveBeenLastCalledWith(
+    expect.objectContaining({ params: { environmentId, threadId: "chat-current" } }),
+  );
+  expect(currentQueue().map((run) => run.id)).toContain("current");
   expect(state.refresh).toHaveBeenCalled();
 });
 it("opens the next repository's refinement chat with its own project binding", async () => {
@@ -266,7 +292,11 @@ it("retains the ticket after a failed decision", async () => {
   state.decision.mockResolvedValue({ _tag: "Failure" });
   await render();
   await approve();
-  expect(state.navigate).not.toHaveBeenCalled();
+  await expire();
+  expect(state.navigate).toHaveBeenLastCalledWith(
+    expect.objectContaining({ params: { environmentId, threadId: "chat-current" } }),
+  );
+  expect(currentQueue().map((run) => run.id)).toContain("current");
   expect(renderer!.root.findByType("h2").props.children).toBe("Current ticket");
 });
 it("advances after Delay without selecting tickets that depend on the delayed ticket", async () => {
@@ -282,6 +312,9 @@ it("advances after Delay without selecting tickets that depend on the delayed ti
   await act(async () => {
     await button.props.onClick();
   });
+  expect(currentQueue().map((run) => run.id)).toEqual(["next"]);
+  expect(state.decision).not.toHaveBeenCalled();
+  await expire();
   expect(state.decision.mock.calls[0]?.[0].input.decision).toBe("delay");
   expect(state.navigate).toHaveBeenCalledWith({
     to: "/$environmentId/$threadId",
@@ -309,4 +342,131 @@ it("closes the delayed ticket when there is nothing else eligible to refine", as
     useRightPanelStore.getState().byThreadKey[`${ref.environmentId}:${ref.threadId}`]?.surfaces ??
       [],
   ).not.toContainEqual(expect.objectContaining({ id: "ticket:current" }));
+});
+
+it.each(["Approve", "Reject", "Delay"])(
+  "%s waits five seconds and commits once after navigation and unmount",
+  async (label) => {
+    await render();
+    await click(label);
+    expect(state.decision).not.toHaveBeenCalled();
+    expect(currentQueue().map((run) => run.id)).toEqual(["next"]);
+    await act(async () => {
+      renderer!.unmount();
+    });
+    renderer = undefined;
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(state.decision).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(state.decision).toHaveBeenCalledOnce();
+    expect(state.decision.mock.calls[0]?.[0].input.decision).toBe(label.toLowerCase());
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(state.decision).toHaveBeenCalledOnce();
+  },
+);
+
+it.each(["Approve", "Reject", "Delay"])(
+  "Undo cancels %s and reopens the ticket without calling Linear",
+  async (label) => {
+    state.queue = [run("current"), { ...run("dependent"), blockerIds: ["current"] }, run("next")];
+    await render();
+    await click(label);
+    const notice = useThreadUndoNotice.getState().notice!;
+    await act(async () => {
+      await notice.undo();
+      await notice.undo();
+    });
+    expect(undoLatestThreadAction()).toBe(false);
+    expect(state.navigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ params: { environmentId, threadId: "chat-current" } }),
+    );
+    const ref = scopeThreadRef(environmentId, ThreadId.make("chat-current"));
+    expect(
+      useRightPanelStore.getState().byThreadKey[`${ref.environmentId}:${ref.threadId}`]
+        ?.activeSurfaceId,
+    ).toBe("ticket:current");
+    expect(currentQueue().map((run) => run.id)).toContain("current");
+    expect(currentQueue().map((run) => run.id)).toContain("dependent");
+    await expire();
+    expect(state.decision).not.toHaveBeenCalled();
+  },
+);
+
+it("blocks a repeated click and keeps a successful decision hidden until the subscription catches up", async () => {
+  await render();
+  const handler = renderer!.root
+    .findAllByType("button")
+    .find((entry) => entry.props.children === "Approve")!.props.onClick;
+  await act(async () => {
+    handler();
+    handler();
+  });
+  expect(useWorkflowDecisions.getState().decisions).toHaveLength(1);
+  await expire();
+  expect(state.decision).toHaveBeenCalledOnce();
+  expect(currentQueue().map((run) => run.id)).not.toContain("current");
+  state.queue = [{ ...run("current"), phase: "approved" }, run("next")];
+  await act(async () => {
+    renderer!.update(
+      <WorkflowTicketPanel
+        environmentId={environmentId}
+        projectId={projectId}
+        runId="current"
+        cwd="/project"
+      />,
+    );
+  });
+  expect(useWorkflowDecisions.getState().decisions).toHaveLength(1);
+  expect(currentQueue().map((run) => run.id)).toEqual(["next"]);
+});
+
+it("keeps committed decisions hidden across loading, fresh, and stale queue consumers", async () => {
+  await render();
+  await approve();
+  await expire();
+  function Snapshot({ runs }: { runs: ReadonlyArray<WorkflowRun> }) {
+    return (
+      <output>
+        {useRefinementQueue(environmentId, runs)
+          .map((run) => run.id)
+          .join(",")}
+      </output>
+    );
+  }
+  const stale = [run("current"), run("next")];
+  const loading: WorkflowRun[] = [];
+  await act(async () => {
+    renderer!.update(
+      <>
+        <Snapshot runs={stale} />
+        <Snapshot runs={loading} />
+      </>,
+    );
+  });
+  expect(renderer!.root.findAllByType("output")[0]!.props.children).toBe("next");
+  const fresh: WorkflowRun[] = [{ ...run("current"), phase: "approved" }, run("next")];
+  await act(async () => {
+    renderer!.update(
+      <>
+        <Snapshot runs={stale} />
+        <Snapshot runs={fresh} />
+      </>,
+    );
+  });
+  expect(renderer!.root.findAllByType("output").map((node) => node.props.children)).toEqual([
+    "next",
+    "next",
+  ]);
+  await act(async () => {
+    renderer!.update(
+      <>
+        <Snapshot runs={stale} />
+        <Snapshot runs={stale} />
+      </>,
+    );
+  });
+  expect(renderer!.root.findAllByType("output").map((node) => node.props.children)).toEqual([
+    "next",
+    "next",
+  ]);
 });

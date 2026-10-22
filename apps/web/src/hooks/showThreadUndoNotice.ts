@@ -9,7 +9,17 @@ import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import * as ThreadUndo from "./threadUndo";
 
 type UndoOptions = {
-  action: "Settled" | "Snoozed" | "Unpinned" | "Archived" | "Discarded";
+  action:
+    | "Settled"
+    | "Snoozed"
+    | "Unpinned"
+    | "Archived"
+    | "Discarded"
+    | "Approved"
+    | "Rejected"
+    | "Delayed";
+  /** Ticket decisions undo individually; thread actions group by default. */
+  group?: boolean;
   undo: () => Promise<AtomCommandResult<unknown, unknown>>;
   failureTitle: string;
   claim: ReturnType<typeof ThreadUndo.begin>;
@@ -43,7 +53,11 @@ function refreshNotice() {
   const group: UndoOptions[] = [];
   for (let index = liveUndos.length - 1; index >= 0; index--) {
     const entry = liveUndos[index]!;
-    if (entry.action !== latest.action) break;
+    if (
+      entry.action !== latest.action ||
+      (group.length > 0 && (latest.group === false || entry.group === false))
+    )
+      break;
     group.push(entry);
   }
   useThreadUndoNotice.setState({

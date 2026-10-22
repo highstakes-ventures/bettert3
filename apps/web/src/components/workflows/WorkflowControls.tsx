@@ -42,6 +42,7 @@ import { WorkflowActivity } from "./WorkflowActivity";
 import {
   requestWorkflowAction,
   takeWorkflowAction,
+  useRefinementQueue,
   WORKFLOW_ACTION_EVENT,
 } from "./workflowActions";
 
@@ -186,7 +187,7 @@ function WorkflowControls(
   const navigate = useNavigate();
   const { isMobile, setOpenMobile, setOpen: setSidebarOpen } = useSidebar();
   const modifiers = useShortcutModifierState();
-  const queue = live.data?.runs.filter((run) => run.phase === "review") ?? [];
+  const queue = useRefinementQueue(props.environmentId, live.data?.runs ?? []);
   const configured = live.data?.connected && live.data.configuration !== null;
   async function openRun(run: WorkflowRun) {
     const threadId = run.threadId ?? run.implementationThreadId;

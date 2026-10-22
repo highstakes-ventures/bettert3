@@ -143,9 +143,11 @@ shortcut; assign one in **Settings → Keybindings**.
 
 `thread.undo` (`mod+z` by default) reverses the actions shown in the notice at the
 bottom of the sidebar, such as unpin, settle, snooze, archive, or discarding a
-draft. Consecutive
-actions of the same kind undo together. The notice remains available for five
-seconds after the latest action. The default shortcut skips text fields and
+draft. It also cancels a pending ticket approval, rejection, or delay before
+the decision reaches Linear. Ticket decisions undo one at a time. Consecutive
+thread actions of the same kind undo together. The notice remains available for
+five seconds after the latest action. Reloading during that window cancels pending
+ticket decisions. The default shortcut skips text fields and
 terminals so native undo keeps working there.
 
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
