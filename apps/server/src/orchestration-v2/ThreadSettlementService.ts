@@ -196,6 +196,17 @@ export function isSnoozed(
   return !wokeOnError && !wokeOnCompletion;
 }
 
+function ticketPreparationSettlementAt(
+  thread: ProjectionStore.ProjectionSettlementCandidate,
+): DateTime.Utc | null {
+  // Any human message makes this a normal refinement chat.
+  return thread.ticketPreparationComplete === true &&
+    thread.status === "completed" &&
+    thread.latestUserAuthoredMessageAt === null
+    ? (thread.latestRunCompletedAt ?? null)
+    : null;
+}
+
 export function resolveAutoSettlementAt(input: {
   readonly thread: ProjectionStore.ProjectionSettlementCandidate;
   readonly pullRequest: SettlementPullRequest | null;
@@ -228,6 +239,9 @@ export function resolveAutoSettlementAt(input: {
           };
   }
   if (!isAutoSettlementCandidate(thread, input.nowMs)) return null;
+  // Result submission alone can happen while the provider is still running.
+  const preparedAt = ticketPreparationSettlementAt(thread);
+  if (preparedAt !== null) return preparedAt;
   const activityAtMs = latestMillis([
     toMillis(thread.latestUserMessageAt),
     toMillis(thread.latestRunRequestedAt),
@@ -322,9 +336,7 @@ export const make = Effect.gen(function* () {
     threadId?: ThreadId,
   ) {
     const settings = yield* settingsService.getSettings;
-    if (!autoSettlementConfigured(settings)) {
-      return;
-    }
+    const generalSettlementConfigured = autoSettlementConfigured(settings);
     // A sweep for one thread reads only that thread's candidate row.
     const threads = yield* projections.getSettlementCandidates(threadId);
     if (threads.length === 0) return;
@@ -335,7 +347,11 @@ export const make = Effect.gen(function* () {
     // the merged pull request: most threads carry no link and settle from
     // their branch lookup, which would otherwise wait for the next minute's
     // sweep on a possibly stale cached answer.
-    const candidates = threads.filter((thread) => isAutoSettlementCandidate(thread, nowMs));
+    const candidates = threads.filter(
+      (thread) =>
+        (generalSettlementConfigured || ticketPreparationSettlementAt(thread) !== null) &&
+        isAutoSettlementCandidate(thread, nowMs),
+    );
 
     const settleThread = Effect.fn("ThreadSettlementServiceV2.settleThread")(
       function* (thread: (typeof candidates)[number], pullRequest: SettlementPullRequest | null) {
@@ -385,6 +401,7 @@ export const make = Effect.gen(function* () {
     ))
       .filter((thread) => thread !== null)
       .filter((thread) => visibleThreadPullRequests(thread.pullRequests ?? []).length === 0);
+    if (!generalSettlementConfigured) return;
     // Use the same cwd as the sidebar so both paths share GitManager's PR cache.
     const lookupCwdByThreadId = new Map<string, string>();
     yield* Effect.forEach(

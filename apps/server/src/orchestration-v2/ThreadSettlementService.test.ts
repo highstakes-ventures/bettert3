@@ -49,7 +49,10 @@ function at(offsetMs: number): DateTime.Utc {
 }
 
 type SettlementShell = OrchestrationV2ThreadShell &
-  Pick<ProjectionStore.ProjectionSettlementCandidate, "latestUserAuthoredMessageAt">;
+  Pick<
+    ProjectionStore.ProjectionSettlementCandidate,
+    "latestUserAuthoredMessageAt" | "ticketPreparationComplete"
+  >;
 
 // A fixture's user message is one the user wrote unless the test sets
 // latestUserAuthoredMessageAt on its own.
@@ -251,6 +254,42 @@ describe("threadHasQueuedTurnStart", () => {
 });
 
 describe("resolveAutoSettlementAt", () => {
+  it("settles successful preparation, but preserves attention and later human refinement", () => {
+    const prepared = shell({
+      ticketPreparationComplete: true,
+      status: "completed",
+      latestRunId: "preparation-run" as never,
+      latestRunCompletedAt: at(-1_000),
+      latestUserMessageAt: at(-2_000),
+      latestUserAuthoredMessageAt: null,
+    });
+    const resolve = (overrides: Partial<SettlementShell> = {}) =>
+      ThreadSettlementService.resolveAutoSettlementAt({
+        thread: { ...prepared, ...overrides },
+        pullRequest: null,
+        nowMs: NOW_MS,
+        autoSettleAfterDays: null,
+        autoSettleOnMerge: false,
+      });
+    expect(resolve()).toEqual(prepared.latestRunCompletedAt);
+    for (const overrides of [
+      { ticketPreparationComplete: false },
+      { activityRunStatus: "running" as const },
+      { status: "failed" as const },
+      { status: "interrupted" as const },
+      { latestRunCompletedAt: null },
+      { pendingRuntimeRequest: { kind: "approval" } as never },
+      { pinnedAt: at(-1) },
+      { autoSettleDisabledAt: at(-1) },
+      { settledOverride: "active" as const },
+      { pendingBackgroundTasks: [{ taskId: "review", kind: "subagent" as const }] },
+      { snoozedAt: at(-500), snoozedUntil: at(60_000) },
+      { latestUserAuthoredMessageAt: at(-500) },
+    ]) {
+      expect(resolve(overrides), JSON.stringify(overrides)).toBeNull();
+    }
+  });
+
   it("keeps threads with a PR from inactivity settlement only when asked", () => {
     const input = {
       thread: shell({
@@ -726,6 +765,105 @@ const startHarness = Effect.fn("startThreadSettlementHarness")(function* (
 });
 
 describe("ThreadSettlementServiceV2 worker", () => {
+  it.effect("settles finished preparation even when general automatic settlement is off", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const prepared = makeThread("prepared", {
+          ticketPreparationComplete: true,
+          status: "completed",
+          latestRunId: "preparation-run" as never,
+          latestRunCompletedAt: DateTime.makeUnsafe(NOW),
+          latestUserAuthoredMessageAt: null,
+        });
+        const running = { ...prepared, activityRunStatus: "running" as const };
+        const engaged = makeThread("human-refinement", {
+          ...prepared,
+          id: ThreadId.make("human-refinement"),
+          latestUserAuthoredMessageAt: DateTime.makeUnsafe(NOW),
+          pullRequests: [
+            {
+              host: "example.test",
+              repository: "owner/repository",
+              number: 42,
+              url: "https://example.test/owner/repository/pull/42",
+              source: "manual",
+              linkedAt: NOW,
+              snapshot: {
+                state: "closed",
+                title: "Closed pull request",
+                headBranch: "feature",
+                baseBranch: "main",
+                isDraft: false,
+                updatedAt: NOW,
+                syncedAt: NOW,
+                closedAt: NOW,
+              },
+              stack: null,
+            },
+          ],
+        });
+        const failed = {
+          ...engaged,
+          id: ThreadId.make("failed"),
+          status: "failed" as const,
+          latestUserAuthoredMessageAt: null,
+        };
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([
+            running,
+            engaged,
+            failed,
+            makeThread("manual", { branch: "feature" }),
+          ]),
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: null,
+            sidebarAutoSettleOnMerge: false,
+            projectSettingsOverrides: {},
+          },
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          expect(yield* Ref.get(fixture.commands)).toEqual([]);
+          yield* Ref.set(fixture.snapshots, makeSnapshot([prepared]));
+          yield* fixture.publishEvent({
+            type: "provider-session.detached",
+            id: EventId.make("prepared:detached"),
+            threadId: prepared.id,
+            occurredAt: DateTime.makeUnsafe(NOW),
+            payload: {
+              providerSessionId: ProviderSessionId.make("prepared:session"),
+              detachedAt: DateTime.makeUnsafe(NOW),
+            },
+          });
+          yield* Queue.take(fixture.snapshotReads);
+          yield* service.drain;
+          const commands = yield* Ref.get(fixture.commands);
+          expect(commands).toHaveLength(1);
+          expect(commands[0]).toMatchObject({
+            threadId: prepared.id,
+            snapshotAt: prepared.updatedAt,
+            settledAt: prepared.latestRunCompletedAt,
+          });
+          const lateResult = { ...prepared, id: ThreadId.make("late-result") };
+          yield* Ref.set(fixture.snapshots, makeSnapshot([lateResult]));
+          // Result persistence may finish after the terminal run event. The
+          // existing periodic sweep must also settle this completed task.
+          yield* TestClock.adjust("1 minute");
+          yield* Queue.take(fixture.snapshotReads);
+          yield* service.drain;
+          expect((yield* Ref.get(fixture.commands)).map((command) => command.threadId)).toEqual([
+            prepared.id,
+            lateResult.id,
+          ]);
+          expect(yield* Ref.get(fixture.branchCalls)).toEqual([]);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
   it.effect("settles a merged pull request stored only in the thread links", () =>
     Effect.scoped(
       Effect.gen(function* () {

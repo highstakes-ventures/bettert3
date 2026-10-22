@@ -211,6 +211,7 @@ export type ProjectionSettlementCandidate = Pick<
 > &
   Pick<OrchestrationV2AppThread, "lastSnoozeWakeAt"> & {
     readonly latestUserAuthoredMessageAt: DateTime.Utc | null;
+    readonly ticketPreparationComplete?: boolean;
   };
 
 const ProjectionCheckpointContext = Schema.Struct({
@@ -1071,7 +1072,7 @@ type SettlementThreadRow = Pick<
   | "latest_run_completed_at"
   | "latest_user_message_at"
   | "latest_user_authored_message_at"
->;
+> & { readonly ticket_preparation_complete: number };
 
 type ShellRunItemCountRow = {
   readonly thread_id: string;
@@ -5352,6 +5353,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               (
                 SELECT workflow.id FROM workflow_runs workflow
                 WHERE json_extract(workflow.run_json, '$.threadId') = t.thread_id
+                  AND json_extract(workflow.run_json, '$.kind') IN ('performance', 'refactor')
                 LIMIT 1
               ) AS background_workflow_id,
               CASE
@@ -5689,6 +5691,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             // threads before loading the remaining candidates' background work.
             const rows = yield* sql<SettlementThreadRow>`
             SELECT t.thread_id, t.payload_json,
+              EXISTS (
+                SELECT 1 FROM workflow_runs workflow
+                WHERE json_extract(workflow.run_json, '$.threadId') = t.thread_id
+                  AND json_extract(workflow.run_json, '$.kind') = 'tickets'
+                  AND json_extract(workflow.run_json, '$.phase') IN (
+                    'review', 'approving', 'approved', 'implementing', 'done', 'rejecting', 'rejected'
+                  )
+                  AND json_extract(workflow.run_json, '$.error') IS NULL
+              ) AS ticket_preparation_complete,
               r.run_id AS latest_run_id,
               r.status AS latest_run_status,
               r.requested_at AS latest_run_requested_at,
@@ -5774,6 +5785,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     row.latest_user_authored_message_at === null
                       ? null
                       : DateTime.makeUnsafe(row.latest_user_authored_message_at),
+                  ticketPreparationComplete: row.ticket_preparation_complete === 1,
                   activityRunStatus: null,
                   activityRunStartedAt: null,
                   pendingRuntimeRequest: null,
