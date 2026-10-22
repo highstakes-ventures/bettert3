@@ -4,24 +4,48 @@ Preparation writes a PR-style proposal. Refinement maintains that proposal and
 adds the implementation design. Keep the same description authoritative throughout.
 Scale supporting detail to the change rather than filling every section mechanically.
 
+## Writing style and length
+
+Use mostly ASD-STE100-style English. Write short sentences in active voice.
+Use plain words and one idea per sentence. State one checkable requirement per
+acceptance bullet. Keep exact technical names, code, and necessary domain terms.
+Do not force them into a controlled vocabulary or claim formal STE compliance.
+
+Aim for about 250 words in the preparation brief. Refinement may add the design
+and proof needed to implement the change. Keep that addition concise. Do not
+remove requirements, important preserved behavior, or blockers to meet a word count.
+
+Keep decisive facts in the ticket. Link detailed traces, research, source evidence,
+and test procedures through durable, accessible references. Do not paste a research
+report into the description or link a temporary local file as its only evidence.
+If no durable link is available, include the essential facts inline. Links support
+the brief; they do not replace its agreed requirements or architecture decisions.
+
 ## Preparation form
 
 - **Problem.** Current behavior, concrete consequence, and decisive evidence.
 - **User story.** Who needs what and why, in plain language. A system operator
   or developer can be the actor; do not invent a customer persona.
-- **Proposed solution.** Intended behavior and the smallest supported approach.
+- **Proposed solution.** Intended behavior, scope, and the smallest supported approach.
   Identify unsettled choices rather than presenting them as approved.
 - **Flow.** The smallest useful user or system flow diagram. Compare current
   and proposed behavior when that comparison explains the change. Keep diagrams
   readable in Linear using supported Markdown, text, or a real linked asset.
-- **Change impact.** Affected responsibilities and scope. Include explicit
-  exclusions when they prevent a plausible misunderstanding.
+- **Change impact.** Add a separate section only when affected responsibilities
+  or scope need explanation beyond the proposed solution. Include exclusions
+  only when they prevent a plausible misunderstanding.
 - **Acceptance criteria.** Independently checkable outcomes, including important
   preserved behavior. Replace vague adjectives with observable results.
+- **Verification.** The owning test or service layer and the decisive proof.
+  Link detailed fixtures, commands, and test procedures when available.
 - **Evidence.** Real screenshots, examples, traces, and repository references
   with their revision. Distinguish present evidence from proposed mockups.
 - **Risks and open questions.** Material uncertainty that needs a decision or
   more evidence. Keep a question next to the affected requirement when clearer.
+
+Omit empty or redundant sections. Do not add a search transcript, a duplicate-check
+essay, or a prose copy of native metadata. Report a material duplicate or dependency
+uncertainty briefly where the user needs to decide it.
 
 Do not invent final file counts, an implemented hierarchy, speedups, passing
 tests, or before/after implementation evidence during preparation. Native project,
@@ -29,7 +53,8 @@ priority, labels, and dependencies stay authoritative in Linear fields.
 
 ## Refinement extension
 
-Keep the preparation sections current as decisions settle. Add the following
+Rewrite the preparation sections as decisions settle. Do not append a history of
+the refinement conversation. Add the following
 implementation detail where it applies. A small correction needs a smaller
 design than a new workflow, but each ticket must explain its actual change.
 

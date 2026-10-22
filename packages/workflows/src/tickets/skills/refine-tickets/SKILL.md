@@ -12,6 +12,10 @@ deliver one coherent PR without another planning conversation.
 Read `t3_workflow_read` and [the shared ticket brief](../prepare-tickets/references/ticket-brief.md).
 Keep its preparation form current and complete its refinement extension. Do not
 define another template or a competing specification in comments or local notes.
+Keep the shared brief's compact, mostly ASD-STE100 writing style. Replace settled
+questions with decisions instead of appending the discussion. Link detailed
+investigation and test procedures; keep the agreed requirements and design in
+the ticket.
 
 ## Resolve the design together
 
