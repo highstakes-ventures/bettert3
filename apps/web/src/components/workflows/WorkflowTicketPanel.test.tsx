@@ -153,7 +153,10 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(async ({ input }: { input: { decision: string } }) => ({
       _tag: "Success",
-      value: { ...current, phase: input.decision === "reject" ? "rejected" : "approved" },
+      value:
+        input.decision === "delay"
+          ? { ...current, delayedAt: "2026-10-22T12:00:05Z" }
+          : { ...current, phase: input.decision === "reject" ? "rejected" : "approved" },
     }));
   state.settle.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   state.unsettle.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
@@ -405,12 +408,17 @@ it.each(["Approve", "Reject", "Delay"])(
     renderer = undefined;
     await vi.advanceTimersByTimeAsync(4_999);
     expect(state.decision).not.toHaveBeenCalled();
+    expect(state.settle).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(state.decision).toHaveBeenCalledOnce();
     expect(state.decision.mock.calls[0]?.[0].input.decision).toBe(label.toLowerCase());
-    expect(state.settle).toHaveBeenCalledTimes(label === "Reject" ? 1 : 0);
+    expect(state.settle).toHaveBeenCalledExactlyOnceWith({
+      environmentId,
+      input: { threadId: "chat-current" },
+    });
     await vi.advanceTimersByTimeAsync(5_000);
     expect(state.decision).toHaveBeenCalledOnce();
+    expect(state.settle).toHaveBeenCalledOnce();
   },
 );
 
@@ -557,7 +565,13 @@ it("keeps committed decisions hidden across loading, fresh, and stale queue cons
   ]);
 });
 
-it("settles only the rejected ticket's chat after the rejection response succeeds", async () => {
+it.each([
+  { label: "Approve", phase: "approved" },
+  { label: "Approve", phase: "implementing" },
+  { label: "Approve", phase: "done" },
+  { label: "Reject", phase: "rejected" },
+  { label: "Delay", phase: "review", delayedAt: "2026-10-22T12:00:05Z" },
+] as const)("settles only the refinement chat after $label saves as $phase", async (saved) => {
   let finish!: (result: unknown) => void;
   state.decision.mockImplementation(
     () =>
@@ -566,13 +580,21 @@ it("settles only the rejected ticket's chat after the rejection response succeed
       }),
   );
   await render();
-  await click("Reject");
+  await click(saved.label);
   expect(state.settle).not.toHaveBeenCalled();
   await expire();
   expect(state.decision).toHaveBeenCalledOnce();
   expect(state.settle).not.toHaveBeenCalled();
   await act(async () => {
-    finish({ _tag: "Success", value: { ...run("current"), phase: "rejected" } });
+    finish({
+      _tag: "Success",
+      value: {
+        ...run("current"),
+        phase: saved.phase,
+        delayedAt: "delayedAt" in saved ? saved.delayedAt : null,
+        implementationThreadId: ThreadId.make("implementation-chat"),
+      },
+    });
   });
   expect(state.settle).toHaveBeenCalledExactlyOnceWith({
     environmentId,
@@ -581,30 +603,42 @@ it("settles only the rejected ticket's chat after the rejection response succeed
   expect(currentQueue().map((run) => run.id)).not.toContain("current");
 });
 
-it.each(["Failure", "review", "rejecting"])(
-  "does not settle the chat when rejection returns %s",
-  async (outcome) => {
+it.each([
+  { label: "Approve", outcome: "Failure" },
+  { label: "Approve", outcome: "review" },
+  { label: "Approve", outcome: "approving" },
+  { label: "Reject", outcome: "Failure" },
+  { label: "Reject", outcome: "review" },
+  { label: "Reject", outcome: "rejecting" },
+  { label: "Delay", outcome: "Failure" },
+  { label: "Delay", outcome: "review" },
+])(
+  "does not settle the chat when $label returns $outcome without a saved decision",
+  async ({ label, outcome }) => {
     state.decision.mockResolvedValue(
       outcome === "Failure"
         ? { _tag: "Failure" }
         : { _tag: "Success", value: { ...run("current"), phase: outcome } },
     );
     await render();
-    await click("Reject");
+    await click(label);
     await expire();
     expect(state.settle).not.toHaveBeenCalled();
     expect(currentQueue().map((run) => run.id)).toContain("current");
   },
 );
 
-it("keeps a successful rejection when settling its chat fails", async () => {
-  state.settle.mockResolvedValue({ _tag: "Failure" });
-  await render();
-  await click("Reject");
-  await expire();
-  expect(state.settle).toHaveBeenCalledOnce();
-  expect(currentQueue().map((run) => run.id)).not.toContain("current");
-  expect(state.navigate).not.toHaveBeenCalledWith(
-    expect.objectContaining({ params: { environmentId, threadId: "chat-current" } }),
-  );
-});
+it.each(["Approve", "Reject", "Delay"])(
+  "keeps a successful %s when settling its chat fails",
+  async (label) => {
+    state.settle.mockResolvedValue({ _tag: "Failure" });
+    await render();
+    await click(label);
+    await expire();
+    expect(state.settle).toHaveBeenCalledOnce();
+    expect(currentQueue().map((run) => run.id)).not.toContain("current");
+    expect(state.navigate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ params: { environmentId, threadId: "chat-current" } }),
+    );
+  },
+);

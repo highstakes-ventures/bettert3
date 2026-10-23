@@ -100,7 +100,7 @@ function Ticket({
   );
   const canDecide = useAtomValue(serverEnvironment.decideWorkflow.permissionAtom(environmentId));
   const decide = useAtomCommand(serverEnvironment.decideWorkflow);
-  const settle = useOrchestrationCommand(threadEnvironment.settle, "settle rejected ticket chat");
+  const settle = useOrchestrationCommand(threadEnvironment.settle, "settle refinement chat");
   const openRun = useOpenWorkflowRun(environmentId);
   async function submit(decision: WorkflowDecisionInput["decision"]) {
     if (busy || !canDecide || !detail.ticket || (decision === "approve" && !selectedTarget)) return;
@@ -120,9 +120,12 @@ function Ticket({
           },
         });
         if (
-          decision === "reject" &&
           result._tag === "Success" &&
-          result.value.phase === "rejected" &&
+          (decision === "approve"
+            ? ["approved", "implementing", "done"].includes(result.value.phase)
+            : decision === "reject"
+              ? result.value.phase === "rejected"
+              : result.value.phase === "review" && result.value.delayedAt != null) &&
           detail.run.threadId
         ) {
           await settle({ environmentId, input: { threadId: detail.run.threadId } });

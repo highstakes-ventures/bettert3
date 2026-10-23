@@ -83,6 +83,9 @@ project; if the choice is unclear, select one during refinement before approval.
 later refinement. **Reject** cancels it and removes it from the queue. Restore
 canceled tickets in Linear if needed.
 
+Approve, Reject, and Delay each have a five-second Undo window. After the decision
+saves, its refinement chat moves to Settled.
+
 After approval, implementation starts in a fresh worktree when every blocker is
 completed and required code is present on the configured base branch. Canceled
 blockers keep dependent work waiting. A finished implementation waits for its
