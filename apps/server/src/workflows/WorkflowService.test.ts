@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -460,6 +461,38 @@ it.effect.each([
       .pipe(Effect.flip);
     expect(h.switches.saves).toBe(1);
     expect(h.tickets.get(ticket.id)).toEqual(ticket);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("publishes a new panel revision for consecutive agent ticket updates", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const run = yield* h.prepare("refining");
+    const snapshots = yield* Queue.unbounded<typeof run>();
+    yield* h.service.subscribe(projectId).pipe(
+      Stream.runForEach((snapshot) =>
+        Queue.offer(
+          snapshots,
+          snapshot.runs.find((entry) => entry.id === run.id)!,
+        ),
+      ),
+      Effect.forkScoped,
+    );
+    let previous = yield* Queue.take(snapshots);
+    // Both saves happen at the same clock time, but each must invalidate the panel.
+    for (const description of ["First refinement", "Second refinement"]) {
+      const ticket = (yield* h.service.read(run.id)).ticket!;
+      const detail = yield* h.service.agentUpdate(run.threadId!, {
+        expectedUpdatedAt: ticket.updatedAt,
+        ticket: { ...draft, description },
+      });
+      const published = yield* Queue.take(snapshots);
+      expect(published.title).toBe(draft.title);
+      expect(published.updatedAt).not.toBe(previous.updatedAt);
+      expect(detail.run.updatedAt).toBe(published.updatedAt);
+      expect(detail.ticket?.description).toBe(description);
+      previous = published;
+    }
   }).pipe(Effect.scoped),
 );
 

@@ -162,7 +162,13 @@ const make = Effect.gen(function* () {
     });
   const save = (record: Record) =>
     Effect.gen(function* () {
-      const value = { ...record, updatedAt: yield* now };
+      // Clients use updatedAt to invalidate ticket details after every saved change.
+      const updatedAt = DateTime.formatIso(
+        DateTime.makeUnsafe(
+          Math.max(DateTime.toEpochMillis(yield* DateTime.now), Date.parse(record.updatedAt) + 1),
+        ),
+      );
+      const value = { ...record, updatedAt };
       const json = yield* encodeRecord(value).pipe(Effect.mapError(storageError));
       yield* sql`INSERT INTO workflow_runs(id, project_id, run_json) VALUES(${value.id}, ${value.projectId}, ${json}) ON CONFLICT(id) DO UPDATE SET run_json = excluded.run_json WHERE workflow_runs.project_id = excluded.project_id`.pipe(
         Effect.mapError(storageError),
