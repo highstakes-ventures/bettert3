@@ -1366,6 +1366,17 @@ export function codexThreadRuntimeParams(input: {
               "t3-code": {
                 url: mcpSession.endpoint,
                 tool_timeout_sec: CODEX_T3_MCP_TOOL_TIMEOUT_SEC,
+                // Refinement cannot prompt for approval. Trust reads and owned-ticket
+                // saves here; the MCP service still enforces ownership and phase.
+                ...(input.runtimePolicy?.ticketRefinement
+                  ? {
+                      default_tools_approval_mode: "writes",
+                      tools: {
+                        t3_workflow_update: { approval_mode: "approve" },
+                        t3_workflow_result: { approval_mode: "approve" },
+                      },
+                    }
+                  : {}),
                 http_headers: {
                   Authorization: mcpSession.authorizationHeader,
                 },

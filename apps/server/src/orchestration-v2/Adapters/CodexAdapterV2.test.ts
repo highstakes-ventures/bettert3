@@ -688,6 +688,45 @@ describe("CodexAdapterV2 runtime policy", () => {
 });
 
 describe("CodexAdapterV2 process spawning", () => {
+  it("allows refinement reads and owned-ticket saves without approving other MCP writes", () => {
+    const params = CodexAdapterV2.codexThreadRuntimeParams({
+      mcpSession: {
+        environmentId: EnvironmentId.make("environment-refinement"),
+        threadId: ThreadId.make("thread-refinement"),
+        providerSessionId: "refinement-session",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        browserToolsAvailable: false,
+        endpoint: "http://127.0.0.1:43123/mcp",
+        authorizationHeader: "Bearer refinement-token",
+      },
+      runtimePolicy: {
+        runtimeMode: "full-access",
+        interactionMode: "plan",
+        cwd: "/workspace/refinement",
+        ticketRefinement: true,
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "readOnly" },
+      },
+    });
+
+    assert.containsSubset(params.config, {
+      mcp_servers: {
+        "t3-code": {
+          default_tools_approval_mode: "writes",
+          tools: {
+            t3_workflow_update: { approval_mode: "approve" },
+            t3_workflow_result: { approval_mode: "approve" },
+          },
+        },
+      },
+    });
+    const servers = params.config.mcp_servers as Record<string, Record<string, unknown>>;
+    assert.sameMembers(Object.keys(servers["t3-code"]!.tools as object), [
+      "t3_workflow_update",
+      "t3_workflow_result",
+    ]);
+  });
+
   it("injects cwd, model, and MCP authorization into thread-scoped params", () => {
     const threadId = ThreadId.make("thread-codex-mcp");
     const mcpSession = {
