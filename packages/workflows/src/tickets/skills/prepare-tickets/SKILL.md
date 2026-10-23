@@ -44,9 +44,12 @@ When the workflow supports reusing an existing issue, preserve its unique detail
 and use its current revision. Existing-issue binding does not itself perform a
 native duplicate merge or transfer attachments. Report that distinction accurately.
 
-Choose an existing, unfinished target Linear project from its actual purpose and
-scope. A project needs a delivery outcome or an explicit ongoing maintenance
-purpose. Its native status can be Backlog. The configured `intakeProjectId` is
+Choose an existing, unfinished target Linear project by the overarching goal the
+ticket advances. Prefunding and merchant payment notifications belong under
+Payments; SDK guide ownership belongs under Developer experience. Route bugs
+and maintenance to the goal they support. Do not propose a project for each
+feature or a separate project based on the Maintenance / Improvement type.
+Its native status can be Backlog. The configured `intakeProjectId` is
 an inbox, never a delivery target. Use the project's native ID, not the BetterT3
 workspace project's ID. If none fits, keep preparation unfinished and ask the
 user to resolve the destination. Do not submit a null or intake target, invent

@@ -49,7 +49,9 @@ Keep a valid delivery project and exactly one ticket-type label on every update.
 Preparation must resolve both before refinement. For older tickets that still
 lack either, resolve them together before saving or approving. The configured
 `intakeProjectId` is an inbox, not a delivery target. Choose an existing,
-unfinished project that fits the agreed outcome or ongoing maintenance purpose.
+unfinished project whose overarching goal the agreed work advances. Keep
+features, bugs, and maintenance within the goal they support. One feature or
+the Maintenance / Improvement type does not justify a separate project.
 A delivery project can have Backlog status without authorizing implementation.
 If none fits, ask the user to choose or configure one; do not invent a project.
 
