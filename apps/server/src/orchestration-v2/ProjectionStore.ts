@@ -1027,6 +1027,7 @@ type PayloadRow = {
 
 type ShellThreadRow = {
   readonly thread_id: string;
+  readonly ticket_workflow_id: string | null;
   readonly background_workflow_id: string | null;
   readonly payload_json: string;
   readonly forked_from_run_source_thread_id: string | null;
@@ -1682,6 +1683,7 @@ function isActivityRunForShell(
 }
 
 type ShellThreadState = {
+  readonly ticketWorkflowId: string | null;
   readonly backgroundWorkflowId: string | null;
   readonly executionDestination: OrchestrationV2ThreadShell["executionDestination"];
   readonly thread: OrchestrationV2ThreadProjection["thread"];
@@ -1816,6 +1818,9 @@ function shellFromState(input: {
   readonly visibleItemCount: number;
 }): OrchestrationV2ThreadShell {
   return {
+    ...(input.state.ticketWorkflowId === null
+      ? {}
+      : { ticketWorkflowId: input.state.ticketWorkflowId }),
     ...(input.state.backgroundWorkflowId === null
       ? {}
       : { backgroundWorkflowId: input.state.backgroundWorkflowId }),
@@ -5353,6 +5358,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               (
                 SELECT workflow.id FROM workflow_runs workflow
                 WHERE json_extract(workflow.run_json, '$.threadId') = t.thread_id
+                  AND json_extract(workflow.run_json, '$.kind') = 'tickets'
+                LIMIT 1
+              ) AS ticket_workflow_id,
+              (
+                SELECT workflow.id FROM workflow_runs workflow
+                WHERE json_extract(workflow.run_json, '$.threadId') = t.thread_id
                   AND json_extract(workflow.run_json, '$.kind') IN ('performance', 'refactor')
                 LIMIT 1
               ) AS background_workflow_id,
@@ -5943,6 +5954,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           }),
         ];
         return {
+          ticketWorkflowId: row.ticket_workflow_id,
           backgroundWorkflowId: row.background_workflow_id,
           executionDestination:
             row.execution_destination_json === null

@@ -62,6 +62,15 @@ it.effect("hides scanner history while keeping ticket preparation and other chat
     }
     const listed = (yield* store.getShellSnapshot()).threads;
     expect(
+      Object.fromEntries(listed.map((thread) => [thread.id, thread.ticketWorkflowId])),
+    ).toEqual({
+      scan: undefined,
+      prepare: "ticket",
+      implementation: undefined,
+      manual: undefined,
+      sales: undefined,
+    });
+    expect(
       Object.fromEntries(listed.map((thread) => [thread.id, thread.backgroundWorkflowId])),
     ).toEqual({
       scan: "daily-scan",
@@ -73,6 +82,9 @@ it.effect("hides scanner history while keeping ticket preparation and other chat
     for (const thread of listed) {
       expect((yield* store.getThreadShell(thread.id))?.backgroundWorkflowId).toBe(
         thread.backgroundWorkflowId,
+      );
+      expect((yield* store.getThreadShell(thread.id))?.ticketWorkflowId).toBe(
+        thread.ticketWorkflowId,
       );
       expect((yield* store.getThreadProjection(thread.id)).thread.title).toBe("Refine: a request");
     }

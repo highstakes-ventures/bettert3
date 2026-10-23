@@ -1,4 +1,4 @@
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -19,6 +19,7 @@ import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { useEnvironmentThreadRefs, useThreadRefs, useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
+import { useRightPanelStore } from "../rightPanelStore";
 import {
   buildThreadRouteParams,
   isThreadRouteSnapshotAuthoritative,
@@ -58,6 +59,20 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   const serverThreadRef: ScopedThreadRef | null =
     target.kind === "server" ? target.threadRef : (draftSession?.promotedTo ?? inferredThreadRef);
   const serverThread = useThreadShell(serverThreadRef);
+  const ticketWorkflowId = serverThread?.source.ticketWorkflowId;
+  const ticketProjectId = serverThread?.projectId;
+  const ticketEnvironmentId = serverThreadRef?.environmentId;
+  const ticketThreadId = serverThreadRef?.threadId;
+  useEffect(() => {
+    if (!ticketWorkflowId || !ticketProjectId || !ticketEnvironmentId || !ticketThreadId) return;
+    useRightPanelStore
+      .getState()
+      .openTicket(
+        scopeThreadRef(ticketEnvironmentId, ticketThreadId),
+        ticketWorkflowId,
+        ticketProjectId,
+      );
+  }, [ticketEnvironmentId, ticketThreadId, ticketWorkflowId, ticketProjectId]);
   const openCloud = useAtomCommand(cloudChats.open, { reportFailure: false });
   const cloudDestination = serverThread?.source.runDestination;
   const cloudAccountId = cloudDestination?.accountId;

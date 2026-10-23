@@ -264,6 +264,7 @@ import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
 import { createSidebarListMotion } from "./Sidebar.motion";
 import {
   ThreadPullRequestBadgeControl,
+  ThreadRefinementIndicator,
   ThreadPullRequestsMiniList,
   nextThreadChangeRequestSnapshot,
   prStatusIndicator,
@@ -1881,6 +1882,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               />
             ) : null}
             {draftIndicator}
+            <ThreadRefinementIndicator runId={thread.source.ticketWorkflowId} />
             {title}
             <ThreadAutomationsIndicator
               environmentId={thread.environmentId}
@@ -2217,6 +2219,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {props.sweepAction !== null ? dragDestination : null}
             </div>
             <div className="flex h-5 min-w-0 items-center gap-1.5 text-xs text-secondary-label">
+              <ThreadRefinementIndicator runId={thread.source.ticketWorkflowId} />
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">

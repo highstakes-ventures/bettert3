@@ -17,6 +17,7 @@ import {
   ChangeRequestStatusIcon,
   prStatusIndicator,
   PrStatusTooltipContent,
+  ThreadRefinementIndicator,
   ThreadTerminalStatusButton,
   ThreadStatusLabel,
   ThreadWorktreeIndicator,
@@ -806,6 +807,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             </a>
           ) : null}
           {threadStatus && <ThreadStatusLabel status={threadStatus} />}
+          <ThreadRefinementIndicator runId={thread.source.ticketWorkflowId} />
           {canOperateThread && renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}
