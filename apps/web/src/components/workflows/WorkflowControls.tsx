@@ -37,11 +37,13 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SidebarMenuButton, SidebarMenuItem, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { toastManager } from "../ui/toast";
 import { WorkflowActivity } from "./WorkflowActivity";
 import { useOpenWorkflowRun } from "./useOpenWorkflowRun";
 import {
   lastOpenedRefinementRunByEnvironment,
   nextRefinementRun,
+  readyRefinementQueue,
   requestWorkflowAction,
   takeWorkflowAction,
   useRefinementQueue,
@@ -202,14 +204,18 @@ function WorkflowControls(
     setOpen(true);
   };
   const refine = () => {
-    const tickets = queue.filter((entry) => entry.threadId !== null);
-    const current = tickets.find((entry) => entry.threadId === props.threadId);
+    const tickets = live.data?.runs ?? [];
+    const ready = readyRefinementQueue(props.environmentId, tickets);
+    const current = tickets.find(
+      (entry) => entry.phase === "review" && entry.threadId === props.threadId,
+    );
     const lastRunId = lastOpenedRefinementRunByEnvironment.get(props.environmentId);
     const run = current
-      ? nextRefinementRun(tickets, current.id)
-      : (tickets.find((entry) => entry.id === lastRunId) ?? tickets[0]);
+      ? nextRefinementRun(tickets, current.id, ready)
+      : (ready.find((entry) => entry.id === lastRunId) ??
+        nextRefinementRun(tickets, lastRunId ?? "", ready));
     if (run) void openRun(run);
-    else openIntake();
+    else toastManager.add({ type: "info", title: "No tickets ready to refine" });
   };
   useEffect(() => {
     const handleAction = () => {

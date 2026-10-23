@@ -1,8 +1,13 @@
 import type { EnvironmentId, WorkflowDecisionInput, WorkflowRun } from "@t3tools/contracts";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { isThreadWorking } from "@t3tools/client-runtime/state/thread-inbox";
+import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { orderRefinementQueue, workflowDelayUntil } from "@t3tools/workflows/tickets";
 import { AsyncResult } from "effect/reactivity";
 import { create } from "zustand";
+import { useEffect, useState } from "react";
+import { readThreadShell, useThreadShells } from "~/state/entities";
 import { showThreadUndoNotice } from "~/hooks/showThreadUndoNotice";
 import * as ThreadUndo from "~/hooks/threadUndo";
 import { toastManager } from "../ui/toast";
@@ -81,7 +86,55 @@ export function refinementQueueWithPendingDecisions(
 
 export function useRefinementQueue(environmentId: EnvironmentId, runs: ReadonlyArray<WorkflowRun>) {
   const decisions = useWorkflowDecisions((state) => state.decisions);
-  return refinementQueueWithPendingDecisions(environmentId, runs, decisions);
+  const shells = useThreadShells();
+  const [, setWakeTick] = useState(0);
+  useEffect(() => {
+    const threadIds = new Set(
+      runs.filter((run) => run.phase === "review").map((run) => run.threadId),
+    );
+    const wakeTimes = shells.flatMap((shell) =>
+      shell.environmentId === environmentId && threadIds.has(shell.id)
+        ? [Date.parse(shell.snoozedUntil ?? "")]
+        : [],
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      const now = Date.now();
+      const wakeAt = Math.min(...wakeTimes.filter((at) => at > now));
+      if (!Number.isFinite(wakeAt)) return;
+      // Snooze expiry has no server event. Refresh at each actual wake boundary.
+      timer = setTimeout(
+        () => {
+          setWakeTick((tick) => tick + 1);
+          arm();
+        },
+        Math.min(wakeAt - now, 2_147_483_647),
+      );
+    };
+    arm();
+    return () => clearTimeout(timer);
+  }, [environmentId, runs, shells]);
+  return readyRefinementQueue(environmentId, runs, decisions);
+}
+
+/** Read fresh chat state for navigation as well as the live ready count. */
+export function readyRefinementQueue(
+  environmentId: EnvironmentId,
+  runs: ReadonlyArray<WorkflowRun>,
+  receipts = useWorkflowDecisions.getState().decisions,
+) {
+  const now = new Date().toISOString();
+  return refinementQueueWithPendingDecisions(environmentId, runs, receipts).filter((run) => {
+    if (run.threadId === null) return false;
+    const shell = readThreadShell(scopeThreadRef(environmentId, run.threadId));
+    return (
+      shell !== null &&
+      shell.archivedAt === null &&
+      shell.deletedAt === null &&
+      !isThreadWorking(shell) &&
+      !effectiveSnoozed(shell, { now })
+    );
+  });
 }
 
 export function hasPendingWorkflowDecision(

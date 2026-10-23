@@ -1,16 +1,20 @@
 import {
   EnvironmentId,
   ProjectId,
+  ProviderInstanceId,
   ThreadId,
   type WorkflowDetail,
   type WorkflowRun,
 } from "@t3tools/contracts";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { makeThreadFixture } from "~/test-fixtures";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
   detail: null as WorkflowDetail | null,
   queue: [] as WorkflowRun[],
+  shells: new Map<string, EnvironmentThreadShell | null>(),
   decision: vi.fn(),
   settle: vi.fn(),
   unsettle: vi.fn(),
@@ -53,6 +57,19 @@ vi.mock("~/state/query", () => ({
   }),
 }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => state.decision }));
+vi.mock("~/state/entities", () => ({
+  useThreadShells: () => [...state.shells.values()].filter((shell) => shell !== null),
+  readThreadShell: ({
+    environmentId,
+    threadId,
+  }: {
+    environmentId: EnvironmentId;
+    threadId: ThreadId;
+  }) =>
+    state.shells.has(`${environmentId}:${threadId}`)
+      ? state.shells.get(`${environmentId}:${threadId}`)
+      : makeThreadFixture({ environmentId, id: threadId }),
+}));
 vi.mock("~/state/threads", () => ({
   threadEnvironment: { settle: "settle", unsettle: "unsettle" },
 }));
@@ -122,6 +139,7 @@ const run = (id: string): WorkflowRun => ({
 let renderer: ReactTestRenderer | undefined;
 beforeEach(() => {
   lastOpenedRefinementRunByEnvironment.clear();
+  state.shells.clear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-22T12:00:00Z"));
   const current = run("current");
@@ -202,6 +220,64 @@ const currentQueue = () => refinementQueueWithPendingDecisions(environmentId, st
 it("remembers a refinement ticket opened directly from its chat", async () => {
   await render();
   expect(lastOpenedRefinementRunByEnvironment.get(environmentId)).toBe("current");
+});
+
+it.each(["Approve", "Reject", "Delay"])(
+  "%s skips working and snoozed destinations while Undo can restore the working current chat",
+  async (label) => {
+    state.queue = [run("earlier"), run("current"), run("working"), run("snoozed"), run("ready")];
+    const runtime = {
+      status: "running" as const,
+      activeRunId: null,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      providerName: "Codex",
+      lastError: null,
+      updatedAt: "2026-10-22T12:00:00Z",
+    };
+    for (const id of ["current", "working", "snoozed"]) {
+      state.shells.set(
+        `test:chat-${id}`,
+        makeThreadFixture({
+          environmentId,
+          id: ThreadId.make(`chat-${id}`),
+          ...(id === "snoozed" ? { snoozedUntil: "2026-10-23T12:00:00Z" } : { runtime }),
+        }),
+      );
+    }
+    await render();
+    await click(label);
+    expect(state.navigate).toHaveBeenLastCalledWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId, threadId: "chat-ready" },
+    });
+    await act(async () => {
+      await useThreadUndoNotice.getState().notice!.undo();
+    });
+    expect(state.navigate).toHaveBeenLastCalledWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId, threadId: "chat-current" },
+    });
+    expect(state.decision).not.toHaveBeenCalled();
+  },
+);
+
+it("stays in the current chat after a decision when the remaining ticket is snoozed", async () => {
+  state.queue = [run("current"), run("snoozed")];
+  state.shells.set(
+    "test:chat-snoozed",
+    makeThreadFixture({
+      environmentId,
+      id: ThreadId.make("chat-snoozed"),
+      snoozedUntil: "2026-10-23T12:00:00Z",
+    }),
+  );
+  await render();
+  await approve();
+  expect(state.navigate).not.toHaveBeenCalled();
+  expect(state.unsettle).not.toHaveBeenCalled();
+  expect(state.decision).not.toHaveBeenCalled();
+  await expire();
+  expect(state.decision).toHaveBeenCalledOnce();
 });
 it.each(["Approve", "Reject", "Delay"])(
   "%s opens the next ticket before closing the mounted ticket surface",

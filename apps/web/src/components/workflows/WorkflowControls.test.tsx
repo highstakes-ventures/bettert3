@@ -9,6 +9,10 @@ import {
   type WorkflowRun,
 } from "@t3tools/contracts";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { makeThreadFixture } from "~/test-fixtures";
+import { toastManager } from "../ui/toast";
+import { Popover } from "../ui/popover";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import * as Cause from "effect/Cause";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
@@ -21,6 +25,7 @@ const state = vi.hoisted(() => ({
   unsettle: vi.fn(),
   threadId: "chat-current",
   queue: [] as WorkflowRun[],
+  shells: new Map<string, EnvironmentThreadShell | null>(),
 }));
 vi.mock("@effect/atom-react", () => ({
   useAtomValue: (atom: unknown) => (atom === "keybindings" ? DEFAULT_RESOLVED_KEYBINDINGS : true),
@@ -72,6 +77,17 @@ vi.mock("~/composerDraftStore", () => ({ useComposerDraftStore: () => null }));
 vi.mock("~/state/entities", () => ({
   useProject: () => ({ environmentId: "test", id: "project" }),
   useProjects: () => [],
+  useThreadShells: () => [...state.shells.values()].filter((shell) => shell !== null),
+  readThreadShell: ({
+    environmentId,
+    threadId,
+  }: {
+    environmentId: EnvironmentId;
+    threadId: ThreadId;
+  }) =>
+    state.shells.has(`${environmentId}:${threadId}`)
+      ? state.shells.get(`${environmentId}:${threadId}`)
+      : makeThreadFixture({ environmentId, id: threadId }),
 }));
 vi.mock("~/state/environments", () => ({ usePrimaryEnvironment: () => null }));
 vi.mock("~/shortcutModifierState", () => ({ useShortcutModifierState: () => ({}) }));
@@ -123,6 +139,7 @@ beforeEach(() => {
   state.unsettle.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   state.threadId = "chat-current";
   state.queue = [];
+  state.shells.clear();
   lastOpenedRefinementRunByEnvironment.clear();
   useRightPanelStore.setState({ byThreadKey: {} });
   useWorkflowDecisions.setState({ decisions: [] });
@@ -133,6 +150,8 @@ afterEach(async () => {
   useWorkflowDecisions.setState({ decisions: [] });
   vi.unstubAllGlobals();
   lastOpenedRefinementRunByEnvironment.clear();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const run = (id: string, project = "project"): WorkflowRun => ({
@@ -151,11 +170,35 @@ const run = (id: string, project = "project"): WorkflowRun => ({
   updatedAt: "2026-10-21",
 });
 
+const shell = (id: string, overrides: Partial<EnvironmentThreadShell> = {}) => {
+  const thread = makeThreadFixture({
+    environmentId: EnvironmentId.make("test"),
+    id: ThreadId.make(`chat-${id}`),
+    ...overrides,
+  });
+  state.shells.set(`${thread.environmentId}:${thread.id}`, thread);
+  return thread;
+};
+const working = (id: string) =>
+  shell(id, {
+    runtime: {
+      status: "running",
+      activeRunId: null,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      providerName: "Codex",
+      lastError: null,
+      updatedAt: "2026-10-23T12:00:00Z",
+    },
+  });
+
 it.each(["button", "shortcut", "command"])(
   "%s advances through refinement tickets while the current agent is working, then wraps back",
   async (source) => {
     const next = run("next", "other-project");
-    state.queue = [run("earlier"), run("current"), next];
+    state.queue = [run("earlier"), run("current"), run("working"), run("snoozed"), next];
+    working("current");
+    working("working");
+    shell("snoozed", { snoozedUntil: "2099-01-01T00:00:00Z" });
     await act(async () => {
       renderer = create(
         <>
@@ -221,15 +264,114 @@ it.each(["button", "shortcut", "command"])(
     await refine();
     expect(state.navigate).toHaveBeenLastCalledWith({
       to: "/$environmentId/$threadId",
-      params: { environmentId: "test", threadId: "chat-current" },
+      params: { environmentId: "test", threadId: "chat-next" },
     });
     expect(state.unsettle.mock.calls.map(([request]) => request.input)).toEqual([
       { threadId: "chat-next", reason: "user" },
       { threadId: "chat-earlier", reason: "user" },
-      { threadId: "chat-current", reason: "user" },
+      { threadId: "chat-next", reason: "user" },
     ]);
   },
 );
+
+it.each(["working", "snoozed"])(
+  "continues after the remembered %s chat instead of restarting at the front",
+  async (status) => {
+    state.threadId = "unrelated-chat";
+    state.queue = [run("earlier"), run("remembered"), run("next")];
+    if (status === "working") working("remembered");
+    else shell("remembered", { snoozedUntil: "2099-01-01T00:00:00Z" });
+    lastOpenedRefinementRunByEnvironment.set(EnvironmentId.make("test"), "remembered");
+    await act(async () => {
+      renderer = create(<SidebarWorkflowControls />);
+    });
+    await act(async () => requestWorkflowAction("refine"));
+    expect(state.navigate).toHaveBeenCalledExactlyOnceWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "test", threadId: "chat-next" },
+    });
+  },
+);
+
+it("stays in the chat without opening intake when every destination is working or snoozed", async () => {
+  state.queue = [run("current"), run("snoozed")];
+  working("current");
+  shell("snoozed", { snoozedUntil: "2099-01-01T00:00:00Z" });
+  const toast = vi.spyOn(toastManager, "add");
+  await act(async () => {
+    renderer = create(<SidebarWorkflowControls />);
+  });
+  await act(async () => requestWorkflowAction("refine"));
+  expect(state.navigate).not.toHaveBeenCalled();
+  expect(state.unsettle).not.toHaveBeenCalled();
+  expect(renderer!.root.findAllByType(Popover).every((entry) => entry.props.open !== true)).toBe(
+    true,
+  );
+  expect(toast).toHaveBeenCalledWith(
+    expect.objectContaining({ title: "No tickets ready to refine" }),
+  );
+});
+
+it("updates the ready count at the snooze boundary and opens the woken ticket", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-23T12:00:00Z"));
+  state.queue = [run("current"), run("snoozed")];
+  working("current");
+  shell("snoozed", { snoozedUntil: "2026-10-23T12:00:10Z" });
+  await act(async () => {
+    renderer = create(<SidebarWorkflowControls />);
+  });
+  const button = () => renderer!.root.findByProps({ "data-workflow-action": "refine" });
+  expect(button().props["aria-label"]).toBe("Refine 0 tickets");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+  expect(button().props["aria-label"]).toBe("Refine 1 ticket");
+  await act(async () => requestWorkflowAction("refine"));
+  expect(state.navigate).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      params: { environmentId: "test", threadId: "chat-snoozed" },
+    }),
+  );
+});
+
+it("opens a snoozed running chat that has woken to ask the user a question", async () => {
+  state.queue = [run("current"), run("question")];
+  working("current");
+  const thread = working("question");
+  shell("question", {
+    runtime: thread.runtime,
+    hasPendingUserInput: true,
+    snoozedUntil: "2099-01-01T00:00:00Z",
+  });
+  await act(async () => {
+    renderer = create(<SidebarWorkflowControls />);
+  });
+  await act(async () => requestWorkflowAction("refine"));
+  expect(state.navigate).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      params: { environmentId: "test", threadId: "chat-question" },
+    }),
+  );
+});
+
+it("skips an unavailable shell without letting another environment's busy chat hide a ready one", async () => {
+  state.queue = [run("current"), run("missing"), run("ready")];
+  working("current");
+  state.shells.set("test:chat-missing", null);
+  const busy = working("ready");
+  state.shells.delete("test:chat-ready");
+  shell("ready", { ...busy, environmentId: EnvironmentId.make("other") });
+  await act(async () => {
+    renderer = create(<SidebarWorkflowControls />);
+  });
+  await act(async () => requestWorkflowAction("refine"));
+  expect(state.navigate).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      params: { environmentId: "test", threadId: "chat-ready" },
+    }),
+  );
+});
 
 it.each(["Success", "Failure"])(
   "waits for sidebar restoration before opening a refinement chat when restoration returns %s",

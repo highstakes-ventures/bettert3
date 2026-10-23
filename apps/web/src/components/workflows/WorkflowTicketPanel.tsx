@@ -18,13 +18,14 @@ import { useOrchestrationCommand } from "~/state/use-orchestration-command";
 import { threadEnvironment } from "~/state/threads";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { Button } from "../ui/button";
+import { toastManager } from "../ui/toast";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import ChatMarkdown from "../ChatMarkdown";
 import { useOpenWorkflowRun } from "./useOpenWorkflowRun";
 import {
   lastOpenedRefinementRunByEnvironment,
   nextRefinementRun,
-  refinementQueueWithPendingDecisions,
+  readyRefinementQueue,
   stageWorkflowDecision,
   hasPendingWorkflowDecision,
   useWorkflowDecisions,
@@ -151,7 +152,7 @@ function Ticket({
       },
     });
     if (!staged) return;
-    const nextQueue = refinementQueueWithPendingDecisions(environmentId, queue);
+    const nextQueue = readyRefinementQueue(environmentId, queue);
     const next = nextRefinementRun(queue, detail.run.id, nextQueue);
     // Closing this surface unmounts the hook and cancels its pending navigation.
     if (next && !(await openRun(next))) return;
@@ -164,7 +165,10 @@ function Ticket({
           scopeThreadRef(environmentId, detail.run.threadId),
           `ticket:${detail.run.id}`,
         );
-    if (!next) refresh();
+    if (!next) {
+      toastManager.add({ type: "info", title: "No tickets ready to refine" });
+      refresh();
+    }
   }
   return (
     <RefinementPanel
