@@ -143,9 +143,9 @@ export function RefinementPanel({
           </section>
         )}
       </div>
-      <footer className="flex items-center justify-between gap-3 border-t px-5 py-3">
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
         <span className="text-xs text-muted-foreground">Refined on approval</span>
-        <div className="flex gap-2">{actions}</div>
+        <div className="flex flex-wrap items-center gap-2">{actions}</div>
       </footer>
     </section>
   );

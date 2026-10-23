@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProjectId, type WorkflowRun, type WorkflowTicket } from "@t3tools/contracts";
-import { orderRefinementQueue, refinementQuestions, ticketApprovalKey } from "./workflow.ts";
+import {
+  orderRefinementQueue,
+  refinementQuestions,
+  ticketApprovalKey,
+  workflowDelayUntil,
+} from "./workflow.ts";
 const run = (id: string, blockers: string[] = [], priority = 3): WorkflowRun => ({
   id,
   issueId: id,
@@ -38,6 +43,29 @@ const ticket: WorkflowTicket = {
 };
 
 describe("refinement ordering and approval", () => {
+  it("defaults to one week and clamps a calendar month at month end", () => {
+    expect(workflowDelayUntil("2026-10-23T09:00:00Z")).toBe("2026-10-30T09:00:00.000Z");
+    expect(workflowDelayUntil("2026-01-31T09:00:00Z", "1-month")).toBe("2026-02-28T09:00:00.000Z");
+    expect(workflowDelayUntil("2028-01-31T09:00:00Z", "1-month")).toBe("2028-02-29T09:00:00.000Z");
+  });
+  it("uses the latest prerequisite deadline even when a shorter delay was applied later", () => {
+    const runs = [
+      { ...run("long"), delayedAt: "2026-10-20T09:00:00Z", delayedUntil: "2026-11-20T09:00:00Z" },
+      {
+        ...run("short", ["long"]),
+        delayedAt: "2026-10-21T09:00:00Z",
+        delayedUntil: "2026-10-24T09:00:00Z",
+      },
+      run("dependent", ["short"]),
+      run("ready"),
+    ];
+    expect(
+      orderRefinementQueue(runs, Date.parse("2026-11-20T08:59:59.999Z")).map((entry) => entry.id),
+    ).toEqual(["ready"]);
+    expect(
+      orderRefinementQueue(runs, Date.parse("2026-11-20T09:00:00Z")).map((entry) => entry.id),
+    ).toEqual(["ready", "long", "short", "dependent"]);
+  });
   it("hides delayed tickets and their transitive dependents until five days have elapsed", () => {
     const runs = [
       { ...run("delayed", [], 1), delayedAt: "2026-10-21T09:00:00Z" },

@@ -2,11 +2,13 @@ import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
   ProjectId,
+  WorkflowDelayDuration,
   WorkflowDecisionInput,
   WorkflowDetail,
   WorkflowRun,
 } from "@t3tools/contracts";
 import { RefinementPanel } from "@t3tools/workflows/tickets/panel";
+import { workflowDelayOptions } from "@t3tools/workflows/tickets";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useEffect, useState } from "react";
 import { serverEnvironment } from "~/state/server";
@@ -89,6 +91,7 @@ function Ticket({
   refresh: () => void;
 }) {
   const [target, setTarget] = useState(detail.ticket?.project?.id ?? "");
+  const [delayDuration, setDelayDuration] = useState<WorkflowDelayDuration>("1-week");
   useEffect(() => {
     // Also remember refinement chats opened directly from the sidebar.
     if (detail.run.phase === "review") {
@@ -117,6 +120,7 @@ function Ticket({
       environmentId,
       run: detail.run,
       decision,
+      delayDuration,
       commit: async () => {
         const result = await decide({
           environmentId,
@@ -125,6 +129,7 @@ function Ticket({
             decision,
             expectedUpdatedAt: ticket.updatedAt,
             targetProjectId: selectedTarget?.id ?? null,
+            ...(decision === "delay" ? { delayDuration } : {}),
           },
         });
         if (
@@ -223,14 +228,38 @@ function Ticket({
             >
               Reject
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy || !canDecide}
-              onClick={() => void submit("delay")}
-            >
-              Delay
-            </Button>
+            <div className="flex items-center gap-1">
+              <Select
+                value={delayDuration}
+                onValueChange={(value) => {
+                  if (value) setDelayDuration(value);
+                }}
+                disabled={busy || !canDecide}
+              >
+                <SelectTrigger size="sm" aria-label="Delay duration">
+                  <SelectValue>
+                    {(value: WorkflowDelayDuration) =>
+                      workflowDelayOptions.find((option) => option.value === value)?.label
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {workflowDelayOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || !canDecide}
+                onClick={() => void submit("delay")}
+              >
+                Delay
+              </Button>
+            </div>
             <Button
               size="sm"
               disabled={busy || !canDecide || !selectedTarget || detail.questions.length > 0}

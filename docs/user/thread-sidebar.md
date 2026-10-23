@@ -260,7 +260,8 @@ finishes; the call's own result shows its status.
 
 ## Delay ticket refinement
 
-During Linear ticket refinement, **Delay** hides the ticket for five days.
+During Linear ticket refinement, choose a duration beside **Delay** to hide the
+ticket for 1 day, 3 days, 1 week, 2 weeks, or 1 month. The default is 1 week.
 Tickets that depend on it wait too. Delayed tickets stay out of the refinement
 count and return to the queue automatically when the delay expires.
 

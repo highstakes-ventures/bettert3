@@ -217,6 +217,7 @@ const make = Effect.gen(function* () {
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     ...(record.delayedAt === undefined ? {} : { delayedAt: record.delayedAt }),
+    ...(record.delayedUntil === undefined ? {} : { delayedUntil: record.delayedUntil }),
   });
   const implementationSlots = () =>
     Effect.gen(function* () {
@@ -1036,14 +1037,17 @@ const make = Effect.gen(function* () {
               return yield* new WorkflowError({
                 message: "The ticket changed. Refresh it before deciding.",
               });
-            if (input.decision === "delay")
+            if (input.decision === "delay") {
+              const delayedAt = yield* now;
               return summary(
                 yield* save({
                   ...ticketRecord(record, ticket),
-                  delayedAt: yield* now,
+                  delayedAt,
+                  delayedUntil: Tickets.workflowDelayUntil(delayedAt, input.delayDuration),
                   error: null,
                 }),
               );
+            }
             const config = yield* requireConfiguration(record.projectId);
             if (
               input.decision === "approve" &&

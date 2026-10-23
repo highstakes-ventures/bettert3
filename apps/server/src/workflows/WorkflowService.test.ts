@@ -530,44 +530,74 @@ it.effect.each([{ targetProjectId: null }, { targetProjectId: "intake" }])(
     }).pipe(Effect.scoped),
 );
 
-it.effect("hides refinement for five days across restart without changing the Linear ticket", () =>
+it.effect(
+  "defaults refinement delay to one week across restart without changing the Linear ticket",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      const first = yield* h.prepare("first");
+      yield* h.prepare("second");
+      const ticket = (yield* h.service.read(first.id)).ticket!;
+      const delayed = yield* h.service.decide({
+        runId: first.id,
+        decision: "delay",
+        expectedUpdatedAt: ticket.updatedAt,
+        targetProjectId: null,
+      });
+      expect(delayed.phase).toBe("review");
+      expect(delayed.delayedAt).toBeDefined();
+      expect(Date.parse(delayed.delayedUntil!) - Date.parse(delayed.delayedAt!)).toBe(
+        7 * 24 * 60 * 60 * 1_000,
+      );
+      expect(h.tickets.get(ticket.id)).toEqual(ticket);
+      expect(h.decisions).toEqual([]);
+      expect(h.switches.saves).toBe(2);
+      const restored = yield* h.restart();
+      yield* restored.resume();
+      expect(
+        (yield* restored.list(projectId)).runs
+          .filter((run) => run.phase === "review")
+          .map((run) => run.id),
+      ).toEqual(["second"]);
+      expect((yield* restored.read(first.id)).run.delayedAt).toBe(delayed.delayedAt);
+      expect((yield* restored.read(first.id)).run.delayedUntil).toBe(delayed.delayedUntil);
+      // Activity retains delayed history without returning it to the refinement queue.
+      expect((yield* restored.list(projectId, true)).runs.map((run) => run.id)).toEqual([
+        "first",
+        "second",
+      ]);
+      yield* TestClock.adjust(7 * 24 * 60 * 60 * 1_000 - 1);
+      expect((yield* restored.list(projectId)).runs.map((run) => run.id)).toEqual(["second"]);
+      yield* TestClock.adjust(1);
+      expect((yield* restored.list(projectId)).runs.map((run) => run.id)).toEqual([
+        "second",
+        "first",
+      ]);
+      expect(h.launches).toHaveLength(2);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("persists a selected three-day delay and returns the ticket at its exact deadline", () =>
   Effect.gen(function* () {
     const h = yield* harness;
     const first = yield* h.prepare("first");
-    yield* h.prepare("second");
     const ticket = (yield* h.service.read(first.id)).ticket!;
     const delayed = yield* h.service.decide({
       runId: first.id,
       decision: "delay",
       expectedUpdatedAt: ticket.updatedAt,
       targetProjectId: null,
+      delayDuration: "3-days",
     });
-    expect(delayed.phase).toBe("review");
-    expect(delayed.delayedAt).toBeDefined();
-    expect(h.tickets.get(ticket.id)).toEqual(ticket);
-    expect(h.decisions).toEqual([]);
-    expect(h.switches.saves).toBe(2);
+    expect(Date.parse(delayed.delayedUntil!) - Date.parse(delayed.delayedAt!)).toBe(
+      3 * 24 * 60 * 60 * 1_000,
+    );
     const restored = yield* h.restart();
-    yield* restored.resume();
-    expect(
-      (yield* restored.list(projectId)).runs
-        .filter((run) => run.phase === "review")
-        .map((run) => run.id),
-    ).toEqual(["second"]);
-    expect((yield* restored.read(first.id)).run.delayedAt).toBe(delayed.delayedAt);
-    // Activity retains delayed history without returning it to the refinement queue.
-    expect((yield* restored.list(projectId, true)).runs.map((run) => run.id)).toEqual([
-      "first",
-      "second",
-    ]);
-    yield* TestClock.adjust(5 * 24 * 60 * 60 * 1_000 - 1);
-    expect((yield* restored.list(projectId)).runs.map((run) => run.id)).toEqual(["second"]);
+    expect((yield* restored.read(first.id)).run.delayedUntil).toBe(delayed.delayedUntil);
+    yield* TestClock.adjust(3 * 24 * 60 * 60 * 1_000 - 1);
+    expect((yield* restored.list(projectId)).runs).toEqual([]);
     yield* TestClock.adjust(1);
-    expect((yield* restored.list(projectId)).runs.map((run) => run.id)).toEqual([
-      "second",
-      "first",
-    ]);
-    expect(h.launches).toHaveLength(2);
+    expect((yield* restored.list(projectId)).runs.map((run) => run.id)).toEqual(["first"]);
   }).pipe(Effect.scoped),
 );
 

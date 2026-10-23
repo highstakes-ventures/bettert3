@@ -1,4 +1,10 @@
-import type { WorkflowRun, WorkflowTicket, WorkflowDependencyEvidence } from "@t3tools/contracts";
+import type {
+  WorkflowRun,
+  WorkflowTicket,
+  WorkflowDependencyEvidence,
+  WorkflowDelayDuration,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import { preparationGoal, implementationGoal } from "./goals.ts";
 
@@ -34,7 +40,24 @@ export function implement<A, E, R>(
   );
 }
 
-/** Five-day delays also postpone dependent tickets. Eligible prerequisites come first. */
+export const workflowDelayOptions = [
+  { value: "1-day", label: "1 day" },
+  { value: "3-days", label: "3 days" },
+  { value: "1-week", label: "1 week" },
+  { value: "2-weeks", label: "2 weeks" },
+  { value: "1-month", label: "1 month" },
+] as const satisfies ReadonlyArray<{ value: WorkflowDelayDuration; label: string }>;
+
+/** Calendar months clamp to their final day, preserving the UTC time. */
+export function workflowDelayUntil(start: string, duration: WorkflowDelayDuration = "1-week") {
+  const days = { "1-day": 1, "3-days": 3, "1-week": 7, "2-weeks": 14 };
+  return DateTime.makeUnsafe(start).pipe(
+    DateTime.add(duration === "1-month" ? { months: 1 } : { days: days[duration] }),
+    DateTime.formatIso,
+  );
+}
+
+/** Delays also postpone dependent tickets. Eligible prerequisites come first. */
 export function orderRefinementQueue(runs: ReadonlyArray<WorkflowRun>, now: number): WorkflowRun[] {
   const waiting = runs.filter((run) => run.kind === "tickets" && run.phase === "review");
   const byIssue = new Map(
@@ -43,13 +66,23 @@ export function orderRefinementQueue(runs: ReadonlyArray<WorkflowRun>, now: numb
   const result: WorkflowRun[] = [];
   // A delayed prerequisite takes its dependents with it; otherwise they would
   // pull the delayed ticket straight back to the front of the queue.
-  const delayed = new Map(waiting.map((run) => [run.id, run.delayedAt ?? ""]));
+  const delayed = new Map(
+    waiting.map((run) => {
+      const deadline =
+        run.delayedUntil !== undefined
+          ? Date.parse(run.delayedUntil)
+          : run.delayedAt !== undefined
+            ? Date.parse(run.delayedAt) + 5 * 24 * 60 * 60 * 1_000
+            : 0;
+      return [run.id, Number.isNaN(deadline) ? Infinity : deadline];
+    }),
+  );
   for (let changed = true; changed;) {
     changed = false;
     for (const run of waiting) {
       const rank = run.blockerIds.reduce((latest, id) => {
         const blocker = byIssue.get(id);
-        const value = blocker ? delayed.get(blocker.id)! : "";
+        const value = blocker ? delayed.get(blocker.id)! : 0;
         return value > latest ? value : latest;
       }, delayed.get(run.id)!);
       if (rank !== delayed.get(run.id)) {
@@ -61,13 +94,12 @@ export function orderRefinementQueue(runs: ReadonlyArray<WorkflowRun>, now: numb
   const remaining = new Set(
     waiting
       .filter((run) => {
-        const delayedAt = delayed.get(run.id)!;
-        return delayedAt === "" || Date.parse(delayedAt) + 5 * 24 * 60 * 60 * 1_000 <= now;
+        return delayed.get(run.id)! <= now;
       })
       .map((run) => run.id),
   );
   const compare = (a: WorkflowRun, b: WorkflowRun) =>
-    delayed.get(a.id)!.localeCompare(delayed.get(b.id)!) ||
+    delayed.get(a.id)! - delayed.get(b.id)! ||
     (a.priority || 5) - (b.priority || 5) ||
     a.createdAt.localeCompare(b.createdAt) ||
     a.id.localeCompare(b.id);

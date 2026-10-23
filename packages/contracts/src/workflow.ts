@@ -137,6 +137,7 @@ export const WorkflowRun = Schema.Struct({
   createdAt: Schema.String,
   updatedAt: Schema.String,
   delayedAt: Schema.optionalKey(Schema.String),
+  delayedUntil: Schema.optionalKey(Schema.String),
 });
 export type WorkflowRun = typeof WorkflowRun.Type;
 export const WorkflowListInput = Schema.Struct({
@@ -167,11 +168,20 @@ export const WorkflowIntakeInput = Schema.Struct({
   requestId: Id,
   text: TrimmedNonEmptyString.check(Schema.isMaxLength(20_000)),
 });
+export const WorkflowDelayDuration = Schema.Literals([
+  "1-day",
+  "3-days",
+  "1-week",
+  "2-weeks",
+  "1-month",
+]);
+export type WorkflowDelayDuration = typeof WorkflowDelayDuration.Type;
 export const WorkflowDecisionInput = Schema.Struct({
   runId: Id,
   decision: Schema.Literals(["approve", "reject", "delay"]),
   expectedUpdatedAt: Schema.String,
   targetProjectId: Schema.NullOr(Id),
+  delayDuration: Schema.optional(WorkflowDelayDuration),
 });
 export type WorkflowDecisionInput = typeof WorkflowDecisionInput.Type;
 export const WorkflowAgentResult = Schema.Union([

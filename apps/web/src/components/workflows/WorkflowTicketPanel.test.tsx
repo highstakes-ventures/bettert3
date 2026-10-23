@@ -379,13 +379,14 @@ it.each([{ id: null }, { id: "intake" }])(
     expect(button().props.disabled).toBe(true);
     await approve();
     expect(state.decision).not.toHaveBeenCalled();
-    expect(renderer!.root.findByType("select").props.value).toBe("");
-    expect(renderer!.root.findAllByType("option").map((option) => option.props.value)).toEqual([
+    const projectSelector = renderer!.root.findAllByType("select")[0]!;
+    expect(projectSelector.props.value).toBe("");
+    expect(projectSelector.findAllByType("option").map((option) => option.props.value)).toEqual([
       "",
       "target",
     ]);
     await act(async () => {
-      renderer!.root.findByType("select").props.onChange({ currentTarget: { value: "target" } });
+      projectSelector.props.onChange({ currentTarget: { value: "target" } });
     });
     expect(button().props.disabled).toBe(false);
     await approve();
@@ -465,10 +466,25 @@ it("advances after Delay without selecting tickets that depend on the delayed ti
   expect(state.decision).not.toHaveBeenCalled();
   await expire();
   expect(state.decision.mock.calls[0]?.[0].input.decision).toBe("delay");
+  expect(state.decision.mock.calls[0]?.[0].input.delayDuration).toBe("1-week");
   expect(state.navigate).toHaveBeenCalledWith({
     to: "/$environmentId/$threadId",
     params: { environmentId, threadId: "chat-next" },
   });
+});
+
+it("keeps a selected month delay in the queue projection and submits it after the Undo window", async () => {
+  await render();
+  const durationSelector = renderer!.root.findAllByType("select")[1]!;
+  await act(async () => {
+    durationSelector.props.onChange({ currentTarget: { value: "1-month" } });
+  });
+  await click("Delay");
+  const receipt = useWorkflowDecisions.getState().decisions[0]!;
+  expect(receipt.delayedUntil).toBe("2026-11-22T12:00:00.000Z");
+  expect(currentQueue().map((run) => run.id)).toEqual(["next"]);
+  await expire();
+  expect(state.decision.mock.calls[0]?.[0].input.delayDuration).toBe("1-month");
 });
 
 it("closes the delayed ticket when there is nothing else eligible to refine", async () => {

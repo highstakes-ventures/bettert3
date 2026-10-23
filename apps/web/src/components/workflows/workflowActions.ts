@@ -1,6 +1,6 @@
 import type { EnvironmentId, WorkflowDecisionInput, WorkflowRun } from "@t3tools/contracts";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
-import { orderRefinementQueue } from "@t3tools/workflows/tickets";
+import { orderRefinementQueue, workflowDelayUntil } from "@t3tools/workflows/tickets";
 import { AsyncResult } from "effect/reactivity";
 import { create } from "zustand";
 import { showThreadUndoNotice } from "~/hooks/showThreadUndoNotice";
@@ -44,6 +44,7 @@ type TicketDecision = {
   runId: string;
   decision: WorkflowDecisionInput["decision"];
   stagedAt: string;
+  delayedUntil?: string;
   result?: WorkflowRun;
 };
 
@@ -63,7 +64,15 @@ export function refinementQueueWithPendingDecisions(
     const entry = decisions.find((entry) => entry.runId === run.id);
     if (!entry) return [run];
     if (entry.result) return [run.updatedAt > entry.result.updatedAt ? run : entry.result];
-    return entry.decision === "delay" ? [{ ...run, delayedAt: entry.stagedAt }] : [];
+    return entry.decision === "delay"
+      ? [
+          {
+            ...run,
+            delayedAt: entry.stagedAt,
+            ...(entry.delayedUntil === undefined ? {} : { delayedUntil: entry.delayedUntil }),
+          },
+        ]
+      : [];
   });
   const eligible = new Set(orderRefinementQueue(projected, Date.now()).map((run) => run.id));
   // The server owns ordering. Locally project eligibility without changing that order.
@@ -87,7 +96,11 @@ export function hasPendingWorkflowDecision(
   if (!entry.result) return true;
   if (run.updatedAt > entry.result.updatedAt) return false;
   // A delayed ticket can be revisited once this detail has acknowledged the save.
-  return run.phase !== entry.result.phase || run.delayedAt !== entry.result.delayedAt;
+  return (
+    run.phase !== entry.result.phase ||
+    run.delayedAt !== entry.result.delayedAt ||
+    run.delayedUntil !== entry.result.delayedUntil
+  );
 }
 
 /** Stages one decision and lets the existing Undo notice own its commit timer. */
@@ -95,6 +108,7 @@ export function stageWorkflowDecision(options: {
   environmentId: EnvironmentId;
   run: WorkflowRun;
   decision: WorkflowDecisionInput["decision"];
+  delayDuration?: WorkflowDecisionInput["delayDuration"];
   commit: () => Promise<AtomCommandResult<WorkflowRun, unknown>>;
   restore: () => Promise<void>;
 }) {
@@ -103,11 +117,15 @@ export function stageWorkflowDecision(options: {
   const previous = useWorkflowDecisions
     .getState()
     .decisions.find((item) => item.environmentId === environmentId && item.runId === run.id);
+  const stagedAt = new Date().toISOString();
   const entry: TicketDecision = {
     environmentId,
     runId: run.id,
     decision,
-    stagedAt: new Date().toISOString(),
+    stagedAt,
+    ...(decision === "delay"
+      ? { delayedUntil: workflowDelayUntil(stagedAt, options.delayDuration) }
+      : {}),
   };
   useWorkflowDecisions.setState((state) => ({
     decisions: [
