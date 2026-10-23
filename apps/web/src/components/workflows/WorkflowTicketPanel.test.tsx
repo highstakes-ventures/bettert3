@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   detail: null as WorkflowDetail | null,
   queue: [] as WorkflowRun[],
   decision: vi.fn(),
+  settle: vi.fn(),
   navigate: vi.fn(),
   refresh: vi.fn(),
   projects: [
@@ -51,6 +52,10 @@ vi.mock("~/state/query", () => ({
   }),
 }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => state.decision }));
+vi.mock("~/state/threads", () => ({ threadEnvironment: { settle: "settle" } }));
+vi.mock("~/state/use-orchestration-command", () => ({
+  useOrchestrationCommand: () => state.settle,
+}));
 vi.mock("../ChatMarkdown", () => ({ default: ({ text }: { text: string }) => <p>{text}</p> }));
 vi.mock("../ui/select", () => ({
   Select: ({
@@ -142,7 +147,11 @@ beforeEach(() => {
   state.queue = [current, run("next")];
   state.decision
     .mockReset()
-    .mockResolvedValue({ _tag: "Success", value: { ...current, phase: "approved" } });
+    .mockImplementation(async ({ input }: { input: { decision: string } }) => ({
+      _tag: "Success",
+      value: { ...current, phase: input.decision === "reject" ? "rejected" : "approved" },
+    }));
+  state.settle.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   state.navigate.mockReset().mockResolvedValue(undefined);
   state.refresh.mockReset();
   useRightPanelStore.setState({ byThreadKey: {} });
@@ -360,6 +369,7 @@ it.each(["Approve", "Reject", "Delay"])(
     await vi.advanceTimersByTimeAsync(1);
     expect(state.decision).toHaveBeenCalledOnce();
     expect(state.decision.mock.calls[0]?.[0].input.decision).toBe(label.toLowerCase());
+    expect(state.settle).toHaveBeenCalledTimes(label === "Reject" ? 1 : 0);
     await vi.advanceTimersByTimeAsync(5_000);
     expect(state.decision).toHaveBeenCalledOnce();
   },
@@ -389,6 +399,7 @@ it.each(["Approve", "Reject", "Delay"])(
     expect(currentQueue().map((run) => run.id)).toContain("dependent");
     await expire();
     expect(state.decision).not.toHaveBeenCalled();
+    expect(state.settle).not.toHaveBeenCalled();
   },
 );
 
@@ -469,4 +480,56 @@ it("keeps committed decisions hidden across loading, fresh, and stale queue cons
     "next",
     "next",
   ]);
+});
+
+it("settles only the rejected ticket's chat after the rejection response succeeds", async () => {
+  let finish!: (result: unknown) => void;
+  state.decision.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await render();
+  await click("Reject");
+  expect(state.settle).not.toHaveBeenCalled();
+  await expire();
+  expect(state.decision).toHaveBeenCalledOnce();
+  expect(state.settle).not.toHaveBeenCalled();
+  await act(async () => {
+    finish({ _tag: "Success", value: { ...run("current"), phase: "rejected" } });
+  });
+  expect(state.settle).toHaveBeenCalledExactlyOnceWith({
+    environmentId,
+    input: { threadId: "chat-current" },
+  });
+  expect(currentQueue().map((run) => run.id)).not.toContain("current");
+});
+
+it.each(["Failure", "review", "rejecting"])(
+  "does not settle the chat when rejection returns %s",
+  async (outcome) => {
+    state.decision.mockResolvedValue(
+      outcome === "Failure"
+        ? { _tag: "Failure" }
+        : { _tag: "Success", value: { ...run("current"), phase: outcome } },
+    );
+    await render();
+    await click("Reject");
+    await expire();
+    expect(state.settle).not.toHaveBeenCalled();
+    expect(currentQueue().map((run) => run.id)).toContain("current");
+  },
+);
+
+it("keeps a successful rejection when settling its chat fails", async () => {
+  state.settle.mockResolvedValue({ _tag: "Failure" });
+  await render();
+  await click("Reject");
+  await expire();
+  expect(state.settle).toHaveBeenCalledOnce();
+  expect(currentQueue().map((run) => run.id)).not.toContain("current");
+  expect(state.navigate).not.toHaveBeenCalledWith(
+    expect.objectContaining({ params: { environmentId, threadId: "chat-current" } }),
+  );
 });
