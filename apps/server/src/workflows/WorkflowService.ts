@@ -16,6 +16,7 @@ import {
   type WorkflowListResult,
   type WorkflowTicketUpdateInput,
   type WorkflowSearchResult,
+  type WorkflowTicketDraft,
 } from "@t3tools/contracts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as Performance from "@t3tools/workflows/performance";
@@ -381,21 +382,44 @@ const make = Effect.gen(function* () {
         implementationLaunched: false,
       });
     });
-  const validateTarget = (config: WorkflowConfiguration, target: string | null) =>
-    linear.connection().pipe(
-      Effect.flatMap((connection) =>
-        target === null ||
-        connection.projects.some(
-          (project) => project.id === target && project.teamIds.includes(config.linearTeamId),
-        )
-          ? Effect.void
-          : Effect.fail(
-              new WorkflowError({
-                message: "Choose a target project available to this ticket's Linear team.",
-              }),
-            ),
-      ),
-    );
+  const validateTarget = (
+    config: WorkflowConfiguration,
+    target: string | null,
+    connection: WorkflowConnection,
+  ) =>
+    target === null ||
+    connection.projects.some(
+      (project) => project.id === target && project.teamIds.includes(config.linearTeamId),
+    )
+      ? Effect.void
+      : Effect.fail(
+          new WorkflowError({
+            message: "Choose a target project available to this ticket's Linear team.",
+          }),
+        );
+  const validateTicket = Effect.fnUntraced(function* (
+    config: WorkflowConfiguration,
+    draft: Pick<WorkflowTicketDraft, "targetProjectId" | "labelIds">,
+    available?: WorkflowConnection,
+  ) {
+    if (draft.targetProjectId === null || draft.targetProjectId === config.intakeProjectId)
+      return yield* new WorkflowError({
+        message:
+          "Choose a delivery project other than the intake project before completing preparation or refinement.",
+      });
+    const connection = available ?? (yield* linear.connection());
+    yield* validateTarget(config, draft.targetProjectId, connection);
+    const labels = connection.teams.find((team) => team.id === config.linearTeamId)?.labels ?? [];
+    if (draft.labelIds.some((id) => !labels.some((label) => label.id === id)))
+      return yield* new WorkflowError({
+        message: "Choose labels available to this ticket's Linear team.",
+      });
+    if (!Tickets.ticketType(labels.filter((label) => draft.labelIds.includes(label.id))))
+      return yield* new WorkflowError({
+        message:
+          "Choose exactly one ticket type: Feature, Bug, Maintenance / Improvement, Content, Campaign, or Market research.",
+      });
+  });
   const launchTask = (
     record: Record,
     config: WorkflowConfiguration,
@@ -516,7 +540,7 @@ const make = Effect.gen(function* () {
       return yield* issueLocks.withLock(
         issueId,
         Effect.gen(function* () {
-          yield* validateTarget(config, result.ticket.targetProjectId);
+          yield* validateTicket(config, result.ticket);
           const others = yield* all();
           const existing = others.find(
             (run) => run.id !== record.id && run.issueId === issueId && run.phase !== "rejected",
@@ -557,10 +581,7 @@ const make = Effect.gen(function* () {
           const ticket = yield* linear.save({
             id: issueId,
             teamId: config.linearTeamId,
-            draft: {
-              ...result.ticket,
-              targetProjectId: result.ticket.targetProjectId ?? config.intakeProjectId,
-            },
+            draft: result.ticket,
             create: result.existingIssueId === undefined,
             ...(result.expectedUpdatedAt === undefined
               ? {}
@@ -607,6 +628,30 @@ const make = Effect.gen(function* () {
         return yield* new WorkflowError({
           message: "The ticket moved to another Linear team. No decision was applied.",
         });
+      if (!rejecting) {
+        const routingError = !Tickets.ticketType(ticket.labels)
+          ? "Choose exactly one ticket type in chat before approval."
+          : yield* validateTicket(
+              config,
+              {
+                targetProjectId: record.ticket?.project?.id ?? null,
+                labelIds: ticket.labels.map((label) => label.id),
+              },
+              connection,
+            ).pipe(
+              Effect.match({
+                onSuccess: () => null,
+                onFailure: (error) => error.message,
+              }),
+            );
+        if (routingError !== null)
+          return yield* save({
+            ...ticketRecord(record, ticket),
+            phase: "review",
+            approvalKey: null,
+            error: routingError,
+          });
+      }
       // Recovery accepts the original snapshot or the desired result after a lost response.
       if (
         !rejecting &&
@@ -625,7 +670,11 @@ const make = Effect.gen(function* () {
         stateId,
         rejecting ? undefined : (record.ticket?.project?.id ?? null),
       );
-      if (!rejecting && Tickets.ticketApprovalKey(updated) !== record.approvalKey)
+      if (
+        !rejecting &&
+        (!Tickets.ticketType(updated.labels) ||
+          Tickets.ticketApprovalKey(updated) !== record.approvalKey)
+      )
         return yield* save({
           ...ticketRecord(record, updated),
           phase: "review",
@@ -935,7 +984,7 @@ const make = Effect.gen(function* () {
             return yield* new WorkflowError({
               message: "Choose a Linear team available to this connection.",
             });
-          yield* validateTarget(input, input.intakeProjectId);
+          yield* validateTarget(input, input.intakeProjectId, connection);
           const epoch = DateTime.toEpochMillis(yield* DateTime.now);
           const encoded = yield* encodeConfiguration(input).pipe(Effect.mapError(storageError));
           yield* sql`INSERT INTO workflow_configurations(project_id,configuration_json,performance_enabled_at,refactor_enabled_at) VALUES(${input.projectId},${encoded},${input.performanceEnabled ? epoch : null},${input.refactorEnabled ? epoch : null}) ON CONFLICT(project_id) DO UPDATE SET configuration_json=excluded.configuration_json,performance_enabled_at=CASE WHEN excluded.performance_enabled_at IS NULL THEN NULL ELSE COALESCE(workflow_configurations.performance_enabled_at,excluded.performance_enabled_at) END,refactor_enabled_at=CASE WHEN excluded.refactor_enabled_at IS NULL THEN NULL ELSE COALESCE(workflow_configurations.refactor_enabled_at,excluded.refactor_enabled_at) END`.pipe(
@@ -1011,8 +1060,9 @@ const make = Effect.gen(function* () {
               return yield* new WorkflowError({
                 message: "The ticket moved to another Linear team.",
               });
-            if (input.decision === "approve") yield* validateTarget(config, input.targetProjectId);
             const connection = yield* linear.connection();
+            if (input.decision === "approve")
+              yield* validateTarget(config, input.targetProjectId, connection);
             const target =
               input.targetProjectId === null
                 ? null
@@ -1079,7 +1129,7 @@ const make = Effect.gen(function* () {
               return yield* new WorkflowError({
                 message: "The ticket changed. Read it again before updating.",
               });
-            yield* validateTarget(config, draft.targetProjectId);
+            yield* validateTicket(config, draft);
             const ticket = yield* linear.save({
               id: record.issueId!,
               teamId: config.linearTeamId,

@@ -44,17 +44,29 @@ When the workflow supports reusing an existing issue, preserve its unique detail
 and use its current revision. Existing-issue binding does not itself perform a
 native duplicate merge or transfer attachments. Report that distinction accurately.
 
-Choose an existing target Linear project from its actual purpose and scope.
-The configured `intakeProjectId` is an inbox, never a delivery target. Do not
-preserve it as the target because the incoming ticket is assigned there. If no
-existing delivery project clearly fits, return `targetProjectId: null` and flag
-the choice for refinement. The workflow keeps that ticket in intake. Do not
-invent a project or select an unrelated one to complete the metadata.
-Use the project's native ID, not the BetterT3 workspace project's ID. Resolve
-supported labels and priority from available metadata. Leave uncertain choices
-visible for refinement instead of creating projects or labels. Preserve other
-existing properties unless the request justifies changing them. Status and team
-configuration belong to the workflow; assignee is not part of this preparation.
+Choose an existing, unfinished target Linear project from its actual purpose and
+scope. A project needs a delivery outcome or an explicit ongoing maintenance
+purpose. Its native status can be Backlog. The configured `intakeProjectId` is
+an inbox, never a delivery target. Use the project's native ID, not the BetterT3
+workspace project's ID. If none fits, keep preparation unfinished and ask the
+user to resolve the destination. Do not submit a null or intake target, invent
+a project, or select an unrelated one to complete preparation.
+
+Assign exactly one native ticket-type label from the available metadata:
+
+- Development: Feature, Bug, or Maintenance / Improvement.
+- Marketing: Content, Campaign, or Market research.
+
+Use the label's actual ID. Preserve other useful labels. A new capability is a
+Feature; broken agreed behavior is a Bug; upkeep, refactors, and performance work
+are Maintenance / Improvement. Classify the requested work, not its source.
+Never force a development type onto marketing. If no supported type fits, keep
+preparation unfinished and ask for a suitable type instead of inventing one.
+Initiatives are out of scope. Milestones are optional.
+
+Resolve priority from available metadata. Preserve other existing properties
+unless the request justifies changing them. Status and team configuration belong
+to the workflow; assignee is not part of this preparation.
 
 Relate different existing tickets using native `blockedBy` IDs. A blocker needs a
 specific prerequisite that the dependent ticket cannot satisfy first. Similar

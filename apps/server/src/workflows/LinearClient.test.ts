@@ -517,7 +517,7 @@ it.effect("connects within Linear's query budget without dropping paginated meta
     id: `project-${index}`,
     name: `Project ${index}`,
     teams: { nodes: [{ id: team.id, name: team.name }] },
-    initiatives: { nodes: [{ id: "initiative", name: "Building" }] },
+    status: { type: index === 0 ? "canceled" : index === 1 ? "completed" : "backlog" },
   }));
   const f = fixture((query, variables) => {
     if (query.includes("team(id:"))
@@ -550,11 +550,11 @@ it.effect("connects within Linear's query budget without dropping paginated meta
     expect(connection.connected).toBe(true);
     expect(connection.teams.map((team) => team.id)).toEqual(teams.map((team) => team.id));
     expect(connection.projects.map((project) => project.id)).toEqual(
-      projects.map((project) => project.id),
+      projects.slice(2).map((project) => project.id),
     );
     expect(connection.teams[0]?.labels.map((label) => label.id)).toEqual(["label-0", "extra"]);
     expect(connection.teams[11]?.refinedStateId).toBe("refined-11");
-    expect(connection.projects[11]?.initiatives).toEqual(["Building"]);
+    expect(connection.projects.at(-1)?.initiatives).toEqual([]);
     expect(f.stored).toHaveLength(1);
     expect(f.calls.every((call) => !call.query.includes("mutation"))).toBe(true);
   }).pipe(Effect.provide(f.layer));

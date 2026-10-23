@@ -30,7 +30,7 @@ const ticket: WorkflowTicket = {
   priority: 3,
   estimate: null,
   dueDate: null,
-  labels: [],
+  labels: [{ id: "feature", name: "Feature" }],
   blockedBy: [],
   blocks: [],
   comments: [],

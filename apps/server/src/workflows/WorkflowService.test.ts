@@ -46,6 +46,16 @@ const configuration: WorkflowConfiguration = {
 const projects = [
   { id: "intake", name: "Backlog", teamIds: ["team"], initiatives: [] },
   { id: "target", name: "Building", teamIds: ["team"], initiatives: ["Building"] },
+  { id: "other-team", name: "Other team", teamIds: ["other"], initiatives: [] },
+];
+const labels = [
+  { id: "feature", name: "Feature" },
+  { id: "bug", name: "Bug" },
+  { id: "maintenance", name: "Maintenance / Improvement" },
+  { id: "content", name: "Content" },
+  { id: "campaign", name: "Campaign" },
+  { id: "research", name: "Market research" },
+  { id: "security", name: "Security" },
 ];
 const connection = {
   connected: true,
@@ -53,7 +63,7 @@ const connection = {
     {
       id: "team",
       name: "Team",
-      labels: [],
+      labels,
       refinedStateId: "refined",
       canceledStateId: "canceled",
       completedStateId: "done",
@@ -84,9 +94,9 @@ const makeTicket = (id: string): WorkflowTicket => ({
 const draft: WorkflowTicketDraft = {
   title: "Implement a concrete change",
   description: "## Problem\nA concrete problem",
-  targetProjectId: "intake",
+  targetProjectId: "target",
   priority: 3,
-  labelIds: [],
+  labelIds: ["feature"],
   blockedBy: [],
   dependencyEvidence: [],
 };
@@ -143,6 +153,7 @@ const harness = Effect.gen(function* () {
     failDecision: false,
     loseDecisionResponse: false,
     editDuringDecision: false,
+    renameTypeDuringDecision: false,
     loseSaveResponse: false,
     failLaunch: false,
     ancestry: true,
@@ -256,6 +267,7 @@ const harness = Effect.gen(function* () {
             title: value.title,
             description: value.description,
             priority: value.priority,
+            labels: labels.filter((label) => value.labelIds.includes(label.id)),
             project: projects.find((entry) => entry.id === value.targetProjectId) ?? null,
             blockedBy: value.blockedBy.map((key) => tickets.get(key)!),
             updatedAt: `save-${switches.saves}`,
@@ -279,6 +291,9 @@ const harness = Effect.gen(function* () {
                 ? tickets.get(id)!.project
                 : (projects.find((entry) => entry.id === target) ?? null),
             ...(switches.editDuringDecision ? { description: "Concurrent unapproved scope" } : {}),
+            ...(switches.renameTypeDuringDecision
+              ? { labels: [{ id: "feature", name: "Unsupported" }] }
+              : {}),
             stateId,
             stateType:
               stateId === "done" ? "completed" : stateId === "canceled" ? "canceled" : "unstarted",
@@ -371,7 +386,7 @@ it.effect("rejects by canceling in the original project and removing the review 
       targetProjectId: null,
     });
     expect(h.decisions).toEqual(["canceled"]);
-    expect(h.tickets.get(ticket.id)?.project?.id).toBe("intake");
+    expect(h.tickets.get(ticket.id)?.project?.id).toBe("target");
     expect(
       (yield* h.service.list(projectId)).runs.filter((entry) => entry.phase === "review"),
     ).toEqual([]);
@@ -380,14 +395,112 @@ it.effect("rejects by canceling in the original project and removing the review 
   }).pipe(Effect.scoped),
 );
 
-it.effect("keeps prepared tickets with no delivery project in intake for refinement", () =>
+it.effect.each(
+  [null, "intake", "missing", "other-team"].map((targetProjectId) => ({ targetProjectId })),
+)("cannot complete preparation with target %s, including after restart", ({ targetProjectId }) =>
   Effect.gen(function* () {
     const h = yield* harness;
-    const run = yield* h.prepare("unresolved", { ...draft, targetProjectId: null });
+    const error = yield* h.prepare("unresolved", { ...draft, targetProjectId }).pipe(Effect.flip);
+    expect(error.message).toMatch(/delivery project|target project/);
+    const restored = yield* h.restart();
+    yield* restored.resume();
+    expect((yield* restored.read("unresolved")).run.phase).toBe("preparing");
+    expect(h.switches.saves).toBe(0);
+    expect(h.tickets.size).toBe(0);
+    expect(h.launches).toHaveLength(1);
+    const run = (yield* restored.list(projectId)).runs[0]!;
+    yield* restored.submitResult(run.threadId!, { type: "prepared", ticket: draft });
+    expect((yield* restored.read(run.id)).run.phase).toBe("review");
+    expect(h.switches.saves).toBe(1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect.each(
+  [[], ["security"], ["feature", "bug"], ["content", "feature"], ["missing"]].map((labelIds) => ({
+    labelIds,
+  })),
+)("rejects missing or conflicting ticket types %j before writing to Linear", ({ labelIds }) =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const error = yield* h.prepare("invalid-type", { ...draft, labelIds }).pipe(Effect.flip);
+    expect(error.message).toMatch(/ticket type|labels/);
+    expect(h.switches.saves).toBe(0);
+    expect((yield* h.service.read("invalid-type")).run.phase).toBe("preparing");
+  }).pipe(Effect.scoped),
+);
+
+it.effect.each(["feature", "bug", "maintenance", "content", "campaign", "research"])(
+  "prepares and approves type %s while preserving other labels",
+  (type) =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      const run = yield* h.prepare("typed", { ...draft, labelIds: [type, "security"] });
+      const ticket = (yield* h.service.read(run.id)).ticket!;
+      expect(ticket.labels.map((label) => label.id)).toEqual([type, "security"]);
+      yield* h.approve(run.id);
+      expect((yield* h.service.read(run.id)).run.phase).toBe("approved");
+    }).pipe(Effect.scoped),
+);
+
+it.effect.each([
+  { targetProjectId: null },
+  { targetProjectId: "intake" },
+  { labelIds: [] },
+  { labelIds: ["feature", "content"] },
+])("refinement cannot clear valid routing with %j", (change) =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const run = yield* h.prepare("refining");
+    const ticket = (yield* h.service.read(run.id)).ticket!;
+    yield* h.service
+      .agentUpdate(run.threadId!, {
+        expectedUpdatedAt: ticket.updatedAt,
+        ticket: { ...draft, ...change },
+      })
+      .pipe(Effect.flip);
+    expect(h.switches.saves).toBe(1);
+    expect(h.tickets.get(ticket.id)).toEqual(ticket);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("requires a type on the live ticket before approval", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const run = yield* h.prepare("edited-in-linear");
+    const ticket = (yield* h.service.read(run.id)).ticket!;
+    h.tickets.set(ticket.id, { ...ticket, labels: [] });
     const detail = yield* h.service.read(run.id);
-    expect(detail.run.phase).toBe("review");
-    expect(detail.ticket?.project?.id).toBe("intake");
+    expect(detail.questions.join(" ")).toContain("ticket type");
+    yield* h.approve(run.id).pipe(Effect.flip);
     expect(h.decisions).toEqual([]);
+    expect(detail.run.phase).toBe("review");
+  }).pipe(Effect.scoped),
+);
+
+it.effect("rechecks ticket types when recovering failed approval", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const run = yield* h.prepare("recover-type");
+    h.switches.failDecision = true;
+    yield* h.approve(run.id).pipe(Effect.flip);
+    const ticket = h.tickets.get(run.issueId!)!;
+    // The approval key still matches because the native label ID did not change.
+    h.tickets.set(ticket.id, { ...ticket, labels: [{ id: "feature", name: "Unsupported" }] });
+    h.switches.failDecision = false;
+    const restored = yield* h.restart();
+    yield* restored.resume();
+    expect((yield* restored.read(run.id)).run.phase).toBe("review");
+    expect(h.decisions).toEqual([]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("returns a ticket to review when its type changes during approval", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const run = yield* h.prepare("type-race");
+    h.switches.renameTypeDuringDecision = true;
+    yield* h.approve(run.id);
+    expect((yield* h.service.read(run.id)).run.phase).toBe("review");
     expect(h.launches).toHaveLength(1);
   }).pipe(Effect.scoped),
 );

@@ -1,5 +1,6 @@
 import type { WorkflowDetail } from "@t3tools/contracts";
 import type { ReactNode } from "react";
+import { ticketType } from "./workflow.ts";
 
 function Link({ href, children }: { href: string; children: ReactNode }) {
   return /^https?:\/\//i.test(href) ? (
@@ -34,6 +35,8 @@ export function RefinementPanel({
     );
   const priority =
     ["No priority", "Urgent", "High", "Normal", "Low"][ticket.priority] ?? "No priority";
+  const type = ticketType(ticket.labels);
+  const otherLabels = ticket.labels.filter((label) => label.id !== type?.id);
   return (
     <section aria-label="Ticket refinement" className="flex h-full min-h-0 flex-col bg-background">
       <header className="flex items-center justify-between gap-3 border-b px-5 py-3 text-xs text-muted-foreground">
@@ -48,19 +51,15 @@ export function RefinementPanel({
         <dl className="grid grid-cols-[auto_1fr] items-start gap-x-5 gap-y-3 text-sm">
           <dt className="text-muted-foreground">Target project</dt>
           <dd className="min-w-0">{projectControl}</dd>
-          {ticket.project?.initiatives.length ? (
-            <>
-              <dt className="text-muted-foreground">Initiative</dt>
-              <dd>{ticket.project.initiatives.join(", ")}</dd>
-            </>
-          ) : null}
+          <dt className="text-muted-foreground">Type</dt>
+          <dd>{type?.name ?? "Choose in chat"}</dd>
           <dt className="text-muted-foreground">Priority</dt>
           <dd>{priority}</dd>
-          {ticket.labels.length ? (
+          {otherLabels.length ? (
             <>
               <dt className="text-muted-foreground">Labels</dt>
               <dd className="flex flex-wrap gap-1">
-                {ticket.labels.map((label) => (
+                {otherLabels.map((label) => (
                   <span key={label.id} className="rounded bg-muted px-2 py-0.5 text-xs">
                     {label.name}
                   </span>

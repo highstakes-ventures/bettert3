@@ -2,6 +2,21 @@ import type { WorkflowRun, WorkflowTicket, WorkflowDependencyEvidence } from "@t
 import * as Effect from "effect/Effect";
 import { preparationGoal, implementationGoal } from "./goals.ts";
 
+const ticketTypeNames = new Set([
+  "Feature",
+  "Bug",
+  "Maintenance / Improvement",
+  "Content",
+  "Campaign",
+  "Market research",
+]);
+
+/** Ticket types are native Linear labels; other labels remain independent. */
+export function ticketType(labels: ReadonlyArray<{ id: string; name: string }>) {
+  const types = labels.filter((label) => ticketTypeNames.has(label.name));
+  return types.length === 1 ? types[0] : undefined;
+}
+
 /** The runtime supplies its durable, idempotent task launch operation. */
 export function prepare<A, E, R>(
   request: string,
@@ -115,6 +130,8 @@ export function refinementQuestions(
     return (graph.get(id) ?? []).some((blocker) => reachesTicket(blocker, seen));
   };
   const questions: string[] = [];
+  if (!ticketType(ticket.labels))
+    questions.push("Choose exactly one ticket type in chat before approval.");
   if (ticket.blockedBy.some((blocker) => reachesTicket(blocker.id, new Set())))
     questions.push("Resolve the dependency cycle before approval.");
   for (const blocker of ticket.blockedBy) {

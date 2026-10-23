@@ -34,7 +34,7 @@ const page = <S extends Schema.Top>(node: S) =>
 const Project = Schema.Struct({
   ...Node.fields,
   teams: Schema.Struct({ nodes: Schema.Array(Node) }),
-  initiatives: Schema.Struct({ nodes: Schema.Array(Node) }),
+  status: Schema.Struct({ type: Schema.String }),
 });
 const Reference = Schema.Struct({
   id: Schema.String,
@@ -73,7 +73,7 @@ const Candidate = Schema.Struct({
   team: Schema.Struct({ id: Schema.String }),
 });
 const decodeSearchResult = Schema.decodeUnknownEffect(WorkflowSearchResult);
-const projectFields = "id name teams { nodes { id name } } initiatives { nodes { id name } }";
+const projectFields = "id name teams { nodes { id name } } status { type }";
 const referenceFields = "id identifier title url state { id type }";
 const pageFields = "pageInfo { hasNextPage endCursor }";
 const collectionFields = {
@@ -91,7 +91,7 @@ const project = (value: typeof Project.Type) => ({
   id: value.id,
   name: value.name,
   teamIds: value.teams.nodes.map((team) => team.id),
-  initiatives: value.initiatives.nodes.map((initiative) => initiative.name),
+  initiatives: [],
 });
 const reference = (value: typeof Reference.Type) => ({
   id: value.id,
@@ -293,7 +293,7 @@ const make = Effect.gen(function* () {
               readonly pageInfo: typeof pageInfo.Type;
             };
           } = yield* request(
-            // Nested labels, teams and initiatives multiply Linear's query
+            // Nested labels and teams multiply Linear's query
             // complexity. Small parent pages stay below its 10,000-point cap.
             `query($after:String){${name}(first:10,after:$after){nodes{${fields}} ${pageFields}}}`,
             { after },
@@ -359,7 +359,9 @@ const make = Effect.gen(function* () {
           team.states.nodes.find((state) => state.type === "completed")?.id ??
           null,
       })),
-      projects: projects.map(project),
+      projects: projects
+        .filter((project) => !["completed", "canceled"].includes(project.status.type))
+        .map(project),
     } satisfies WorkflowConnection;
   });
   const changed = Schema.Struct({ success: Schema.Boolean });
