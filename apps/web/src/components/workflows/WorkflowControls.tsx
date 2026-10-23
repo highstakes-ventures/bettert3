@@ -209,7 +209,9 @@ function WorkflowControls(
     setOpen(true);
   };
   const refine = () => {
-    const run = queue.find((entry) => entry.threadId === props.threadId) ?? queue[0];
+    const tickets = queue.filter((entry) => entry.threadId !== null);
+    const current = tickets.findIndex((entry) => entry.threadId === props.threadId);
+    const run = tickets[current + 1] ?? tickets[0];
     if (run) void openRun(run);
     else openIntake();
   };
