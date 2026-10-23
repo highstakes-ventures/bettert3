@@ -8,11 +8,17 @@ Scale supporting detail to the change rather than filling every section mechanic
 
 Use mostly ASD-STE100-style English. Write short sentences in active voice.
 Use plain words and one idea per sentence. State one checkable requirement per
-acceptance bullet. Keep exact technical names, code, and necessary domain terms.
+acceptance bullet or table row. Keep exact technical names, code, and necessary domain terms.
 Do not force them into a controlled vocabulary or claim formal STE compliance.
 
-Aim for about 250 words in the preparation brief. Refinement may add the design
-and proof needed to implement the change. Keep that addition concise. Do not
+Use one or two short sentences for context. Put requirements, proof, and open
+decisions in bullets or compact tables. Use a small flow for sequence and branches;
+do not explain the same flow again in a paragraph. Write complete, clear requirements
+instead of compressing them into unexplained abbreviations.
+
+Aim for 150 to 250 words during preparation. This is a guide, not a hard limit.
+Refinement adds the design and proof needed to implement the change in the same
+format. Prefer a responsibility map and call flow to an architecture essay. Do not
 remove requirements, important preserved behavior, or blockers to meet a word count.
 
 Keep decisive facts in the ticket. Link detailed traces, research, source evidence,
@@ -23,29 +29,27 @@ the brief; they do not replace its agreed requirements or architecture decisions
 
 ## Preparation form
 
-- **Problem.** Current behavior, concrete consequence, and decisive evidence.
-- **User story.** Who needs what and why, in plain language. A system operator
-  or developer can be the actor; do not invent a customer persona.
-- **Proposed solution.** Intended behavior, scope, and the smallest supported approach.
-  Identify unsettled choices rather than presenting them as approved.
-- **Flow.** The smallest useful user or system flow diagram. Compare current
-  and proposed behavior when that comparison explains the change. Keep diagrams
-  readable in Linear using supported Markdown, text, or a real linked asset.
-- **Change impact.** Add a separate section only when affected responsibilities
-  or scope need explanation beyond the proposed solution. Include exclusions
-  only when they prevent a plausible misunderstanding.
-- **Acceptance criteria.** Independently checkable outcomes, including important
-  preserved behavior. Replace vague adjectives with observable results.
-- **Verification.** The owning test or service layer and the decisive proof.
-  Link detailed fixtures, commands, and test procedures when available.
-- **Evidence.** Real screenshots, examples, traces, and repository references
-  with their revision. Distinguish present evidence from proposed mockups.
-- **Risks and open questions.** Material uncertainty that needs a decision or
-  more evidence. Keep a question next to the affected requirement when clearer.
+| Section                  | Output shape                     | Required content                                                                                        |
+| ------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Problem                  | One or two short sentences       | Current behavior, concrete consequence, decisive evidence.                                              |
+| User story               | One sentence                     | Who needs what and why. A developer or operator can be the actor; do not invent a persona.              |
+| Proposed solution        | One or two short sentences       | Smallest supported approach, intended behavior, scope, unsettled choices.                               |
+| Flow                     | Small Markdown-supported diagram | Sequence and branches. Compare current and proposed behavior only when useful.                          |
+| Change impact, if needed | Short bullets                    | Responsibility changes or exclusions that prevent a plausible misunderstanding.                         |
+| Acceptance criteria      | Bullets or compact table         | One independently checkable outcome per item, including important preserved behavior.                   |
+| Verification             | Short bullets                    | Owning layer, decisive stimulus and expected result, necessary checks. Link detailed procedures.        |
+| Evidence                 | Links with short qualifiers      | Inspected revision, real screenshots, examples or traces. Distinguish observed evidence from proposals. |
+| Open decisions, if any   | Short bullets                    | Material uncertainty that needs a decision or more evidence.                                            |
 
 Omit empty or redundant sections. Do not add a search transcript, a duplicate-check
 essay, or a prose copy of native metadata. Report a material duplicate or dependency
 uncertainty briefly where the user needs to decide it.
+
+Before submitting, remove repeated facts and convert narrative requirements or
+test plans into the shapes above. Each statement should add a fact, requirement,
+decision, or proof that the other sections do not already contain. Keep agreed
+requirements and architecture in the description; do not hide them in evidence
+comments to make the ticket shorter.
 
 Do not invent final file counts, an implemented hierarchy, speedups, passing
 tests, or before/after implementation evidence during preparation. Native project,
