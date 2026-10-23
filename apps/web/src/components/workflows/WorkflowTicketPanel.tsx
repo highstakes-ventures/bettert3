@@ -8,7 +8,7 @@ import type {
 } from "@t3tools/contracts";
 import { RefinementPanel } from "@t3tools/workflows/tickets/panel";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { serverEnvironment } from "~/state/server";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -20,6 +20,8 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import ChatMarkdown from "../ChatMarkdown";
 import { useOpenWorkflowRun } from "./useOpenWorkflowRun";
 import {
+  lastOpenedRefinementRunByEnvironment,
+  nextRefinementRun,
   refinementQueueWithPendingDecisions,
   stageWorkflowDecision,
   hasPendingWorkflowDecision,
@@ -87,6 +89,12 @@ function Ticket({
   refresh: () => void;
 }) {
   const [target, setTarget] = useState(detail.ticket?.project?.id ?? "");
+  useEffect(() => {
+    // Also remember refinement chats opened directly from the sidebar.
+    if (detail.run.phase === "review") {
+      lastOpenedRefinementRunByEnvironment.set(environmentId, detail.run.id);
+    }
+  }, [environmentId, detail.run.id, detail.run.phase]);
   const deliveryProjects = projects.filter(
     (project) =>
       project.id !== intakeProjectId && project.teamIds.includes(detail.ticket?.teamId ?? ""),
@@ -139,7 +147,7 @@ function Ticket({
     });
     if (!staged) return;
     const nextQueue = refinementQueueWithPendingDecisions(environmentId, queue);
-    const next = nextQueue.find((run) => run.threadId !== null);
+    const next = nextRefinementRun(queue, detail.run.id, nextQueue);
     // Closing this surface unmounts the hook and cancels its pending navigation.
     if (next && !(await openRun(next))) return;
     // Undo can restore this surface while navigation finishes.

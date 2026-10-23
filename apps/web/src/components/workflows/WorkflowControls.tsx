@@ -40,6 +40,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkflowActivity } from "./WorkflowActivity";
 import { useOpenWorkflowRun } from "./useOpenWorkflowRun";
 import {
+  lastOpenedRefinementRunByEnvironment,
+  nextRefinementRun,
   requestWorkflowAction,
   takeWorkflowAction,
   useRefinementQueue,
@@ -201,8 +203,11 @@ function WorkflowControls(
   };
   const refine = () => {
     const tickets = queue.filter((entry) => entry.threadId !== null);
-    const current = tickets.findIndex((entry) => entry.threadId === props.threadId);
-    const run = tickets[current + 1] ?? tickets[0];
+    const current = tickets.find((entry) => entry.threadId === props.threadId);
+    const lastRunId = lastOpenedRefinementRunByEnvironment.get(props.environmentId);
+    const run = current
+      ? nextRefinementRun(tickets, current.id)
+      : (tickets.find((entry) => entry.id === lastRunId) ?? tickets[0]);
     if (run) void openRun(run);
     else openIntake();
   };

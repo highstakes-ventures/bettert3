@@ -97,6 +97,7 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { undoLatestThreadAction, useThreadUndoNotice } from "~/hooks/showThreadUndoNotice";
 import {
+  lastOpenedRefinementRunByEnvironment,
   refinementQueueWithPendingDecisions,
   useRefinementQueue,
   useWorkflowDecisions,
@@ -120,6 +121,7 @@ const run = (id: string): WorkflowRun => ({
 });
 let renderer: ReactTestRenderer | undefined;
 beforeEach(() => {
+  lastOpenedRefinementRunByEnvironment.clear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-22T12:00:00Z"));
   const current = run("current");
@@ -169,6 +171,7 @@ afterEach(async () => {
   renderer = undefined;
   await vi.runAllTimersAsync();
   useWorkflowDecisions.setState({ decisions: [] });
+  lastOpenedRefinementRunByEnvironment.clear();
   vi.useRealTimers();
 });
 const render = async () =>
@@ -196,6 +199,10 @@ const expire = async () =>
     await vi.advanceTimersByTimeAsync(5_000);
   });
 const currentQueue = () => refinementQueueWithPendingDecisions(environmentId, state.queue);
+it("remembers a refinement ticket opened directly from its chat", async () => {
+  await render();
+  expect(lastOpenedRefinementRunByEnvironment.get(environmentId)).toBe("current");
+});
 it.each(["Approve", "Reject", "Delay"])(
   "%s opens the next ticket before closing the mounted ticket surface",
   async (label) => {
@@ -268,6 +275,7 @@ it("keeps the restored ticket surface when Undo finishes during the next navigat
     to: "/$environmentId/$threadId",
     params: { environmentId, threadId: "chat-current" },
   });
+  expect(lastOpenedRefinementRunByEnvironment.get(environmentId)).toBe("current");
   await expire();
   expect(state.decision).not.toHaveBeenCalled();
 });
@@ -302,7 +310,21 @@ it.each(["Success", "Failure"])(
   },
 );
 
-it("keeps the current ticket while the queue reorders and opens the new first ticket after approval", async () => {
+it.each(["Approve", "Reject", "Delay"])(
+  "%s advances from the current position instead of returning to the first ticket",
+  async (label) => {
+    state.queue = [run("earlier"), run("current"), run("next")];
+    await render();
+    await click(label);
+    expect(state.navigate).toHaveBeenCalledExactlyOnceWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId, threadId: "chat-next" },
+    });
+    expect(state.decision).not.toHaveBeenCalled();
+  },
+);
+
+it("keeps the current ticket while the queue reorders and wraps after approving the last ticket", async () => {
   await render();
   state.queue = [run("priority-prerequisite"), run("next"), run("current")];
   await act(async () =>

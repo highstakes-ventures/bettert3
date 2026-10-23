@@ -73,10 +73,12 @@ Add an idea with **+ Ticket**. An agent prepares it in Linear and adds it to
 **+ Ticket → Workflow activity** to read their logs, including completed runs and
 delayed tickets. Implementation chats appear in the regular list. Open **Refine**
 to discuss the ticket in chat beside its description, project, evidence, and
-ticket dependencies. Open **Refine** again to move to the next ticket while the
-current agent continues working. It cycles through the queue so you can return
-to earlier tickets. Chats opened for refinement stay in the sidebar, so you can
-also return to a ticket directly from its chat. **Approve** sets its target project
+ticket dependencies. After leaving refinement, **Refine** reopens the last ticket
+you visited in this session. If that ticket is already open, **Refine** moves to
+the next ticket while the current agent continues working. Approve, Reject, and
+Delay also advance from the current ticket's position. Navigation wraps to the
+first eligible ticket at the end. Chats opened for refinement stay in the sidebar,
+so you can also return to a ticket directly from its chat. **Approve** sets its target project
 and Refined state. The intake project is an inbox. Preparation proposes a delivery
 project; if the choice is unclear, select one during refinement before approval.
 **Delay** moves it and its dependents behind ready tickets for

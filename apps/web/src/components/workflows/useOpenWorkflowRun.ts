@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { threadEnvironment } from "~/state/threads";
 import { useOrchestrationCommand } from "~/state/use-orchestration-command";
+import { lastOpenedRefinementRunByEnvironment } from "./workflowActions";
 
 export function useOpenWorkflowRun(environmentId: EnvironmentId) {
   const navigate = useNavigate();
@@ -37,6 +38,9 @@ export function useOpenWorkflowRun(environmentId: EnvironmentId) {
       to: "/$environmentId/$threadId",
       params: { environmentId, threadId },
     });
+    if (run.phase === "review" && request === latestOpen.current) {
+      lastOpenedRefinementRunByEnvironment.set(environmentId, run.id);
+    }
     return true;
   };
 }

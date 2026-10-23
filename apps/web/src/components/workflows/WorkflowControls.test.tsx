@@ -104,7 +104,11 @@ import {
 } from "./WorkflowControls";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useRightPanelStore } from "~/rightPanelStore";
-import { requestWorkflowAction, useWorkflowDecisions } from "./workflowActions";
+import {
+  lastOpenedRefinementRunByEnvironment,
+  requestWorkflowAction,
+  useWorkflowDecisions,
+} from "./workflowActions";
 
 let renderer: ReactTestRenderer | undefined;
 beforeEach(() => {
@@ -119,6 +123,7 @@ beforeEach(() => {
   state.unsettle.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   state.threadId = "chat-current";
   state.queue = [];
+  lastOpenedRefinementRunByEnvironment.clear();
   useRightPanelStore.setState({ byThreadKey: {} });
   useWorkflowDecisions.setState({ decisions: [] });
 });
@@ -127,6 +132,7 @@ afterEach(async () => {
   renderer = undefined;
   useWorkflowDecisions.setState({ decisions: [] });
   vi.unstubAllGlobals();
+  lastOpenedRefinementRunByEnvironment.clear();
 });
 
 const run = (id: string, project = "project"): WorkflowRun => ({
@@ -248,6 +254,9 @@ it.each(["Success", "Failure"])(
     expect(useRightPanelStore.getState().byThreadKey).toEqual({});
     await act(async () => finish({ _tag, value: undefined }));
     expect(state.navigate).toHaveBeenCalledTimes(_tag === "Success" ? 1 : 0);
+    expect(lastOpenedRefinementRunByEnvironment.get(EnvironmentId.make("test"))).toBe(
+      _tag === "Success" ? "next" : undefined,
+    );
     if (_tag === "Success") {
       expect(useRightPanelStore.getState().byThreadKey["test:chat-next"]?.activeSurfaceId).toBe(
         "ticket:next",
@@ -255,6 +264,90 @@ it.each(["Success", "Failure"])(
     } else expect(useRightPanelStore.getState().byThreadKey).toEqual({});
     expect(state.connect).not.toHaveBeenCalled();
     expect(useWorkflowDecisions.getState().decisions).toEqual([]);
+  },
+);
+
+it.each(["button", "shortcut", "command"])(
+  "%s resumes the last opened ticket after leaving refinement and remounting the controls",
+  async (source) => {
+    state.queue = [run("earlier"), run("current"), run("next")];
+    const controls = () => (
+      <>
+        <WorkflowActionShortcuts />
+        <SidebarWorkflowControls />
+      </>
+    );
+    const refine = () =>
+      act(async () => {
+        if (source === "shortcut") {
+          window.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "r",
+              ctrlKey: true,
+              altKey: true,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        } else if (source === "command") requestWorkflowAction("refine");
+        else renderer!.root.findByProps({ "data-workflow-action": "refine" }).props.onClick();
+      });
+    await act(async () => {
+      renderer = create(controls());
+    });
+    await refine();
+    expect(state.navigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ params: { environmentId: "test", threadId: "chat-next" } }),
+    );
+    await act(async () => renderer!.unmount());
+    state.threadId = "unrelated-chat";
+    await act(async () => {
+      renderer = create(controls());
+    });
+    await refine();
+    expect(state.navigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ params: { environmentId: "test", threadId: "chat-next" } }),
+    );
+    state.threadId = "chat-next";
+    await act(async () => renderer!.update(controls()));
+    await refine();
+    expect(state.navigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ params: { environmentId: "test", threadId: "chat-earlier" } }),
+    );
+  },
+);
+
+it.each(["missing", "pending", "no-chat", "other-environment"])(
+  "falls back to the first eligible ticket when the remembered ticket is %s",
+  async (reason) => {
+    state.threadId = "unrelated-chat";
+    state.queue = [run("first"), run("remembered")];
+    lastOpenedRefinementRunByEnvironment.set(
+      EnvironmentId.make(reason === "other-environment" ? "other" : "test"),
+      "remembered",
+    );
+    if (reason === "missing") state.queue = [run("first")];
+    if (reason === "no-chat") state.queue[1] = { ...run("remembered"), threadId: null };
+    if (reason === "pending") {
+      useWorkflowDecisions.setState({
+        decisions: [
+          {
+            environmentId: EnvironmentId.make("test"),
+            runId: "remembered",
+            decision: "approve",
+            stagedAt: "2026-10-23",
+          },
+        ],
+      });
+    }
+    await act(async () => {
+      renderer = create(<SidebarWorkflowControls />);
+    });
+    await act(async () => requestWorkflowAction("refine"));
+    expect(state.navigate).toHaveBeenCalledExactlyOnceWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: "test", threadId: "chat-first" },
+    });
   },
 );
 

@@ -8,6 +8,8 @@ import * as ThreadUndo from "~/hooks/threadUndo";
 import { toastManager } from "../ui/toast";
 
 export const WORKFLOW_ACTION_EVENT = "t3:ticket-workflow";
+// Navigation memory lasts for this page session and is separate for each environment.
+export const lastOpenedRefinementRunByEnvironment = new Map<EnvironmentId, string>();
 let pendingAction: "ticket" | "refine" | null = null;
 export function requestWorkflowAction(action: "ticket" | "refine") {
   pendingAction = action;
@@ -19,6 +21,22 @@ export function takeWorkflowAction() {
   const action = pendingAction;
   pendingAction = null;
   return action;
+}
+
+/** Keep the original position when a decision removes the current ticket or its dependents. */
+export function nextRefinementRun(
+  runs: ReadonlyArray<WorkflowRun>,
+  currentRunId: string,
+  eligibleRuns = runs,
+) {
+  const current = runs.findIndex((run) => run.id === currentRunId);
+  const eligible = new Map(
+    eligibleRuns.filter((run) => run.threadId !== null).map((run) => [run.id, run]),
+  );
+  for (let offset = 1; offset <= runs.length; offset++) {
+    const run = eligible.get(runs[(current + offset) % runs.length]!.id);
+    if (run) return run;
+  }
 }
 
 type TicketDecision = {
