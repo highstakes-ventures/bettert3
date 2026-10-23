@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   refresh: vi.fn(),
   onSaved: vi.fn(),
   navigate: vi.fn(),
+  unsettle: vi.fn(),
   threadId: "chat-current",
   queue: [] as WorkflowRun[],
 }));
@@ -51,6 +52,10 @@ vi.mock("~/state/query", () => ({
   }),
 }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => state.connect }));
+vi.mock("~/state/threads", () => ({ threadEnvironment: { unsettle: "unsettle" } }));
+vi.mock("~/state/use-orchestration-command", () => ({
+  useOrchestrationCommand: () => state.unsettle,
+}));
 vi.mock("~/hooks/useHandleNewThread", () => ({
   useHandleNewThread: () => ({
     activeThread: {
@@ -111,6 +116,7 @@ beforeEach(() => {
   state.refresh.mockReset();
   state.onSaved.mockReset();
   state.navigate.mockReset().mockResolvedValue(undefined);
+  state.unsettle.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   state.threadId = "chat-current";
   state.queue = [];
   useRightPanelStore.setState({ byThreadKey: {} });
@@ -211,6 +217,44 @@ it.each(["button", "shortcut", "command"])(
       to: "/$environmentId/$threadId",
       params: { environmentId: "test", threadId: "chat-current" },
     });
+    expect(state.unsettle.mock.calls.map(([request]) => request.input)).toEqual([
+      { threadId: "chat-next", reason: "user" },
+      { threadId: "chat-earlier", reason: "user" },
+      { threadId: "chat-current", reason: "user" },
+    ]);
+  },
+);
+
+it.each(["Success", "Failure"])(
+  "waits for sidebar restoration before opening a refinement chat when restoration returns %s",
+  async (_tag) => {
+    let finish!: (result: unknown) => void;
+    state.unsettle.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    state.queue = [run("current"), run("next")];
+    await act(async () => {
+      renderer = create(<SidebarWorkflowControls />);
+    });
+    await act(async () => requestWorkflowAction("refine"));
+    expect(state.unsettle).toHaveBeenCalledExactlyOnceWith({
+      environmentId: "test",
+      input: { threadId: "chat-next", reason: "user" },
+    });
+    expect(state.navigate).not.toHaveBeenCalled();
+    expect(useRightPanelStore.getState().byThreadKey).toEqual({});
+    await act(async () => finish({ _tag, value: undefined }));
+    expect(state.navigate).toHaveBeenCalledTimes(_tag === "Success" ? 1 : 0);
+    if (_tag === "Success") {
+      expect(useRightPanelStore.getState().byThreadKey["test:chat-next"]?.activeSurfaceId).toBe(
+        "ticket:next",
+      );
+    } else expect(useRightPanelStore.getState().byThreadKey).toEqual({});
+    expect(state.connect).not.toHaveBeenCalled();
+    expect(useWorkflowDecisions.getState().decisions).toEqual([]);
   },
 );
 
@@ -241,6 +285,28 @@ it("skips tickets without a chat and decisions that are still pending", async ()
   });
   expect(state.connect).not.toHaveBeenCalled();
   expect(useWorkflowDecisions.getState().decisions).toHaveLength(1);
+});
+
+it("does not navigate after the controls unmount while a chat is reopening", async () => {
+  let finish!: (result: unknown) => void;
+  state.unsettle.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  state.queue = [run("next")];
+  await act(async () => {
+    renderer = create(<SidebarWorkflowControls />);
+  });
+  await act(async () => requestWorkflowAction("refine"));
+  await act(async () => {
+    renderer!.unmount();
+  });
+  renderer = undefined;
+  await act(async () => finish({ _tag: "Success", value: undefined }));
+  expect(state.navigate).not.toHaveBeenCalled();
+  expect(useRightPanelStore.getState().byThreadKey).toEqual({});
 });
 
 it.each(["chat-unrelated", "chat-current"])(

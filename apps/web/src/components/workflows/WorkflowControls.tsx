@@ -1,6 +1,6 @@
 import { randomUUID } from "~/lib/utils";
 import { useAtomValue } from "@effect/atom-react";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { DEFAULT_MODEL, ProviderInstanceId } from "@t3tools/contracts";
 import type {
@@ -15,7 +15,7 @@ import type {
   WorkflowRun,
   WorkflowListResult,
 } from "@t3tools/contracts";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
 import { ListFilterIcon, TicketPlusIcon } from "lucide-react";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
@@ -24,7 +24,6 @@ import { useHandleNewThread } from "~/hooks/useHandleNewThread";
 import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "~/keybindings";
 import { useShortcutModifierState } from "~/shortcutModifierState";
-import { useRightPanelStore } from "~/rightPanelStore";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "~/state/server";
 import { useProject, useProjects } from "~/state/entities";
 import { usePrimaryEnvironment } from "~/state/environments";
@@ -39,6 +38,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { SidebarMenuButton, SidebarMenuItem, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkflowActivity } from "./WorkflowActivity";
+import { useOpenWorkflowRun } from "./useOpenWorkflowRun";
 import {
   requestWorkflowAction,
   takeWorkflowAction,
@@ -184,24 +184,15 @@ function WorkflowControls(
     serverEnvironment.intakeWorkflow.permissionAtom(props.environmentId),
   );
   const intake = useAtomCommand(serverEnvironment.intakeWorkflow);
-  const navigate = useNavigate();
+  const openWorkflowRun = useOpenWorkflowRun(props.environmentId);
   const { isMobile, setOpenMobile, setOpen: setSidebarOpen } = useSidebar();
   const modifiers = useShortcutModifierState();
   const queue = useRefinementQueue(props.environmentId, live.data?.runs ?? []);
   const configured = live.data?.connected && live.data.configuration !== null;
   async function openRun(run: WorkflowRun) {
-    const threadId = run.threadId ?? run.implementationThreadId;
-    if (!threadId) return;
-    if (run.phase === "review")
-      useRightPanelStore
-        .getState()
-        .openTicket(scopeThreadRef(props.environmentId, threadId), run.id, run.projectId);
+    if (!(await openWorkflowRun(run))) return;
     setOpen(false);
     if (isMobile) setOpenMobile(false);
-    await navigate({
-      to: "/$environmentId/$threadId",
-      params: { environmentId: props.environmentId, threadId },
-    });
   }
   const openIntake = () => {
     if (isMobile) setOpenMobile(true);

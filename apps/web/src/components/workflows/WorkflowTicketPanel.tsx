@@ -7,7 +7,6 @@ import type {
   WorkflowRun,
 } from "@t3tools/contracts";
 import { RefinementPanel } from "@t3tools/workflows/tickets/panel";
-import { useNavigate } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useState } from "react";
 import { serverEnvironment } from "~/state/server";
@@ -19,6 +18,7 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import ChatMarkdown from "../ChatMarkdown";
+import { useOpenWorkflowRun } from "./useOpenWorkflowRun";
 import {
   refinementQueueWithPendingDecisions,
   stageWorkflowDecision,
@@ -101,7 +101,7 @@ function Ticket({
   const canDecide = useAtomValue(serverEnvironment.decideWorkflow.permissionAtom(environmentId));
   const decide = useAtomCommand(serverEnvironment.decideWorkflow);
   const settle = useOrchestrationCommand(threadEnvironment.settle, "settle rejected ticket chat");
-  const navigate = useNavigate();
+  const openRun = useOpenWorkflowRun(environmentId);
   async function submit(decision: WorkflowDecisionInput["decision"]) {
     if (busy || !canDecide || !detail.ticket || (decision === "approve" && !selectedTarget)) return;
     const ticket = detail.ticket;
@@ -131,18 +131,7 @@ function Ticket({
       },
       restore: async () => {
         refresh();
-        if (!detail.run.threadId) return;
-        useRightPanelStore
-          .getState()
-          .openTicket(
-            scopeThreadRef(environmentId, detail.run.threadId),
-            detail.run.id,
-            detail.run.projectId,
-          );
-        await navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId, threadId: detail.run.threadId },
-        });
+        await openRun(detail.run);
       },
     });
     if (!staged) return;
@@ -155,15 +144,8 @@ function Ticket({
           `ticket:${detail.run.id}`,
         );
     const next = nextQueue.find((run) => run.threadId !== null);
-    if (next?.threadId) {
-      useRightPanelStore
-        .getState()
-        .openTicket(scopeThreadRef(environmentId, next.threadId), next.id, next.projectId);
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: { environmentId, threadId: next.threadId },
-      });
-    } else refresh();
+    if (next) await openRun(next);
+    else refresh();
   }
   return (
     <RefinementPanel

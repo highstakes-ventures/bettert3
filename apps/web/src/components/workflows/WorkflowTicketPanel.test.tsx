@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   queue: [] as WorkflowRun[],
   decision: vi.fn(),
   settle: vi.fn(),
+  unsettle: vi.fn(),
   navigate: vi.fn(),
   refresh: vi.fn(),
   projects: [
@@ -52,9 +53,12 @@ vi.mock("~/state/query", () => ({
   }),
 }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => state.decision }));
-vi.mock("~/state/threads", () => ({ threadEnvironment: { settle: "settle" } }));
+vi.mock("~/state/threads", () => ({
+  threadEnvironment: { settle: "settle", unsettle: "unsettle" },
+}));
 vi.mock("~/state/use-orchestration-command", () => ({
-  useOrchestrationCommand: () => state.settle,
+  useOrchestrationCommand: (command: string) =>
+    command === "settle" ? state.settle : state.unsettle,
 }));
 vi.mock("../ChatMarkdown", () => ({ default: ({ text }: { text: string }) => <p>{text}</p> }));
 vi.mock("../ui/select", () => ({
@@ -152,6 +156,7 @@ beforeEach(() => {
       value: { ...current, phase: input.decision === "reject" ? "rejected" : "approved" },
     }));
   state.settle.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
+  state.unsettle.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   state.navigate.mockReset().mockResolvedValue(undefined);
   state.refresh.mockReset();
   useRightPanelStore.setState({ byThreadKey: {} });
@@ -188,6 +193,36 @@ const expire = async () =>
     await vi.advanceTimersByTimeAsync(5_000);
   });
 const currentQueue = () => refinementQueueWithPendingDecisions(environmentId, state.queue);
+it.each(["Success", "Failure"])(
+  "waits for sidebar restoration before advancing after a decision when restoration returns %s",
+  async (_tag) => {
+    let finish!: (result: unknown) => void;
+    state.unsettle.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await render();
+    await approve();
+    expect(state.unsettle).toHaveBeenCalledExactlyOnceWith({
+      environmentId,
+      input: { threadId: "chat-next", reason: "user" },
+    });
+    expect(state.navigate).not.toHaveBeenCalled();
+    expect(state.decision).not.toHaveBeenCalled();
+    await act(async () => finish({ _tag, value: undefined }));
+    expect(state.navigate).toHaveBeenCalledTimes(_tag === "Success" ? 1 : 0);
+    if (_tag === "Success") {
+      expect(useRightPanelStore.getState().byThreadKey["test:chat-next"]?.activeSurfaceId).toBe(
+        "ticket:next",
+      );
+    } else expect(useRightPanelStore.getState().byThreadKey["test:chat-next"]).toBeUndefined();
+    await expire();
+    expect(state.decision).toHaveBeenCalledOnce();
+  },
+);
+
 it("keeps the current ticket while the queue reorders and opens the new first ticket after approval", async () => {
   await render();
   state.queue = [run("priority-prerequisite"), run("next"), run("current")];
@@ -217,6 +252,10 @@ it("keeps the current ticket while the queue reorders and opens the new first ti
   expect(state.navigate).toHaveBeenCalledWith({
     to: "/$environmentId/$threadId",
     params: { environmentId, threadId: "chat-priority-prerequisite" },
+  });
+  expect(state.unsettle).toHaveBeenCalledExactlyOnceWith({
+    environmentId,
+    input: { threadId: "chat-priority-prerequisite", reason: "user" },
   });
   const ref = scopeThreadRef(environmentId, ThreadId.make("chat-priority-prerequisite"));
   expect(useRightPanelStore.getState().byThreadKey).toMatchObject({
@@ -376,17 +415,25 @@ it.each(["Approve", "Reject", "Delay"])(
 );
 
 it.each(["Approve", "Reject", "Delay"])(
-  "Undo cancels %s and reopens the ticket without calling Linear",
+  "Undo cancels %s and reopens the ticket after unmount without calling Linear",
   async (label) => {
     state.queue = [run("current"), { ...run("dependent"), blockerIds: ["current"] }, run("next")];
     await render();
     await click(label);
+    await act(async () => {
+      renderer!.unmount();
+    });
+    renderer = undefined;
     const notice = useThreadUndoNotice.getState().notice!;
     await act(async () => {
       await notice.undo();
       await notice.undo();
     });
     expect(undoLatestThreadAction()).toBe(false);
+    expect(state.unsettle.mock.calls.map(([request]) => request.input)).toEqual([
+      { threadId: label === "Delay" ? "chat-next" : "chat-dependent", reason: "user" },
+      { threadId: "chat-current", reason: "user" },
+    ]);
     expect(state.navigate).toHaveBeenLastCalledWith(
       expect.objectContaining({ params: { environmentId, threadId: "chat-current" } }),
     );
@@ -402,6 +449,34 @@ it.each(["Approve", "Reject", "Delay"])(
     expect(state.settle).not.toHaveBeenCalled();
   },
 );
+
+it("keeps the restored ticket open when the next chat finishes reopening after Undo", async () => {
+  let finishNext!: (result: unknown) => void;
+  let finishCurrent!: (result: unknown) => void;
+  state.unsettle.mockImplementation(
+    ({ input }: { input: { threadId: string } }) =>
+      new Promise((resolve) => {
+        if (input.threadId === "chat-next") finishNext = resolve;
+        else finishCurrent = resolve;
+      }),
+  );
+  await render();
+  await approve();
+  const notice = useThreadUndoNotice.getState().notice!;
+  await act(async () => {
+    void notice.undo();
+  });
+  await act(async () => finishCurrent({ _tag: "Success", value: undefined }));
+  expect(state.navigate).toHaveBeenCalledExactlyOnceWith({
+    to: "/$environmentId/$threadId",
+    params: { environmentId, threadId: "chat-current" },
+  });
+  await act(async () => finishNext({ _tag: "Success", value: undefined }));
+  expect(state.navigate).toHaveBeenCalledTimes(1);
+  expect(useRightPanelStore.getState().byThreadKey["test:chat-next"]).toBeUndefined();
+  await expire();
+  expect(state.decision).not.toHaveBeenCalled();
+});
 
 it("blocks a repeated click and keeps a successful decision hidden until the subscription catches up", async () => {
   await render();
