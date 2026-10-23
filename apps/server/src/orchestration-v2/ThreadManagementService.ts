@@ -56,6 +56,7 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as WorkflowThreadPolicy from "../workflows/WorkflowThreadPolicy.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -714,6 +715,43 @@ const make = Effect.gen(function* () {
 
   const dispatch: ThreadManagementServiceShape["dispatch"] = (command) =>
     ensureCommandTranscripts(command).pipe(
+      Effect.andThen(
+        Effect.gen(function* () {
+          if (command.type !== "delegated_task.request") return;
+          const shell = yield* orchestrator.getThreadShell(command.parentThreadId);
+          if (shell === null)
+            return yield* new Orchestrator.OrchestratorCommandRejectedError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause: "The parent thread was not found.",
+            });
+          const refinement = yield* WorkflowThreadPolicy.resolve(
+            shell,
+            orchestrator.getThreadShell,
+          ).pipe(
+            Effect.mapError(
+              (cause) =>
+                new Orchestrator.OrchestratorCommandRejectedError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  cause,
+                }),
+            ),
+          );
+          if (
+            refinement &&
+            (command.runtimeMode !== "approval-required" ||
+              command.interactionMode !== "plan" ||
+              command.workspaceStrategy !== undefined)
+          ) {
+            return yield* new Orchestrator.OrchestratorCommandRejectedError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause: WorkflowThreadPolicy.refinementOnlyMessage,
+            });
+          }
+        }),
+      ),
       Effect.andThen(assertDispatchTargetEnabled(command)),
       Effect.andThen(orchestrator.dispatch(command)),
     );

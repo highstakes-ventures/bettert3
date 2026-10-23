@@ -29,6 +29,8 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as RuntimePolicy from "../RuntimePolicy.ts";
+import * as ProjectionStore from "../ProjectionStore.ts";
+import { liveThreadShell } from "../../mcp/McpToolAccess.testkit.ts";
 import { acpPermissionDisposition } from "@t3tools/provider-acp/server/clientPolicy";
 import {
   AcpProviderCapabilitiesV2,
@@ -432,6 +434,11 @@ describe("Grok launch permission mode", () => {
       }).pipe(
         Effect.provide(
           RuntimePolicy.layerFromProjectStore.pipe(
+            Layer.provide(
+              Layer.mock(ProjectionStore.ProjectionStoreV2)({
+                getThreadShell: (id) => Effect.succeed(liveThreadShell(id)),
+              }),
+            ),
             Layer.provide(
               Layer.mock(ProjectStore.ProjectStoreV2)({
                 get: () => Effect.die("the thread has a worktree"),

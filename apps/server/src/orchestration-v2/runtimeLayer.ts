@@ -64,6 +64,7 @@ export const layerEventInfrastructure = Layer.mergeAll(
 
 const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
   Layer.provide(ProjectStore.layer),
+  Layer.provide(ProjectionStore.layer),
 );
 
 const layerEventStoreProvided = EventStore.layerFromOrchestrationEventStore.pipe(

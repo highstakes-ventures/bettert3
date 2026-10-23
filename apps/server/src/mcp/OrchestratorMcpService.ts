@@ -65,6 +65,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as WorkflowThreadPolicy from "../workflows/WorkflowThreadPolicy.ts";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -1978,6 +1979,26 @@ const make = Effect.gen(function* () {
     delegateTask: (callerScope, input) =>
       Effect.gen(function* () {
         const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
+        const shell = yield* threadManagement
+          .getThreadShell(scope.thread.threadId)
+          .pipe(
+            Effect.mapError(() =>
+              failure("orchestration_error", "Could not read the calling thread."),
+            ),
+          );
+        if (shell === null)
+          return yield* failure("thread_not_found", "The calling thread was not found.");
+        const refinement = yield* WorkflowThreadPolicy.resolve(
+          shell,
+          threadManagement.getThreadShell,
+        ).pipe(
+          Effect.mapError(() =>
+            failure("orchestration_error", "Could not resolve the calling thread's workflow."),
+          ),
+        );
+        if (refinement && input.isolation === "worktree") {
+          return yield* failure("capability_denied", WorkflowThreadPolicy.refinementOnlyMessage);
+        }
         const parentRun = parent.runs
           .filter(ThreadManagementService.isActiveRun)
           .toSorted((left, right) => right.ordinal - left.ordinal)[0];
@@ -2010,12 +2031,12 @@ const make = Effect.gen(function* () {
           skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
         });
         const runtimeMode = yield* resolveRuntimeMode(
-          parent.thread.runtimeMode,
+          refinement ? "approval-required" : parent.thread.runtimeMode,
           input.runtimeMode,
           target,
         );
         const interactionMode = yield* resolveInteractionMode(
-          parent.thread.interactionMode,
+          refinement ? "plan" : parent.thread.interactionMode,
           input.interactionMode,
         );
         let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;

@@ -15,6 +15,7 @@ import type { OrchestratorV2Error } from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as OrchestrationMcp from "./OrchestratorMcpService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
+import * as WorkflowThreadPolicy from "../workflows/WorkflowThreadPolicy.ts";
 
 export const unavailable = () =>
   new OrchestratorMcpFailure({
@@ -54,6 +55,7 @@ export interface Caller {
   /** The calling thread, absent for a client signed in from outside T3. */
   readonly caller: OrchestrationV2ThreadShell | undefined;
   readonly limits: CallerLimits;
+  readonly refinement: boolean;
 }
 
 export const readCaller = Effect.fn("mcp.readCaller")(function* () {
@@ -79,6 +81,7 @@ export const loadCaller = Effect.fn("mcp.loadCaller")(function* () {
       scope,
       threads,
       caller: undefined,
+      refinement: false,
       limits: {
         runtimeMode: McpInvocationContext.clientRuntimeModeCeiling(scope.client),
         interactionMode: "default",
@@ -98,9 +101,22 @@ export const loadCaller = Effect.fn("mcp.loadCaller")(function* () {
     scope,
     threads,
     caller,
+    refinement: yield* WorkflowThreadPolicy.resolve(caller, threads.getThreadShell).pipe(
+      Effect.mapError(unavailable),
+    ),
     limits: { runtimeMode: caller.runtimeMode, interactionMode: caller.interactionMode },
   } satisfies Caller;
 });
+
+export const assertWorkflowWritable = (caller: Caller) =>
+  caller.refinement
+    ? Effect.fail(
+        new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: WorkflowThreadPolicy.refinementOnlyMessage,
+        }),
+      )
+    : Effect.void;
 
 /**
  * A caller may change another thread only if that thread runs within the

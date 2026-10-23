@@ -33,14 +33,14 @@ export const layer = McpToolAccess.toLayer(WorkflowToolkit, {
         .pipe(Effect.mapError(failure));
     }),
   ),
-  t3_workflow_update: McpToolAccess.actsAsCaller((input) =>
+  t3_workflow_update: McpToolAccess.actsAsRefinementCaller((input) =>
     Effect.gen(function* () {
       return yield* (yield* WorkflowService.WorkflowService)
         .agentUpdate(yield* caller, input)
         .pipe(Effect.mapError(failure));
     }),
   ),
-  t3_workflow_result: McpToolAccess.actsAsCaller((input) =>
+  t3_workflow_result: McpToolAccess.actsAsRefinementCaller((input) =>
     Effect.gen(function* () {
       return yield* (yield* WorkflowService.WorkflowService)
         .submitResult(yield* caller, input.result)

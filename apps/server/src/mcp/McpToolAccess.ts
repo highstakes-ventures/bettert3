@@ -20,6 +20,7 @@ import { resolveInteractionMode, resolveRuntimeMode } from "./OrchestratorMcpSer
 import {
   assertFullAccess,
   assertLiveCaller,
+  assertWorkflowWritable,
   assertTargetWithinLimits,
   type Caller,
   loadCaller,
@@ -117,15 +118,17 @@ const refuseReadOnlyClient = McpInvocationContext.McpInvocationContext.pipe(
  * capability of their own (preview, device, worktree, pull requests) check it
  * themselves.
  */
-const writingCaller = refuseReadOnlyClient.pipe(
+const liveCaller = refuseReadOnlyClient.pipe(
   Effect.andThen(loadCaller()),
   Effect.tap(assertLiveCaller),
 );
+const writingCaller = liveCaller.pipe(Effect.tap(assertWorkflowWritable));
 
 /** The same, for tools whose only capability is controlling threads. */
 const orchestratingCaller = refuseReadOnlyClient.pipe(
   Effect.andThen(readCaller()),
   Effect.tap(assertLiveCaller),
+  Effect.tap(assertWorkflowWritable),
 );
 
 const requireThreadCaller = McpInvocationContext.McpInvocationContext.pipe(
@@ -149,6 +152,15 @@ export const actsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A,
   declare((params: P) =>
     requireThreadCaller.pipe(
       Effect.flatMap(() => writingCaller),
+      Effect.flatMap(() => handle(params)),
+    ),
+  );
+
+/** Owned ticket updates and research tasks whose services enforce their narrower scope. */
+export const actsAsRefinementCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
+  declare((params: P) =>
+    requireThreadCaller.pipe(
+      Effect.flatMap(() => liveCaller),
       Effect.flatMap(() => handle(params)),
     ),
   );

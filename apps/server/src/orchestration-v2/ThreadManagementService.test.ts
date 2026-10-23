@@ -25,6 +25,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
@@ -359,11 +360,17 @@ it.effect("inherits the machine value when the project has no override", () => {
 });
 
 const layerDispatchChokepointTest =
-  (settingsLayer: ReturnType<typeof ServerSettings.layerTest>) => (dispatched: Array<string>) =>
+  (settingsLayer: ReturnType<typeof ServerSettings.layerTest>) =>
+  (dispatched: Array<string>, refinement = false) =>
     ThreadManagementService.layer.pipe(
       Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
       Layer.provide(
         Layer.mock(Orchestrator.OrchestratorV2)({
+          getThreadShell: (id) =>
+            Effect.succeed({
+              ...liveThreadShell(id),
+              ...(refinement ? { ticketWorkflowId: "ticket" } : {}),
+            }),
           getThreadRecords: () =>
             Effect.succeed({
               thread: {
@@ -386,6 +393,61 @@ const layerDispatchChokepointTest =
       Layer.provide(settingsLayer),
       Layer.provideMerge(layerReceiptsTest),
     );
+
+it.effect("refinement rejects writable and worktree delegation before committing a child", () => {
+  const dispatched: Array<string> = [];
+  return Effect.gen(function* () {
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const command = {
+      type: "delegated_task.request" as const,
+      createdBy: "agent" as const,
+      creationSource: "mcp" as const,
+      parentThreadId: ThreadId.make("refinement"),
+      parentRunId: RunId.make("run"),
+      parentNodeId: NodeId.make("node"),
+      task: "Implement this with Opus",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex_work"), model: "test" },
+    };
+    for (const request of [
+      { runtimeMode: "full-access" as const, interactionMode: "default" as const },
+      {
+        runtimeMode: "approval-required" as const,
+        interactionMode: "plan" as const,
+        workspaceStrategy: { type: "worktree" as const, baseRef: "main" },
+      },
+    ]) {
+      const outcome = yield* threads
+        .dispatch({
+          ...command,
+          ...request,
+          commandId: CommandId.make(`refuse:${dispatched.length}:${request.runtimeMode}`),
+        })
+        .pipe(Effect.result);
+      expect(outcome._tag).toBe("Failure");
+      if (outcome._tag === "Failure") {
+        expect(outcome.failure._tag).toBe("OrchestratorCommandRejectedError");
+      }
+      expect(dispatched).toEqual([]);
+    }
+    yield* threads.dispatch({
+      ...command,
+      commandId: CommandId.make("research"),
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+    });
+    expect(dispatched).toEqual(["delegated_task.request"]);
+  }).pipe(
+    Effect.provide(
+      layerDispatchChokepointTest(
+        ServerSettings.layerTest({
+          providerInstances: {
+            [ProviderInstanceId.make("codex_work")]: { driver: "codex", enabled: true },
+          },
+        }),
+      )(dispatched, true),
+    ),
+  );
+});
 
 it.effect(
   "the dispatch chokepoint refuses a continuation message.dispatch on a project-disabled instance before reaching the orchestrator",

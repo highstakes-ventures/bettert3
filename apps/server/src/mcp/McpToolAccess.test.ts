@@ -23,6 +23,8 @@ const supervisedThreadId = ThreadId.make("thread:supervised");
 const planThreadId = ThreadId.make("thread:plan");
 const fullAccessThreadId = ThreadId.make("thread:full-access");
 const endedThreadId = ThreadId.make("thread:ended");
+const refinementThreadId = ThreadId.make("thread:refinement");
+const researchThreadId = ThreadId.make("thread:research");
 
 const shells = new Map([
   [supervisedThreadId, liveThreadShell(supervisedThreadId, { runtimeMode: "approval-required" })],
@@ -32,6 +34,18 @@ const shells = new Map([
   ],
   [fullAccessThreadId, liveThreadShell(fullAccessThreadId)],
   [endedThreadId, liveThreadShell(endedThreadId, { activeRunId: null })],
+  [refinementThreadId, { ...liveThreadShell(refinementThreadId), ticketWorkflowId: "ticket" }],
+  [
+    researchThreadId,
+    {
+      ...liveThreadShell(researchThreadId),
+      lineage: {
+        rootThreadId: refinementThreadId,
+        parentThreadId: refinementThreadId,
+        relationshipToParent: "subagent" as const,
+      },
+    },
+  ],
 ]);
 
 const threadCaller = (threadId: ThreadId): McpInvocationContext.McpInvocationScope => ({
@@ -86,6 +100,7 @@ const ProbeToolkit = Toolkit.make(
   Tool.make("reads", probe),
   Tool.make("reads_as_caller", probe),
   Tool.make("acts_as_caller", probe),
+  Tool.make("acts_as_refinement_caller", probe),
   Tool.make("writes", probe),
   Tool.make("writes_with_capability", probe),
   Tool.make("writes_threads", {
@@ -106,6 +121,7 @@ const probeHandlers: McpToolAccess.Handlers<typeof ProbeToolkit.tools> = {
   reads: McpToolAccess.reads(() => ran),
   reads_as_caller: McpToolAccess.readsAsCaller(() => ran),
   acts_as_caller: McpToolAccess.actsAsCaller(() => ran),
+  acts_as_refinement_caller: McpToolAccess.actsAsRefinementCaller(() => ran),
   writes: McpToolAccess.writes(() => ran),
   writes_with_capability: McpToolAccess.writesWithCapability(() => ran),
   writes_threads: McpToolAccess.writesThreads(
@@ -153,6 +169,7 @@ export const refusedAtCompileTime = () => {
       reads: unchecked,
       reads_as_caller: unchecked,
       acts_as_caller: unchecked,
+      acts_as_refinement_caller: unchecked,
       writes: unchecked,
       writes_with_capability: unchecked,
       writes_threads: unchecked,
@@ -194,6 +211,8 @@ const supervised = threadCaller(supervisedThreadId);
 const plan = threadCaller(planThreadId);
 const fullAccess = threadCaller(fullAccessThreadId);
 const ended = threadCaller(endedThreadId);
+const refinement = threadCaller(refinementThreadId);
+const research = threadCaller(researchThreadId);
 const supervisedClient = clientCaller("approval-required");
 const fullAccessClient = clientCaller("full-access");
 const readOnlyClient = clientCaller("read-only");
@@ -201,6 +220,19 @@ const readOnlyClient = clientCaller("read-only");
 const previewOnly = { ...fullAccess, capabilities: new Set(["preview"] as const) };
 
 it.effect.each([
+  // A full-access composer setting cannot turn refinement into implementation.
+  ["reads", refinement, {}, "ran"],
+  ["acts_as_refinement_caller", refinement, {}, "ran"],
+  ["acts_as_refinement_caller", ended, {}, "parent_not_active"],
+  ["acts_as_refinement_caller", readOnlyClient, {}, "thread_credential_required"],
+  ["acts_as_caller", refinement, {}, "capability_denied"],
+  ["writes", refinement, {}, "capability_denied"],
+  ["writes_with_capability", refinement, {}, "capability_denied"],
+  ["writes_threads", refinement, { threadId: fullAccessThreadId }, "capability_denied"],
+  ["starts_threads", refinement, { runtimeMode: "full-access" }, "capability_denied"],
+  ["writes_environment", refinement, {}, "capability_denied"],
+  ["acts_as_caller", research, {}, "capability_denied"],
+  ["starts_threads", research, {}, "capability_denied"],
   // Reads are open to every caller, even one whose turn ended.
   ["reads", ended, {}, "ran"],
   ["reads", supervisedClient, {}, "ran"],

@@ -1223,6 +1223,7 @@ export const CLAUDE_T3_MCP_TOOL_TIMEOUT_MS = 65 * 60 * 1_000;
 export function claudeMcpQueryOverrides(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly readOnlySandbox: boolean;
+  readonly ticketRefinement?: boolean;
   readonly allowedTools?: ReadonlyArray<string>;
 }): {
   readonly allowedTools?: ReadonlyArray<string>;
@@ -1233,7 +1234,21 @@ export function claudeMcpQueryOverrides(input: {
     return input.allowedTools === undefined ? {} : { allowedTools: input.allowedTools };
   }
   const mcpAllowedTools = input.readOnlySandbox
-    ? CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS
+    ? [
+        ...CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+        ...(input.ticketRefinement
+          ? [
+              "mcp__t3-code__t3_workflow_read",
+              "mcp__t3-code__t3_workflow_search",
+              "mcp__t3-code__t3_workflow_ticket_read",
+              "mcp__t3-code__t3_workflow_update",
+              "mcp__t3-code__t3_workflow_result",
+              "mcp__t3-code__delegate_task",
+              "mcp__t3-code__task_status",
+              "mcp__t3-code__task_cancel",
+            ]
+          : []),
+      ]
     : [CLAUDE_T3_MCP_TOOL_WILDCARD];
   return {
     allowedTools: Array.from(new Set([...(input.allowedTools ?? []), ...mcpAllowedTools])),
@@ -1833,10 +1848,14 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
   const permissionMode = permissionModeForClaudeRuntimePolicy(runtimePolicy);
   const readOnlyTools =
     sandboxPolicyKindForClaudeRuntimePolicy(runtimePolicy) === "readOnly"
-      ? CLAUDE_READ_ONLY_ALLOWED_TOOLS
+      ? [
+          ...CLAUDE_READ_ONLY_ALLOWED_TOOLS,
+          ...(runtimePolicy.ticketRefinement ? ["WebSearch", "WebFetch"] : []),
+        ]
       : undefined;
   const allowedTools =
-    readOnlyTools !== undefined && readOnlyPolicyAllowsGlobalReads(runtimePolicy)
+    readOnlyTools !== undefined &&
+    (runtimePolicy.ticketRefinement || readOnlyPolicyAllowsGlobalReads(runtimePolicy))
       ? readOnlyTools
       : undefined;
   // acceptEdits approves edits before the callback runs; everything else it
@@ -8442,6 +8461,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             mcpSession: yield* mcpSessions.read(turnInput.threadId),
             readOnlySandbox:
               sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly",
+            ticketRefinement: turnInput.runtimePolicy.ticketRefinement === true,
             ...(queryPolicy.allowedTools === undefined
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),

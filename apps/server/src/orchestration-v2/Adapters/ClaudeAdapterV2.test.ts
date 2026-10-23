@@ -634,6 +634,41 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     ]);
   });
 
+  it("lets enforced refinement research and save its ticket without exposing coding tools", () => {
+    const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+      runtimeMode: "full-access",
+      interactionMode: "plan",
+      cwd: "/workspace",
+      approvalPolicy: "never",
+      sandboxPolicy: { type: "readOnly" },
+      ticketRefinement: true,
+    });
+    const query = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(policy);
+    const tools = Array.isArray(query.tools) ? query.tools : [];
+    assert.includeMembers(tools, ["Read", "WebSearch", "WebFetch"]);
+    assert.notInclude(tools, "Bash");
+    assert.notInclude(tools, "Edit");
+    assert.isFalse(query.installPermissionCallback);
+    const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
+      mcpSession: mcpSessionFor(ThreadId.make("refinement")),
+      readOnlySandbox: true,
+      ticketRefinement: true,
+    });
+    assert.includeMembers(
+      [...(overrides.allowedTools ?? [])],
+      [
+        "mcp__t3-code__t3_workflow_update",
+        "mcp__t3-code__t3_workflow_result",
+        "mcp__t3-code__delegate_task",
+      ],
+    );
+    assert.notInclude([...(overrides.allowedTools ?? [])], "mcp__t3-code__t3_thread_launch");
+    assert.notInclude(
+      [...(overrides.allowedTools ?? [])],
+      ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD,
+    );
+  });
+
   it("keys live-query reuse on the MCP-derived pre-approvals", () => {
     const threadId = ThreadId.make("thread-claude-mcp-query-key");
     const mcpSession = mcpSessionFor(threadId);

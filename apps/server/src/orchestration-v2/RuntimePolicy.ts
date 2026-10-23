@@ -14,6 +14,8 @@ import * as Schema from "effect/Schema";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as ProjectionStore from "./ProjectionStore.ts";
+import * as WorkflowThreadPolicy from "../workflows/WorkflowThreadPolicy.ts";
 
 /**
  * ERRORS
@@ -31,7 +33,19 @@ export class RuntimePolicyResolveError extends Schema.TaggedError<RuntimePolicyR
   }
 }
 
-export const RuntimePolicyV2Error = Schema.Union([RuntimePolicyResolveError]);
+export class RefinementProviderUnsupportedError extends Schema.TaggedError<RefinementProviderUnsupportedError>()(
+  "RefinementProviderUnsupportedError",
+  { providerInstanceId: ProviderInstanceId },
+) {
+  override get message(): string {
+    return "This provider cannot enforce read-only ticket refinement. Use a local Codex or Claude provider for this chat.";
+  }
+}
+
+export const RuntimePolicyV2Error = Schema.Union([
+  RuntimePolicyResolveError,
+  RefinementProviderUnsupportedError,
+]);
 export type RuntimePolicyV2Error = typeof RuntimePolicyV2Error.Type;
 
 export const RuntimePolicyV2Override = Schema.Struct({
@@ -88,15 +102,48 @@ function providerRuntimeMode(
 export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
   never,
-  ProjectStore.ProjectStoreV2 | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | ProjectStore.ProjectStoreV2
+  | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | ProjectionStore.ProjectionStoreV2
 > = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
     const projects = yield* ProjectStore.ProjectStoreV2;
     const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         const instance = yield* providerInstances.getInstance(input.modelSelection.instanceId);
+        const refinement = yield* Effect.gen(function* () {
+          const shell = yield* projections.getThreadShell(input.thread.id);
+          if (shell === null && input.thread.lineage.parentThreadId === null)
+            return yield* new WorkflowThreadPolicy.WorkflowThreadPolicyError({
+              threadId: input.thread.id,
+            });
+          // A delegated child's first dispatch resolves policy before its creation commits.
+          return yield* WorkflowThreadPolicy.resolve(
+            shell ?? input.thread,
+            projections.getThreadShell,
+          );
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new RuntimePolicyResolveError({
+                projectId: input.thread.projectId,
+                providerInstanceId: input.modelSelection.instanceId,
+                cause,
+              }),
+          ),
+        );
+        if (
+          refinement &&
+          (input.thread.runDestination !== undefined ||
+            (instance?.driverKind !== "codex" && instance?.driverKind !== "claude"))
+        ) {
+          return yield* new RefinementProviderUnsupportedError({
+            providerInstanceId: input.modelSelection.instanceId,
+          });
+        }
         if (input.thread.runDestination && instance?.driverKind !== "codex") {
           return yield* new RuntimePolicyResolveError({
             projectId: input.thread.projectId,
@@ -139,6 +186,14 @@ export const layerFromProjectStore: Layer.Layer<
           interactionMode: input.thread.interactionMode,
           cwd,
           ...(input.thread.runDestination ? { runDestination: input.thread.runDestination } : {}),
+          ...(refinement
+            ? {
+                ticketRefinement: true,
+                interactionMode: "plan",
+                approvalPolicy: "never",
+                sandboxPolicy: { type: "readOnly" },
+              }
+            : {}),
         });
       }),
     });

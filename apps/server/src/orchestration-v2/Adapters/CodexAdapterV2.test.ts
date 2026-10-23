@@ -471,6 +471,43 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
+  it.effect(
+    "keeps refinement read-only while permitting its owned ticket update in plan mode",
+    () =>
+      Effect.gen(function* () {
+        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId: "native-refinement",
+          codexInput: [{ type: "text", text: "implement it" }],
+          runtimePolicy: {
+            runtimeMode: "full-access",
+            interactionMode: "plan",
+            cwd: null,
+            ticketRefinement: true,
+            approvalPolicy: "never",
+            sandboxPolicy: { type: "readOnly" },
+          },
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.4",
+          },
+          hasT3Mcp: true,
+        });
+
+        assert.equal(params.approvalPolicy, "never");
+        assert.equal(params.sandboxPolicy?.type, "readOnly");
+        assert.equal(params.collaborationMode?.mode, "plan");
+        assert.equal(params.additionalContext?.t3_ticket_refinement?.kind, "application");
+        assert.include(
+          params.additionalContext?.t3_ticket_refinement?.value ?? "",
+          "allowed in Plan mode",
+        );
+        assert.include(
+          params.additionalContext?.t3_ticket_refinement?.value ?? "",
+          "t3_workflow_update",
+        );
+      }),
+  );
+
   it.effect("sends MCP app model context as untrusted Codex context", () =>
     Effect.gen(function* () {
       const policy = { runtimeMode: "full-access", interactionMode: "default", cwd: null } as const;

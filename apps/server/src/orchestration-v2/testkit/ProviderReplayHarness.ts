@@ -269,6 +269,7 @@ export function layerWithRegistry<Error>(
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    readonly runtimePolicyLayer?: Layer.Layer<RuntimePolicy.RuntimePolicyV2>;
     // Start continuation runs for provider wake turns, as the live runtime does.
     // Off by default: most fixtures record no wake turn.
     readonly runContinuationWorker?: boolean;
@@ -288,11 +289,12 @@ export function layerWithRegistry<Error>(
     ServerConfig.ServerConfig,
     makeReplayServerConfig(scenario.name).pipe(Effect.orDie),
   ).pipe(Layer.provide(NodeServices.layer));
+  const layerBaseRuntime = options.runtimePolicyLayer ?? RuntimePolicy.layer;
   const layerRuntime =
     scenario.runtimePolicyOverride === undefined
-      ? RuntimePolicy.layer
+      ? layerBaseRuntime
       : RuntimePolicy.layerWithOverride(scenario.runtimePolicyOverride).pipe(
-          Layer.provide(RuntimePolicy.layer),
+          Layer.provide(layerBaseRuntime),
         );
   const layerDatabase = options.databaseLayer ?? SqlitePersistence.layerMemory;
   // One queue shared by the adapters, the orchestrator, and the worker, like

@@ -6,6 +6,7 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
+import * as WorkflowThreadPolicy from "./WorkflowThreadPolicy.ts";
 
 it.effect("hides scanner history while keeping ticket preparation and other chats observable", () =>
   Effect.gen(function* () {
@@ -106,6 +107,19 @@ it.effect("hides scanner history while keeping ticket preparation and other chat
       (yield* store.getSettlementCandidates(ThreadId.make("prepare")))[0]
         ?.ticketPreparationComplete,
     ).toBe(true);
+    // Approval and completion never turn the original chat into the implementation chat.
+    for (const phase of ["review", "approved", "implementing", "done", "rejected"]) {
+      yield* sql`UPDATE workflow_runs SET run_json = json_set(run_json, '$.phase', ${phase}) WHERE id = 'ticket'`;
+      for (const name of ["prepare", "implementation", "manual"]) {
+        const shell = yield* store.getThreadShell(ThreadId.make(name));
+        expect(shell).not.toBeNull();
+        if (shell !== null) {
+          expect(yield* WorkflowThreadPolicy.resolve(shell, store.getThreadShell)).toBe(
+            name === "prepare",
+          );
+        }
+      }
+    }
     yield* sql`UPDATE workflow_runs
         SET run_json = json_set(run_json, '$.error', 'Linear unavailable') WHERE id = 'ticket'`;
     expect(

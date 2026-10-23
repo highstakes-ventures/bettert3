@@ -775,9 +775,23 @@ export function buildCodexTurnStartParams(input: {
           )
         : undefined;
     const additionalContext =
-      t3Context === undefined && Object.keys(appContext).length === 0
+      t3Context === undefined &&
+      Object.keys(appContext).length === 0 &&
+      !input.runtimePolicy.ticketRefinement
         ? undefined
-        : { ...t3Context, ...appContext };
+        : {
+            ...t3Context,
+            ...appContext,
+            ...(input.runtimePolicy.ticketRefinement
+              ? {
+                  t3_ticket_refinement: {
+                    kind: "application" as const,
+                    value:
+                      "This is a ticket refinement chat. Repository changes and implementation launches are disabled, including through research children. The only permitted mutation is saving this chat's ticket through t3_workflow_update or t3_workflow_result, which is allowed in Plan mode. Keep research delegation read-only in the shared checkout. When refinement is ready, ask the user to use Approve to start its separate implementation chat.",
+                  },
+                }
+              : {}),
+          };
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined

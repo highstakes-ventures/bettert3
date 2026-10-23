@@ -18,6 +18,8 @@ import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
+import * as ProjectionStore from "./ProjectionStore.ts";
+import { liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
 
 const projectId = ProjectId.make("project:runtime-policy");
 const providerInstanceId = ProviderInstanceId.make("codex");
@@ -30,8 +32,9 @@ function makeThread(input: {
   readonly now: DateTime.Utc;
   readonly worktreePath: string | null;
   readonly runtimeMode?: RuntimeMode;
+  readonly threadId?: ThreadId;
 }): OrchestrationV2AppThread {
-  const threadId = ThreadId.make("thread:runtime-policy");
+  const threadId = input.threadId ?? ThreadId.make("thread:runtime-policy");
   return {
     createdBy: "user",
     creationSource: "web",
@@ -79,6 +82,28 @@ const providerInstanceFor = (instanceId: ProviderInstanceId) =>
 
 const layerTest = RuntimePolicy.layerFromProjectStore.pipe(
   Layer.provide(
+    Layer.mock(ProjectionStore.ProjectionStoreV2)({
+      getThreadShell: (id) =>
+        Effect.succeed(
+          id === "thread:missing"
+            ? null
+            : {
+                ...liveThreadShell(id),
+                ...(id === "thread:refinement" ? { ticketWorkflowId: "ticket" } : {}),
+                ...(id === "thread:research"
+                  ? {
+                      lineage: {
+                        rootThreadId: ThreadId.make("thread:refinement"),
+                        parentThreadId: ThreadId.make("thread:refinement"),
+                        relationshipToParent: "subagent" as const,
+                      },
+                    }
+                  : {}),
+              },
+        ),
+    }),
+  ),
+  Layer.provide(
     Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
       getInstance: (instanceId) => Effect.succeed(providerInstanceFor(instanceId)),
       listInstances: Effect.succeed([]),
@@ -111,6 +136,64 @@ const layerTest = RuntimePolicy.layerFromProjectStore.pipe(
 );
 
 it.layer(layerTest)("RuntimePolicyV2", (it) => {
+  it.effect("refuses a missing root instead of assuming it is unrestricted", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const result = yield* policy
+        .resolve({
+          thread: makeThread({
+            now,
+            threadId: ThreadId.make("thread:missing"),
+            worktreePath: null,
+          }),
+          modelSelection,
+        })
+        .pipe(Effect.result);
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") assert.equal(result.failure._tag, "RuntimePolicyResolveError");
+    }),
+  );
+  it.effect(
+    "refuses a provider switch that cannot enforce refinement instead of granting writes",
+    () =>
+      Effect.gen(function* () {
+        const policy = yield* RuntimePolicy.RuntimePolicyV2;
+        const now = yield* DateTime.now;
+        const outcome = yield* policy
+          .resolve({
+            thread: makeThread({
+              now,
+              threadId: ThreadId.make("thread:refinement"),
+              worktreePath: null,
+            }),
+            modelSelection: { instanceId: grokInstanceId, model: "test" },
+          })
+          .pipe(Effect.result);
+        assert.equal(outcome._tag, "Failure");
+        if (outcome._tag === "Failure")
+          assert.equal(outcome.failure._tag, "RefinementProviderUnsupportedError");
+      }),
+  );
+  it.effect("keeps refinement and its research children read-only despite full access", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      for (const id of ["thread:refinement", "thread:research"]) {
+        const resolved = yield* policy.resolve({
+          thread: makeThread({
+            now,
+            threadId: ThreadId.make(id),
+            worktreePath: null,
+            runtimeMode: "full-access",
+          }),
+          modelSelection,
+        });
+        assert.equal(resolved.approvalPolicy, "never");
+        assert.deepEqual(resolved.sandboxPolicy, { type: "readOnly" });
+      }
+    }),
+  );
   it.effect("uses the project root for local-checkout threads", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicy.RuntimePolicyV2;
