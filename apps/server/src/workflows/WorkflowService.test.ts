@@ -138,6 +138,7 @@ const harness = Effect.gen(function* () {
   const gitCalls: ReadonlyArray<string>[] = [];
   const shells = new Map<ThreadId, OrchestrationV2ThreadShell>();
   const shellReads: ThreadId[] = [];
+  const searches: Array<{ teamId: string; query: string }> = [];
   const switches = {
     failDecision: false,
     loseDecisionResponse: false,
@@ -235,6 +236,11 @@ const harness = Effect.gen(function* () {
     Layer.mock(Linear.LinearClient)({
       connected: Effect.succeed(true),
       connection: () => Effect.succeed(connection),
+      search: (teamId, query) =>
+        Effect.sync(() => {
+          searches.push({ teamId, query });
+          return { candidates: [], hasMore: false };
+        }),
       read: (id) =>
         Effect.suspend(() =>
           tickets.has(id)
@@ -329,6 +335,7 @@ const harness = Effect.gen(function* () {
     settings,
     shells,
     shellReads,
+    searches,
     tickets,
     launches,
     decisions,
@@ -836,6 +843,77 @@ it.effect("keeps one canonical issue owner when duplicate intakes merge", () =>
   }).pipe(Effect.scoped),
 );
 
+it.effect(
+  "scopes candidate searches and fresh selected reads to the caller's configured team",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      const run = yield* h.prepare("idea");
+      const selected = makeTicket("selected");
+      h.tickets.set(selected.id, selected);
+      expect(yield* h.service.agentSearch(run.threadId!, "Performance")).toEqual({
+        candidates: [],
+        hasMore: false,
+      });
+      expect(h.searches).toEqual([{ teamId: "team", query: "Performance" }]);
+      expect(yield* h.service.agentReadTicket(run.threadId!, selected.id)).toEqual(selected);
+      h.tickets.set(selected.id, {
+        ...selected,
+        description: "Fresh evidence",
+        updatedAt: "revision-2",
+      });
+      const current = yield* h.service.agentReadTicket(run.threadId!, selected.id);
+      expect(current.description).toBe("Fresh evidence");
+      expect(current.updatedAt).toBe("revision-2");
+      expect((yield* h.service.agentRead(run.threadId!)).detail.ticket?.id).toBe(run.issueId);
+      h.tickets.set(selected.id, { ...selected, teamId: "other-team" });
+      yield* h.service.agentReadTicket(run.threadId!, selected.id).pipe(Effect.flip);
+      yield* h.service
+        .agentReadTicket(ThreadId.make("unrelated-thread"), run.issueId!)
+        .pipe(Effect.flip);
+      expect(h.switches.saves).toBe(1);
+      expect(h.decisions).toEqual([]);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("rejects binding a selected candidate with an absent or stale full-read revision", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    yield* h.service.intake({ projectId, requestId: "idea", text: "One request" });
+    yield* h.service.resume();
+    const run = (yield* h.service.list(projectId)).runs[0]!;
+    const selected = makeTicket("selected");
+    h.tickets.set(selected.id, selected);
+    const read = yield* h.service.agentReadTicket(run.threadId!, selected.id);
+    h.tickets.set(selected.id, { ...selected, updatedAt: "revision-2" });
+    yield* h.service
+      .submitResult(run.threadId!, {
+        type: "prepared",
+        ticket: draft,
+        existingIssueId: selected.id,
+      })
+      .pipe(Effect.flip);
+    yield* h.service
+      .submitResult(run.threadId!, {
+        type: "prepared",
+        ticket: draft,
+        existingIssueId: selected.id,
+        expectedUpdatedAt: read.updatedAt,
+      })
+      .pipe(Effect.flip);
+    expect(h.switches.saves).toBe(0);
+    const current = yield* h.service.agentReadTicket(run.threadId!, selected.id);
+    yield* h.service.submitResult(run.threadId!, {
+      type: "prepared",
+      ticket: draft,
+      existingIssueId: current.id,
+      expectedUpdatedAt: current.updatedAt,
+    });
+    expect(h.switches.saves).toBe(1);
+    expect((yield* h.service.read(run.id)).ticket?.id).toBe(selected.id);
+  }).pipe(Effect.scoped),
+);
+
 it.effect("rejects a merge owned by another project's implementation before changing Linear", () =>
   Effect.gen(function* () {
     const h = yield* harness;
@@ -924,10 +1002,20 @@ it.effect(
       expect((yield* restored.agentRead(pending.threadId!)).detail.ticket?.description).toBe(
         "Human's newer scope",
       );
+      const current = yield* restored.agentReadTicket(pending.threadId!, live.id);
+      // A partial-save correction cannot switch to a new issue identity.
+      yield* restored
+        .submitResult(pending.threadId!, {
+          type: "prepared",
+          ticket: draft,
+          existingIssueId: "replacement",
+          expectedUpdatedAt: current.updatedAt,
+        })
+        .pipe(Effect.flip);
       yield* restored.submitResult(pending.threadId!, {
         type: "prepared",
-        existingIssueId: live.id,
-        expectedUpdatedAt: "human-revision",
+        existingIssueId: current.id,
+        expectedUpdatedAt: current.updatedAt,
         ticket: { ...draft, description: "Human's newer scope with the reconciled request" },
       });
       expect(h.tickets.get(live.id)?.description).toBe(

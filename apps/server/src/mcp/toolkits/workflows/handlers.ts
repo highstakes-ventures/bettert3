@@ -26,6 +26,13 @@ export const layer = McpToolAccess.toLayer(WorkflowToolkit, {
         .pipe(Effect.mapError(failure));
     }),
   ),
+  t3_workflow_ticket_read: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      return yield* (yield* WorkflowService.WorkflowService)
+        .agentReadTicket(yield* caller, input.issueId)
+        .pipe(Effect.mapError(failure));
+    }),
+  ),
   t3_workflow_update: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       return yield* (yield* WorkflowService.WorkflowService)

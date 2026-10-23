@@ -15,6 +15,7 @@ import {
   type WorkflowDetail,
   type WorkflowListResult,
   type WorkflowTicketUpdateInput,
+  type WorkflowSearchResult,
 } from "@t3tools/contracts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as Performance from "@t3tools/workflows/performance";
@@ -94,7 +95,11 @@ export class WorkflowService extends Context.Service<
     readonly agentSearch: (
       threadId: ThreadId,
       query: string,
-    ) => Effect.Effect<ReadonlyArray<WorkflowTicket>, WorkflowError>;
+    ) => Effect.Effect<WorkflowSearchResult, WorkflowError>;
+    readonly agentReadTicket: (
+      threadId: ThreadId,
+      issueId: string,
+    ) => Effect.Effect<WorkflowTicket, WorkflowError>;
     readonly agentUpdate: (
       threadId: ThreadId,
       input: WorkflowTicketUpdateInput,
@@ -1041,6 +1046,17 @@ const make = Effect.gen(function* () {
         Effect.flatMap((record) => requireConfiguration(record.projectId)),
         Effect.flatMap((config) => linear.search(config.linearTeamId, query)),
       ),
+    agentReadTicket: (threadId, issueId) =>
+      Effect.gen(function* () {
+        const record = yield* callerRecord(threadId);
+        const config = yield* requireConfiguration(record.projectId);
+        const ticket = yield* linear.read(issueId);
+        if (ticket.teamId !== config.linearTeamId)
+          return yield* new WorkflowError({
+            message: "This issue belongs to another Linear team.",
+          });
+        return ticket;
+      }),
     agentUpdate: (threadId, input) =>
       Effect.gen(function* () {
         const draft = input.ticket;

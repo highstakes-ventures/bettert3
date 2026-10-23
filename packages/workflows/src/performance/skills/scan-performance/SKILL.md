@@ -20,6 +20,12 @@ Consider repeated work, query and transport volume, blocking callbacks,
 render/update cost, allocation or retention, contention, and input growth where
 they apply. Distinguish a user-visible symptom from its suspected cause.
 
+Search results are bounded candidates. Select plausible issue IDs and call
+`t3_workflow_ticket_read` before comparing complete evidence or ruling out a
+duplicate. `descriptionTruncated` marks incomplete context. If `hasMore` is true,
+refine the query before treating the search as sufficient. Keep candidate excerpts
+distinct from complete ticket descriptions, comments, and resources.
+
 ## Establish the evidence
 
 Reuse existing traces, profiles, benchmark results, and repository checks first.

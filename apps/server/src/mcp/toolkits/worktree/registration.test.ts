@@ -147,6 +147,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("delegate_task");
       expect(toolNames).toContain("t3_workflow_read");
       expect(toolNames).toContain("t3_workflow_search");
+      expect(toolNames).toContain("t3_workflow_ticket_read");
       expect(toolNames).toContain("t3_workflow_update");
       expect(toolNames).toContain("t3_workflow_result");
 

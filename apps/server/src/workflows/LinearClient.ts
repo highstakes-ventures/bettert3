@@ -1,5 +1,8 @@
 import {
   WorkflowError,
+  WorkflowSearchResult,
+  WORKFLOW_SEARCH_LIMIT,
+  WORKFLOW_CANDIDATE_CONTEXT_CODE_POINTS,
   type WorkflowConnection,
   type WorkflowTicket,
   type WorkflowTicketDraft,
@@ -64,6 +67,12 @@ const Issue = Schema.Struct({
   comments: page(Comment),
   attachments: page(Resource),
 });
+const Candidate = Schema.Struct({
+  ...Reference.fields,
+  description: Schema.NullOr(Schema.String),
+  team: Schema.Struct({ id: Schema.String }),
+});
+const decodeSearchResult = Schema.decodeUnknownEffect(WorkflowSearchResult);
 const projectFields = "id name teams { nodes { id name } } initiatives { nodes { id name } }";
 const referenceFields = "id identifier title url state { id type }";
 const pageFields = "pageInfo { hasNextPage endCursor }";
@@ -103,7 +112,7 @@ export class LinearClient extends Context.Service<
     readonly search: (
       teamId: string,
       query: string,
-    ) => Effect.Effect<ReadonlyArray<WorkflowTicket>, WorkflowError>;
+    ) => Effect.Effect<WorkflowSearchResult, WorkflowError>;
     readonly save: (input: {
       id: string;
       teamId: string;
@@ -493,7 +502,7 @@ const make = Effect.gen(function* () {
     save,
     search: (teamId, query) =>
       request(
-        "query($filter:IssueFilter!){issues(first:30,filter:$filter){nodes{id}}}",
+        `query($filter:IssueFilter!){issues(first:${WORKFLOW_SEARCH_LIMIT},filter:$filter){nodes{${referenceFields} description team{id}} pageInfo{hasNextPage}}}`,
         {
           filter: {
             team: { id: { eq: teamId } },
@@ -504,11 +513,43 @@ const make = Effect.gen(function* () {
           },
         },
         Schema.Struct({
-          issues: Schema.Struct({ nodes: Schema.Array(Schema.Struct({ id: Schema.String })) }),
+          issues: Schema.Struct({
+            nodes: Schema.Array(Candidate).check(Schema.isMaxLength(WORKFLOW_SEARCH_LIMIT)),
+            pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+          }),
         }),
       ).pipe(
         Effect.flatMap((data) =>
-          Effect.forEach(data.issues.nodes, (issue) => read(issue.id), { concurrency: 3 }),
+          decodeSearchResult({
+            hasMore: data.issues.pageInfo.hasNextPage,
+            candidates: data.issues.nodes.map((issue) => {
+              const description = issue.description ?? "";
+              const points = Array.from(description);
+              // RegExp indices refer to the original text, even when case folding changes length.
+              const match = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "iu").exec(
+                description,
+              );
+              const matchOffset = match ? Array.from(description.slice(0, match.index)).length : 0;
+              const start = Math.max(
+                0,
+                Math.min(matchOffset - 200, points.length - WORKFLOW_CANDIDATE_CONTEXT_CODE_POINTS),
+              );
+              return {
+                ...reference(issue),
+                stateId: issue.state.id,
+                teamId: issue.team.id,
+                descriptionExcerpt: points
+                  .slice(start, start + WORKFLOW_CANDIDATE_CONTEXT_CODE_POINTS)
+                  .join(""),
+                descriptionTruncated: points.length > WORKFLOW_CANDIDATE_CONTEXT_CODE_POINTS,
+              };
+            }),
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new WorkflowError({ message: "Linear returned invalid search candidates.", cause }),
+            ),
+          ),
         ),
       ),
     decide: (id, stateId, projectId) =>

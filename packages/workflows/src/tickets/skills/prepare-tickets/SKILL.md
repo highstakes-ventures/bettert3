@@ -28,7 +28,14 @@ technical finding still needs a concrete consequence and checkable outcome.
 
 ## Resolve the native ticket data
 
-Search existing tickets with `t3_workflow_search`. Compare requested outcomes,
+Search existing tickets with `t3_workflow_search`. Results are candidates with
+bounded `descriptionExcerpt`, `descriptionTruncated`, and `hasMore`. Select plausible
+IDs, then call `t3_workflow_ticket_read` for each selected issue. Compare its fresh
+complete description, comments, resources, labels, and both blocker directions
+before binding or excluding a duplicate. Use broader or narrower searches when
+`hasMore` is true. Candidate context cannot establish complete evidence.
+
+Compare requested outcomes,
 affected behavior, and evidence before deciding that two requests are duplicates.
 When the workflow supports reusing an existing issue, preserve its unique details
 and use its current revision. Existing-issue binding does not itself perform a
@@ -62,7 +69,7 @@ queue; do not substitute a prose dependency list for native relations.
 
 Submit `t3_workflow_result` with `type: prepared` and the supported ticket fields.
 When reusing an issue, supply `existingIssueId` and its current `expectedUpdatedAt`.
-If a save conflicts or partially succeeds, inspect the current ticket and correct
+If a save conflicts or partially succeeds, read the current ticket with `t3_workflow_ticket_read` and correct
 the same issue using its fresh revision. Do not create a replacement by default.
 
 Do not split one request into multiple tickets during preparation. Splitting is

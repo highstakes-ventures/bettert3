@@ -85,6 +85,33 @@ export const WorkflowTicket = Schema.Struct({
   ),
 });
 export type WorkflowTicket = typeof WorkflowTicket.Type;
+export const WORKFLOW_SEARCH_LIMIT = 30;
+export const WORKFLOW_CANDIDATE_CONTEXT_CODE_POINTS = 1_200;
+// Candidates deliberately omit a writable revision and complete-ticket collections.
+export const WorkflowTicketCandidate = Schema.Struct({
+  ...WorkflowIssueReference.fields,
+  identifier: Schema.String.check(Schema.isMaxLength(150)),
+  title: Schema.String.check(Schema.isMaxLength(500)),
+  url: Schema.String.check(Schema.isMaxLength(2_048)),
+  stateType: Schema.String.check(Schema.isMaxLength(100)),
+  stateId: Id,
+  teamId: Id,
+  descriptionExcerpt: Schema.String.check(
+    Schema.makeFilter(
+      (value) => Array.from(value).length <= WORKFLOW_CANDIDATE_CONTEXT_CODE_POINTS,
+    ),
+  ),
+  descriptionTruncated: Schema.Boolean,
+});
+export type WorkflowTicketCandidate = typeof WorkflowTicketCandidate.Type;
+export const WorkflowSearchResult = Schema.Struct({
+  candidates: Schema.Array(WorkflowTicketCandidate).check(
+    Schema.isMaxLength(WORKFLOW_SEARCH_LIMIT),
+  ),
+  hasMore: Schema.Boolean,
+});
+export type WorkflowSearchResult = typeof WorkflowSearchResult.Type;
+export const WorkflowTicketReadInput = Schema.Struct({ issueId: Id });
 export const WorkflowTicketDraft = Schema.Struct({
   title: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
   description: Text,

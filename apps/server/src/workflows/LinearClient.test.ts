@@ -1,11 +1,20 @@
 import { expect, it } from "@effect/vitest";
-import type { WorkflowTicketDraft } from "@t3tools/contracts";
+import {
+  WorkflowSearchResult,
+  WorkflowTicket,
+  WORKFLOW_CANDIDATE_CONTEXT_CODE_POINTS,
+  type WorkflowTicketDraft,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as Linear from "./LinearClient.ts";
+
+const isSearchResult = Schema.is(WorkflowSearchResult);
+const isCompleteTicket = Schema.is(WorkflowTicket);
 
 const page = (nodes: unknown[], more = false, cursor: string | null = null) => ({
   nodes,
@@ -136,6 +145,217 @@ it.effect("loads native incoming blockers and all paginated ticket details", () 
     expect(f.calls[1]?.variables.after).toBe("next-page");
   }).pipe(Effect.provide(f.layer));
 });
+
+it.effect.each([0, 17, 30])(
+  "searches %i candidates in one bounded, team-scoped request",
+  (count) => {
+    const f = fixture((query, variables) => {
+      expect(query).toContain("issues(first:30,filter:$filter)");
+      expect(query).not.toMatch(/issue\(id:|comments|attachments|labels|relations|after:/);
+      expect(variables.filter).toEqual({
+        team: { id: { eq: "team" } },
+        or: [
+          { title: { containsIgnoreCase: "PeRfOrMaNcE" } },
+          { description: { containsIgnoreCase: "PeRfOrMaNcE" } },
+        ],
+      });
+      return {
+        data: {
+          issues: {
+            nodes: Array.from({ length: count }, (_, index) => ({
+              ...issue(String(index)),
+              description: index === 0 ? null : "Performance context",
+            })),
+            pageInfo: { hasNextPage: count === 30 },
+          },
+        },
+      };
+    });
+    return Effect.gen(function* () {
+      const result = yield* (yield* Linear.LinearClient).search("team", "PeRfOrMaNcE");
+      expect(result.candidates).toHaveLength(count);
+      expect(result.hasMore).toBe(count === 30);
+      expect(f.calls).toHaveLength(1);
+      expect(isSearchResult(result)).toBe(true);
+      if (count > 0) {
+        expect(result.candidates[0]).toEqual({
+          id: "0",
+          identifier: "REC-0",
+          title: "0",
+          url: "https://linear.app/issue/0",
+          teamId: "team",
+          stateId: "todo",
+          stateType: "unstarted",
+          descriptionExcerpt: "",
+          descriptionTruncated: false,
+        });
+        expect(isCompleteTicket(result.candidates[0])).toBe(false);
+      }
+    }).pipe(Effect.provide(f.layer));
+  },
+);
+
+it.effect(
+  "bounds Unicode context around a literal description match and marks incomplete evidence",
+  () => {
+    const description = "😀".repeat(2_000) + "PeRfOrMaNcE [a+b]" + "界".repeat(2_000);
+    const f = fixture(() => ({
+      data: {
+        issues: {
+          nodes: [
+            { ...issue("long"), description },
+            { ...issue("exact"), description: "😀".repeat(WORKFLOW_CANDIDATE_CONTEXT_CODE_POINTS) },
+          ],
+          pageInfo: { hasNextPage: false },
+        },
+      },
+    }));
+    return Effect.gen(function* () {
+      const result = yield* (yield* Linear.LinearClient).search("team", "performance [a+b]");
+      const long = result.candidates[0]!;
+      expect(Array.from(long.descriptionExcerpt)).toHaveLength(
+        WORKFLOW_CANDIDATE_CONTEXT_CODE_POINTS,
+      );
+      expect(long.descriptionExcerpt).toContain("PeRfOrMaNcE [a+b]");
+      expect(long.descriptionExcerpt.isWellFormed()).toBe(true);
+      expect(long.descriptionTruncated).toBe(true);
+      expect(result.candidates[1]?.descriptionTruncated).toBe(false);
+      expect(
+        isSearchResult({
+          ...result,
+          candidates: [{ ...long, descriptionExcerpt: "😀".repeat(1_201) }],
+        }),
+      ).toBe(false);
+      expect(f.calls).toHaveLength(1);
+    }).pipe(Effect.provide(f.layer));
+  },
+);
+
+it.effect(
+  "keeps search requests and compact UTF-8 result bytes independent of comment volume",
+  () =>
+    Effect.gen(function* () {
+      const results: Array<{ requests: number; bytes: number }> = [];
+      for (const commentCount of [0, 250]) {
+        const f = fixture((query) => {
+          expect(query).not.toContain("comments");
+          return {
+            data: {
+              issues: {
+                nodes: Array.from({ length: 30 }, (_, index) => ({
+                  ...issue(String(index)),
+                  description: "Useful context 😀",
+                  comments: page(
+                    Array.from({ length: commentCount }, (_, i) => ({
+                      id: String(i),
+                      body: "Evidence".repeat(1_000),
+                      createdAt: "2026-10-23",
+                      user: null,
+                    })),
+                    commentCount > 100,
+                    "more-comments",
+                  ),
+                })),
+                pageInfo: { hasNextPage: false },
+              },
+            },
+          };
+        });
+        const result = yield* Linear.LinearClient.pipe(
+          Effect.flatMap((client) => client.search("team", "context")),
+          Effect.provide(f.layer),
+        );
+        results.push({
+          requests: f.calls.length,
+          bytes: new TextEncoder().encode(JSON.stringify(result)).byteLength,
+        });
+      }
+      expect(results[0]?.requests).toBe(1);
+      expect(results[1]).toEqual(results[0]);
+    }),
+);
+
+it.effect("reads selected evidence afresh and drains every collection without mutations", () => {
+  const description = "Full description 😀".repeat(500);
+  const collections = {
+    labels: [{ id: "label", name: "Label" }],
+    relations: [{ id: "out", type: "blocks", relatedIssue: reference("dependent") }],
+    inverseRelations: [{ id: "in", type: "blocks", issue: reference("prerequisite") }],
+    comments: [
+      { id: "comment", body: "Full comment".repeat(500), createdAt: "2026-10-23", user: null },
+    ],
+    attachments: [{ title: "Proof", url: "https://example.com/proof" }],
+  };
+  let revision = "before-search";
+  const f = fixture((query, variables) => {
+    if (query.includes("issues(first:"))
+      return {
+        data: {
+          issues: {
+            nodes: [{ ...issue("selected"), description }],
+            pageInfo: { hasNextPage: false },
+          },
+        },
+      };
+    expect(variables.id).toBe("selected");
+    expect(query).not.toContain("mutation");
+    if (query.includes("$after")) {
+      const name = Object.keys(collections).find((key) => query.includes(`${key}(first:`))!;
+      expect(variables.after).toBe(`${name}-next`);
+      return { data: { issue: { [name]: page(collections[name as keyof typeof collections]) } } };
+    }
+    return {
+      data: {
+        issue: {
+          ...issue("selected"),
+          description,
+          updatedAt: revision,
+          ...Object.fromEntries(
+            Object.keys(collections).map((name) => [name, page([], true, `${name}-next`)]),
+          ),
+        },
+      },
+    };
+  });
+  return Effect.gen(function* () {
+    const client = yield* Linear.LinearClient;
+    yield* client.search("team", "description");
+    revision = "fresh-selected-revision";
+    const selected = yield* client.read("selected");
+    expect(selected.updatedAt).toBe(revision);
+    expect(selected.description).toBe(description);
+    expect(selected.labels).toEqual(collections.labels);
+    expect(selected.comments[0]?.body).toBe(collections.comments[0]!.body);
+    expect(selected.resources).toEqual(collections.attachments);
+    expect(selected.blockedBy.map((value) => value.id)).toEqual(["prerequisite"]);
+    expect(selected.blocks.map((value) => value.id)).toEqual(["dependent"]);
+    expect(f.calls).toHaveLength(7);
+    revision = "newer-selected-revision";
+    expect((yield* client.read("selected")).updatedAt).toBe(revision);
+  }).pipe(Effect.provide(f.layer));
+});
+
+it.effect.each(["missing cursor", "repeated cursor", "missing collection"])(
+  "fails incomplete selected reads with %s",
+  (failure) => {
+    const f = fixture((query) => ({
+      data: {
+        issue: query.includes("$after")
+          ? failure === "missing collection"
+            ? {}
+            : { comments: page([], true, "next") }
+          : {
+              ...issue("ticket"),
+              comments: page([], true, failure === "missing cursor" ? null : "next"),
+            },
+      },
+    }));
+    return Effect.gen(function* () {
+      yield* (yield* Linear.LinearClient).read("ticket").pipe(Effect.flip);
+      expect(f.calls.every((call) => !call.query.includes("mutation"))).toBe(true);
+    }).pipe(Effect.provide(f.layer));
+  },
+);
 
 it.effect("recovers an ambiguous issue create by the persisted UUID without duplicating it", () => {
   const f = fixture((query) => {

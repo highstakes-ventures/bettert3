@@ -5,6 +5,8 @@ import {
   WorkflowDetail,
   WorkflowRun,
   WorkflowTicket,
+  WorkflowSearchResult,
+  WorkflowTicketReadInput,
   WorkflowTicketUpdateInput,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
@@ -33,9 +35,16 @@ export const WorkflowToolkit = Toolkit.make(
   Tool.make("t3_workflow_search", {
     ...common,
     description:
-      "Search real Linear tickets in this workflow's team for duplicates and native prerequisites.",
+      "Search this workflow's Linear team by case-insensitive title or description. Returns at most 30 candidates with up to 1,200 Unicode code points of description context. descriptionTruncated marks incomplete context; hasMore signals more matches. Read selected IDs with t3_workflow_ticket_read before comparing or binding. Candidates are not complete tickets and have no writable revision.",
     parameters: Schema.Struct({ query: TrimmedNonEmptyString.check(Schema.isMaxLength(500)) }),
-    success: Schema.Array(WorkflowTicket),
+    success: WorkflowSearchResult,
+  }).annotate(Tool.Readonly, true),
+  Tool.make("t3_workflow_ticket_read", {
+    ...common,
+    description:
+      "Read one selected Linear issue in this workflow's configured team, without mutation. Returns its fresh complete description, all comments, resources, labels and both blocker directions across every page. Before binding, compare this evidence and use its id as existingIssueId and updatedAt as expectedUpdatedAt. Re-read after a conflict and retain the same issue identity.",
+    parameters: WorkflowTicketReadInput,
+    success: WorkflowTicket,
   }).annotate(Tool.Readonly, true),
   Tool.make("t3_workflow_update", {
     ...common,

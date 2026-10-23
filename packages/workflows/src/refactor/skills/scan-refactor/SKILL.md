@@ -12,6 +12,12 @@ Read repository instructions, current code and callers, relevant tests, and
 bounded history where useful. Use `t3_workflow_read` and `t3_workflow_search`
 for context and existing-ticket discovery. Record the inspected revision.
 
+Search results are bounded candidates. Select plausible issue IDs and call
+`t3_workflow_ticket_read` before comparing complete evidence or ruling out a
+duplicate. `descriptionTruncated` marks incomplete context. If `hasMore` is true,
+refine the query before treating the search as sufficient. Keep candidate excerpts
+distinct from complete ticket descriptions, comments, and resources.
+
 ## Investigate maintenance cost
 
 Start with repeated repairs, one rule changed in several places, unclear
