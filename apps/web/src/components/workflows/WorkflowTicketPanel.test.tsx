@@ -196,6 +196,82 @@ const expire = async () =>
     await vi.advanceTimersByTimeAsync(5_000);
   });
 const currentQueue = () => refinementQueueWithPendingDecisions(environmentId, state.queue);
+it.each(["Approve", "Reject", "Delay"])(
+  "%s opens the next ticket before closing the mounted ticket surface",
+  async (label) => {
+    const ref = scopeThreadRef(environmentId, ThreadId.make("chat-current"));
+    useRightPanelStore.getState().openTicket(ref, "current", projectId);
+    function CurrentTicketSurface() {
+      const activeSurface = useRightPanelStore(
+        (store) => store.byThreadKey["test:chat-current"]?.activeSurfaceId,
+      );
+      return activeSurface === "ticket:current" ? (
+        <WorkflowTicketPanel
+          environmentId={environmentId}
+          projectId={projectId}
+          runId="current"
+          cwd="/project"
+        />
+      ) : null;
+    }
+    let finishNext!: (result: unknown) => void;
+    state.unsettle.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishNext = resolve;
+        }),
+    );
+    await act(async () => {
+      renderer = create(<CurrentTicketSurface />);
+    });
+    await click(label);
+    expect(state.navigate).not.toHaveBeenCalled();
+    await act(async () => finishNext({ _tag: "Success", value: undefined }));
+    expect(state.navigate).toHaveBeenCalledExactlyOnceWith({
+      to: "/$environmentId/$threadId",
+      params: { environmentId, threadId: "chat-next" },
+    });
+    expect(useRightPanelStore.getState().byThreadKey["test:chat-next"]?.activeSurfaceId).toBe(
+      "ticket:next",
+    );
+    expect(renderer!.root.findAllByType("h2")).toHaveLength(0);
+    await expire();
+    expect(state.decision).toHaveBeenCalledOnce();
+    expect(state.settle).toHaveBeenCalledExactlyOnceWith({
+      environmentId,
+      input: { threadId: "chat-current" },
+    });
+  },
+);
+
+it("keeps the restored ticket surface when Undo finishes during the next navigation", async () => {
+  const ref = scopeThreadRef(environmentId, ThreadId.make("chat-current"));
+  useRightPanelStore.getState().openTicket(ref, "current", projectId);
+  let finishNext!: () => void;
+  state.navigate.mockImplementation(({ params }: { params: { threadId: string } }) =>
+    params.threadId === "chat-next"
+      ? new Promise<void>((resolve) => {
+          finishNext = resolve;
+        })
+      : Promise.resolve(),
+  );
+  await render();
+  await approve();
+  await act(async () => {
+    await useThreadUndoNotice.getState().notice!.undo();
+  });
+  await act(async () => finishNext());
+  expect(useRightPanelStore.getState().byThreadKey["test:chat-current"]?.activeSurfaceId).toBe(
+    "ticket:current",
+  );
+  expect(state.navigate).toHaveBeenLastCalledWith({
+    to: "/$environmentId/$threadId",
+    params: { environmentId, threadId: "chat-current" },
+  });
+  await expire();
+  expect(state.decision).not.toHaveBeenCalled();
+});
+
 it.each(["Success", "Failure"])(
   "waits for sidebar restoration before advancing after a decision when restoration returns %s",
   async (_tag) => {

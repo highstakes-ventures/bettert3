@@ -139,6 +139,11 @@ function Ticket({
     });
     if (!staged) return;
     const nextQueue = refinementQueueWithPendingDecisions(environmentId, queue);
+    const next = nextQueue.find((run) => run.threadId !== null);
+    // Closing this surface unmounts the hook and cancels its pending navigation.
+    if (next && !(await openRun(next))) return;
+    // Undo can restore this surface while navigation finishes.
+    if (!hasPendingWorkflowDecision(environmentId, detail.run)) return;
     if (detail.run.threadId)
       useRightPanelStore
         .getState()
@@ -146,9 +151,7 @@ function Ticket({
           scopeThreadRef(environmentId, detail.run.threadId),
           `ticket:${detail.run.id}`,
         );
-    const next = nextQueue.find((run) => run.threadId !== null);
-    if (next) await openRun(next);
-    else refresh();
+    if (!next) refresh();
   }
   return (
     <RefinementPanel
