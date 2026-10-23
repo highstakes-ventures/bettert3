@@ -15,7 +15,10 @@ define another template or a competing specification in comments or local notes.
 Keep the shared brief's compact, mostly ASD-STE100 writing style. Replace settled
 questions with decisions instead of appending the discussion. Link detailed
 investigation and test procedures; keep the agreed requirements and design in
-the ticket.
+the ticket. Keep requirements and proof in bullets or compact tables. Add design
+as a responsibility map and call flow, with short notes for decisions the diagrams
+cannot express. Remove repeated facts before saving instead of expanding each
+section into prose.
 
 ## Resolve the design together
 

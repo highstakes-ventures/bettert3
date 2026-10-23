@@ -21,10 +21,13 @@ Preserve unique facts and requirements from the intake. Do not invent screenshot
 user requirements, APIs, or completed validation to fill the template.
 
 Read [the shared ticket brief](references/ticket-brief.md) and produce its
-preparation form. Apply its compact, mostly ASD-STE100 writing style.
-Keep detailed diagnosis in linked evidence instead of copying it into the brief.
-Use a small flow diagram where it explains the proposed behavior. A scanner's
-technical finding still needs a concrete consequence and checkable outcome.
+preparation form. Use mostly ASD-STE100-style English. Keep context to one or two
+short sentences; write requirements, proof, and open decisions as bullets or
+compact tables. Use a small flow for sequence and branches without repeating it
+in prose. Before submission, remove repeated facts and check the shared brief's
+output shapes. Keep detailed diagnosis in linked evidence, but retain requirements
+and blockers in the ticket. A scanner's technical finding still needs a concrete
+consequence and checkable outcome.
 
 ## Resolve the native ticket data
 

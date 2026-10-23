@@ -13,6 +13,8 @@ import { useState } from "react";
 import { serverEnvironment } from "~/state/server";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { useOrchestrationCommand } from "~/state/use-orchestration-command";
+import { threadEnvironment } from "~/state/threads";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -98,6 +100,7 @@ function Ticket({
   );
   const canDecide = useAtomValue(serverEnvironment.decideWorkflow.permissionAtom(environmentId));
   const decide = useAtomCommand(serverEnvironment.decideWorkflow);
+  const settle = useOrchestrationCommand(threadEnvironment.settle, "settle rejected ticket chat");
   const navigate = useNavigate();
   async function submit(decision: WorkflowDecisionInput["decision"]) {
     if (busy || !canDecide || !detail.ticket || (decision === "approve" && !selectedTarget)) return;
@@ -106,8 +109,8 @@ function Ticket({
       environmentId,
       run: detail.run,
       decision,
-      commit: () =>
-        decide({
+      commit: async () => {
+        const result = await decide({
           environmentId,
           input: {
             runId: detail.run.id,
@@ -115,7 +118,17 @@ function Ticket({
             expectedUpdatedAt: ticket.updatedAt,
             targetProjectId: selectedTarget?.id ?? null,
           },
-        }),
+        });
+        if (
+          decision === "reject" &&
+          result._tag === "Success" &&
+          result.value.phase === "rejected" &&
+          detail.run.threadId
+        ) {
+          await settle({ environmentId, input: { threadId: detail.run.threadId } });
+        }
+        return result;
+      },
       restore: async () => {
         refresh();
         if (!detail.run.threadId) return;
