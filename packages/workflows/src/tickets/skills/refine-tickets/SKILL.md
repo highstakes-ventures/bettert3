@@ -6,8 +6,11 @@ description: Collaboratively turn a prepared BetterT3 Linear ticket into an appr
 # Refine tickets
 
 Work with the user in the existing chat while maintaining the actual Linear
-ticket. Frontload investigation and decisions so an implementation agent can
-deliver one coherent PR without another planning conversation.
+ticket. This is the in-depth discussion the refinement queue is for. Start from
+the preparation research, relevant context, proposed ordering, and dependencies.
+Discuss material open choices here rather than requiring answers during
+automatic preparation. Investigate and resolve decisions so an implementation
+agent can deliver one coherent PR without another planning conversation.
 
 Read `t3_workflow_read` and [the shared ticket brief](../prepare-tickets/references/ticket-brief.md).
 Keep its preparation form current and complete its refinement extension. Do not

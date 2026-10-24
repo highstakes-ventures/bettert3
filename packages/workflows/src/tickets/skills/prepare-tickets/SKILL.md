@@ -1,20 +1,27 @@
 ---
 name: prepare-tickets
-description: Normalize varied intake into a grounded BetterT3 Linear ticket with a PR-style brief, target project, metadata, duplicate handling, and native dependencies. Use during automatic preparation, before collaborative refinement. Do not split requests or approve implementation.
+description: Research and organize varied intake into a grounded BetterT3 Linear proposal with relevant context, target project, metadata, duplicate handling, and native dependencies. Use during automatic preparation, before collaborative refinement. Do not split requests or approve implementation.
 ---
 
 # Prepare tickets
 
 Turn an incoming note, existing issue, or scanner finding into a useful proposal
 for human refinement. Preparation improves the request without deciding missing
-product requirements on the user's behalf.
+product requirements on the user's behalf. A prepared ticket need not yet be
+implementable; the refinement queue is where the user discusses it in depth.
+Do not ask design questions, use user-input tools, or wait for the user's
+answers during automatic preparation. Record decisions for refinement and
+continue background work that does not depend on those answers.
 
 ## Establish the facts
 
 Use `t3_workflow_read` for this task's current ticket, configuration, available
 Linear projects, and labels. Read the original request, supplied evidence, and
 relevant repository instructions. Inspect the nearest implementation and callers
-before prescribing a solution. Record the inspected revision with source evidence.
+before suggesting a solution. Research relevant documentation and primary
+sources where available. Resolve factual questions independently and record
+the inspected revision and decisive evidence. Keep researched options distinct
+from agreed requirements and architecture decisions.
 
 Distinguish observed behavior, supported inference, and unanswered questions.
 Preserve unique facts and requirements from the intake. Do not invent screenshots, timing,
@@ -51,9 +58,9 @@ and maintenance to the goal they support. Do not propose a project for each
 feature or a separate project based on the Maintenance / Improvement type.
 Its native status can be Backlog. The configured `intakeProjectId` is
 an inbox, never a delivery target. Use the project's native ID, not the BetterT3
-workspace project's ID. If none fits, keep preparation unfinished and ask the
-user to resolve the destination. Do not submit a null or intake target, invent
-a project, or select an unrelated one to complete preparation.
+workspace project's ID. If none fits, keep preparation unfinished and report the
+missing delivery destination as a setup blocker. Do not submit a null or intake
+target, invent a project, or select an unrelated one to complete preparation.
 
 Assign exactly one native ticket-type label from the available metadata:
 
@@ -64,7 +71,8 @@ Use the label's actual ID. Preserve other useful labels. A new capability is a
 Feature; broken agreed behavior is a Bug; upkeep, refactors, and performance work
 are Maintenance / Improvement. Classify the requested work, not its source.
 Never force a development type onto marketing. If no supported type fits, keep
-preparation unfinished and ask for a suitable type instead of inventing one.
+preparation unfinished and report the missing supported type as a setup
+blocker instead of inventing one.
 Initiatives are out of scope. Milestones are optional.
 
 Resolve priority from available metadata. Preserve other existing properties
@@ -80,8 +88,9 @@ actually requires the missing FX capability.
 Use `dependencyEvidence` as supported by the toolkit. For an unmanaged code
 prerequisite, supply a landed full commit SHA only after verifying it. Do not
 invent a SHA or label code work external to bypass the prerequisite check.
-Leave unproved prerequisites and cycles as explicit questions. Code orders the
-queue; do not substitute a prose dependency list for native relations.
+Leave unproved prerequisites and cycles as explicit decisions for refinement.
+Use evidenced native dependencies and available priority for ordering. Code
+orders the queue; do not substitute a prose dependency list for native relations.
 
 ## Hand off to refinement
 
@@ -93,7 +102,9 @@ the same issue using its fresh revision. Do not create a replacement by default.
 Do not split one request into multiple tickets during preparation. Splitting is
 a collaborative refinement decision. Do not implement code, change repository
 files, approve, reject, delay, launch dependent work, or create schedules.
-The existing conversation continues under `refine-tickets` when the user joins.
+Return the saved ticket link and preparation status without opening a question.
+The existing conversation continues under `refine-tickets` when the user reaches
+it in the queue. Product and architecture discussion starts there.
 
 ## Sources
 

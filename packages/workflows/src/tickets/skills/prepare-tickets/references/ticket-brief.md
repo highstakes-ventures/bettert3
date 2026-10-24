@@ -1,7 +1,9 @@
 # Shared ticket brief
 
-Preparation writes a PR-style proposal. Refinement maintains that proposal and
-adds the implementation design. Keep the same description authoritative throughout.
+Preparation researches context, ordering, and dependencies and writes a grounded
+proposal for the refinement queue. It does not need an implementable design.
+Refinement is the in-depth discussion that settles choices and adds the
+implementation design. Keep the same description authoritative throughout.
 Scale supporting detail to the change rather than filling every section mechanically.
 
 ## Writing style and length
@@ -29,6 +31,11 @@ the brief; they do not replace its agreed requirements or architecture decisions
 
 ## Preparation form
 
+Use known requirements and researched options. Mark suggestions as provisional
+and record missing product or design decisions for refinement. Do not ask the
+user to complete these sections during preparation or invent answers to fill
+the template. Continue independent background research before handing off.
+
 | Section                  | Output shape                     | Required content                                                                                        |
 | ------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | Problem                  | One or two short sentences       | Current behavior, concrete consequence, decisive evidence.                                              |
@@ -39,7 +46,7 @@ the brief; they do not replace its agreed requirements or architecture decisions
 | Acceptance criteria      | Bullets or compact table         | One independently checkable outcome per item, including important preserved behavior.                   |
 | Verification             | Short bullets                    | Owning layer, decisive stimulus and expected result, necessary checks. Link detailed procedures.        |
 | Evidence                 | Links with short qualifiers      | Inspected revision, real screenshots, examples or traces. Distinguish observed evidence from proposals. |
-| Open decisions, if any   | Short bullets                    | Material uncertainty that needs a decision or more evidence.                                            |
+| Open decisions, if any   | Short bullets                    | Unresolved choices for refinement; research factual gaps where possible.                                |
 
 Omit empty or redundant sections. Do not add a search transcript, a duplicate-check
 essay, or a prose copy of native metadata. Report a material duplicate or dependency
