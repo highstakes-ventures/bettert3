@@ -139,7 +139,8 @@ a shortcut.
 ## Snooze a thread
 
 Press `mod+alt+s` to open the active thread's snooze menu. Change the shortcut
-under **Thread: Snooze** in **Settings → Keybindings**.
+under **Thread: Snooze** in **Settings → Keybindings**. Hold `mod` to show
+the shortcut on the active thread when snooze is available.
 With the snooze menu open, `mod+1`, `mod+2`, and `mod+3` choose its first three
 visible durations. The remaining preset durations also have numbered shortcuts.
 The sidebar clock button opens the same menu. Escape closes it without snoozing.

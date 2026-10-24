@@ -374,13 +374,15 @@ function settledTimeLabel(thread: SidebarThreadSummary): string {
 // out "Working") nor shift any layout when it appears. pointer-events-none
 // so it never swallows clicks meant for the settle/un-settle buttons it
 // can overlap.
-function JumpHintBadge(props: { label: string }) {
+function ThreadShortcutHints(props: { jumpLabel: string | null; snoozeLabel: string | null }) {
+  if (!props.jumpLabel && !props.snoozeLabel) return null;
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute right-1.5 top-1/2 z-10 inline-flex h-5 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/95 px-1.5 font-mono text-3xs font-medium tracking-tight text-foreground shadow-sm"
+      className="pointer-events-none absolute right-1.5 top-1/2 z-10 inline-flex h-5 -translate-y-1/2 items-center gap-2 rounded-full border border-border/80 bg-background/95 px-1.5 font-mono text-3xs font-medium tracking-tight text-foreground shadow-sm"
     >
-      {props.label}
+      {props.jumpLabel}
+      {props.snoozeLabel ? <span>Snooze {props.snoozeLabel}</span> : null}
     </span>
   );
 }
@@ -1163,6 +1165,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   isActive: boolean;
   openPullRequestsInRightPanel: boolean;
   jumpLabel: string | null;
+  snoozeShortcutLabel: string | null;
   currentEnvironmentId: string | null;
   environmentLabel: string | null;
   environmentMachine: EnvironmentMachineKind;
@@ -1970,7 +1973,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               </span>
             )}
             {props.sweepAction !== null ? dragDestination : null}
-            {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+            <ThreadShortcutHints
+              jumpLabel={props.jumpLabel}
+              snoozeLabel={snoozeMenuOpen ? null : props.snoozeShortcutLabel}
+            />
           </TooltipTrigger>
           {detailsTooltip}
         </Tooltip>
@@ -2230,7 +2236,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               </span>
             </div>
           </div>
-          {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+          <ThreadShortcutHints
+            jumpLabel={props.jumpLabel}
+            snoozeLabel={snoozeMenuOpen ? null : props.snoozeShortcutLabel}
+          />
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>
@@ -5275,6 +5284,18 @@ export default function Sidebar() {
       },
     },
   );
+  const snoozeShortcutLabel =
+    canSnoozeRouteThread &&
+    !terminalFocused &&
+    keyboardSnoozeThread === null &&
+    !isCommandPaletteOpen() &&
+    !isModelPickerOpen() &&
+    (isMacPlatform(navigator.platform) ? shortcutModifiers.metaKey : shortcutModifiers.ctrlKey)
+      ? shortcutLabelForCommand(keybindings, "thread.snooze", {
+          platform: navigator.platform,
+          context: { terminalFocus: false, terminalOpen: routeTerminalOpen },
+        })
+      : null;
   useEffect(() => {
     updateThreadJumpHintsVisibility(shouldShowJumpHintsNow);
   }, [shouldShowJumpHintsNow, updateThreadJumpHintsVisibility]);
@@ -5677,6 +5698,9 @@ export default function Sidebar() {
                             openPullRequestsInRightPanel={routeThreadRef !== null}
                             jumpLabel={
                               showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
+                            }
+                            snoozeShortcutLabel={
+                              routeThreadKey === threadKey ? snoozeShortcutLabel : null
                             }
                             currentEnvironmentId={primaryEnvironmentId}
                             environmentLabel={
