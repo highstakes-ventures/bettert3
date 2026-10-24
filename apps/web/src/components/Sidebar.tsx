@@ -26,6 +26,7 @@ import {
 } from "./chat/threadContextDrag";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
+import { SnoozeMenu } from "./SnoozeMenu";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
@@ -303,7 +304,7 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "./ui/menu";
+import { MenuTrigger } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { MiddleTruncate } from "./ui/middle-truncate";
 import {
@@ -606,15 +607,8 @@ function SnoozeMenuButton(props: {
   onSnooze: (preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   timestampFormat: TimestampFormat;
 }) {
-  const { open, onOpenChange, onSnooze, timestampFormat } = props;
-  // Presets resolve at open time so "In 1 hour" is relative to the click,
-  // not to when the row mounted.
-  const presets = useMemo(
-    () => (open ? resolveSnoozePresets(new Date(), timestampFormat) : []),
-    [open, timestampFormat],
-  );
   return (
-    <Menu open={open} onOpenChange={onOpenChange}>
+    <SnoozeMenu {...props}>
       <Tooltip>
         <TooltipTrigger
           render={
@@ -635,31 +629,7 @@ function SnoozeMenuButton(props: {
         </TooltipTrigger>
         <TooltipPopup>Snooze thread</TooltipPopup>
       </Tooltip>
-      <MenuPopup side="bottom" align="end">
-        {presets.map((preset) => (
-          <MenuItem
-            key={preset.id}
-            onClick={(event) => {
-              event.stopPropagation();
-              onSnooze(preset);
-            }}
-          >
-            {preset.label}
-            <MenuShortcut>{preset.whenLabel}</MenuShortcut>
-          </MenuItem>
-        ))}
-        <MenuSeparator />
-        <MenuItem
-          onClick={async (event) => {
-            event.stopPropagation();
-            const choice = await requestCustomSnooze();
-            if (choice) onSnooze(choice);
-          }}
-        >
-          Custom…
-        </MenuItem>
-      </MenuPopup>
-    </Menu>
+    </SnoozeMenu>
   );
 }
 
@@ -2469,6 +2439,7 @@ export default function Sidebar() {
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const [keyboardSnoozeThread, setKeyboardSnoozeThread] = useState<ScopedThreadRef | null>(null);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -5205,9 +5176,28 @@ export default function Sidebar() {
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+  const canOperateRouteThread = useEnvironmentScope(
+    routeThreadRef?.environmentId ?? null,
+    AuthOrchestrationOperateScope,
+  );
+  const snoozeRouteThread = routeThreadRef ? readThreadShell(routeThreadRef) : null;
+  const canSnoozeRouteThread = Boolean(
+    routeThreadRef &&
+    snoozeRouteThread &&
+    canOperateRouteThread &&
+    serverConfigs.get(routeThreadRef.environmentId)?.environment.capabilities.threadSnooze ===
+      true &&
+    canSnooze(snoozeRouteThread, { now: new Date().toISOString() }),
+  );
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || isCommandPaletteOpen() || isModelPickerOpen()) {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        isCommandPaletteOpen() ||
+        isModelPickerOpen() ||
+        document.querySelector("[data-snooze-menu]")
+      ) {
         return;
       }
       const command = resolveShortcutCommand(event, keybindings, {
@@ -5220,6 +5210,13 @@ export default function Sidebar() {
           isDesktop: isElectron,
         },
       });
+      if (command === "thread.snooze") {
+        if (!routeThreadRef || !canSnoozeRouteThread) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setKeyboardSnoozeThread(routeThreadRef);
+        return;
+      }
       const navigateToThreadKey = (targetThreadKey: string | null) => {
         if (!targetThreadKey) return false;
         const targetThread = threadByKey.get(targetThreadKey);
@@ -5247,13 +5244,17 @@ export default function Sidebar() {
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, [
+    canSnoozeRouteThread,
     keybindings,
     navigateToThread,
     orderedThreadKeys,
     routeTerminalOpen,
     routeThreadKey,
+    routeThreadRef,
     threadByKey,
   ]);
+
+  useEffect(() => setKeyboardSnoozeThread(null), [routeThreadKey, canSnoozeRouteThread]);
 
   // Same predicate as v1: hints show only while the held modifiers exactly
   // match a thread-jump binding. Adding Shift (screenshots) or Alt no
@@ -5317,6 +5318,21 @@ export default function Sidebar() {
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
     <div className="contents" onMouseLeave={onMouseLeave}>
+      <SnoozeMenu
+        open={
+          keyboardSnoozeThread !== null &&
+          scopedThreadKey(keyboardSnoozeThread) === routeThreadKey &&
+          canSnoozeRouteThread
+        }
+        onOpenChange={(open) => {
+          if (!open) setKeyboardSnoozeThread(null);
+        }}
+        onSnooze={(preset) => {
+          if (keyboardSnoozeThread) attemptSnooze(keyboardSnoozeThread, preset);
+        }}
+        timestampFormat={timestampFormat}
+        anchor={headerSearchRef}
+      />
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent

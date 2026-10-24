@@ -1725,3 +1725,53 @@ describe("Usage shortcuts", () => {
     );
   });
 });
+
+describe("snooze shortcut", () => {
+  it.each(["MacIntel", "Win32", "Linux"])(
+    "opens snooze without replacing stash or settle on %s",
+    (platform) => {
+      const modifiers = { metaKey: platform === "MacIntel", ctrlKey: platform !== "MacIntel" };
+      for (const [extra, command] of [
+        [{ altKey: true }, "thread.snooze"],
+        [{}, "composer.stash"],
+        [{ shiftKey: true }, "thread.settle"],
+      ] as const) {
+        assert.strictEqual(
+          resolveShortcutCommand(
+            event({ key: "s", code: "KeyS", ...modifiers, ...extra }),
+            DEFAULT_RESOLVED_KEYBINDINGS,
+            { platform },
+          ),
+          command,
+        );
+      }
+      assert.isNull(
+        resolveShortcutCommand(
+          event({ key: "s", ...modifiers, altKey: true }),
+          DEFAULT_RESOLVED_KEYBINDINGS,
+          { platform, context: { terminalFocus: true } },
+        ),
+      );
+    },
+  );
+
+  it("can be rebound while preserving its original stash shortcut", () => {
+    const bindings = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([
+        { key: "mod+shift+y", command: "thread.snooze", when: "!terminalFocus" },
+      ]),
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "y", metaKey: true, shiftKey: true }), bindings, {
+        platform: "MacIntel",
+      }),
+      "thread.snooze",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "s", metaKey: true }), bindings, {
+        platform: "MacIntel",
+      }),
+      "composer.stash",
+    );
+  });
+});

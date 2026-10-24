@@ -136,6 +136,14 @@ The last rule whose key and condition both match wins, even if it belongs to a
 different command. Put a more specific rule after a general one when they share
 a shortcut.
 
+## Snooze a thread
+
+Press `mod+alt+s` to open the active thread's snooze menu. Change the shortcut
+under **Thread: Snooze** in **Settings → Keybindings**.
+With the snooze menu open, `mod+1`, `mod+2`, and `mod+3` choose its first three
+visible durations. The remaining preset durations also have numbered shortcuts.
+The sidebar clock button opens the same menu. Escape closes it without snoozing.
+
 ## Commands with special behavior
 
 `thread.stop` interrupts the running turn in the focused thread. It has no default

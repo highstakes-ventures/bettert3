@@ -8115,7 +8115,11 @@ export default function ChatView(props: ChatViewProps) {
         event.stopPropagation();
         return;
       }
-      if (!activeThreadId || isCommandPaletteOpen()) {
+      if (
+        !activeThreadId ||
+        isCommandPaletteOpen() ||
+        document.querySelector("[data-snooze-menu]")
+      ) {
         return;
       }
       const terminalFocusOwner = getTerminalFocusOwner();
