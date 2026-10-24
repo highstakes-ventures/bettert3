@@ -8,7 +8,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as WorkflowThreadPolicy from "./WorkflowThreadPolicy.ts";
 
-it.effect("hides scanner history while keeping ticket preparation and other chats observable", () =>
+it.effect("keeps ticket chats in the background until opened for refinement", () =>
   Effect.gen(function* () {
     const store = yield* ProjectionStore.ProjectionStoreV2;
     const sql = yield* SqlClient.SqlClient;
@@ -75,7 +75,7 @@ it.effect("hides scanner history while keeping ticket preparation and other chat
       Object.fromEntries(listed.map((thread) => [thread.id, thread.backgroundWorkflowId])),
     ).toEqual({
       scan: "daily-scan",
-      prepare: undefined,
+      prepare: "ticket",
       implementation: undefined,
       manual: undefined,
       sales: undefined,
@@ -100,6 +100,9 @@ it.effect("hides scanner history while keeping ticket preparation and other chat
         (yield* store.getSettlementCandidates(ThreadId.make("prepare")))[0]
           ?.ticketPreparationComplete,
       ).toBe(false);
+      expect((yield* store.getThreadShell(ThreadId.make("prepare")))?.backgroundWorkflowId).toBe(
+        "ticket",
+      );
     }
     yield* sql`UPDATE workflow_runs
         SET run_json = json_set(run_json, '$.phase', 'done') WHERE id = 'ticket'`;
@@ -151,6 +154,9 @@ it.effect("hides scanner history while keeping ticket preparation and other chat
         (yield* store.getSettlementCandidates(ThreadId.make("prepare")))[0]
           ?.latestUserAuthoredMessageAt,
       ).toEqual(createdBy === "system" ? null : now);
+      expect((yield* store.getThreadShell(ThreadId.make("prepare")))?.backgroundWorkflowId).toBe(
+        "ticket",
+      );
     }
     const plan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
       SELECT id FROM workflow_runs WHERE json_extract(run_json, '$.threadId') = 'scan'`;
@@ -159,6 +165,97 @@ it.effect("hides scanner history while keeping ticket preparation and other chat
         row.detail.includes("SEARCH workflow_runs USING INDEX workflow_runs_thread"),
       ),
     ).toBe(true);
+  }).pipe(
+    Effect.provide(ProjectionStore.layer.pipe(Layer.provideMerge(Sqlite.layerMemory))),
+    Effect.scoped,
+  ),
+);
+
+it.effect("reveals a ticket when refinement opens and keeps its settled history visible", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const sql = yield* SqlClient.SqlClient;
+    const now = yield* DateTime.now;
+    const threadId = ThreadId.make("refinement");
+    yield* store.apply({
+      id: EventId.make("create-refinement"),
+      type: "thread.created",
+      threadId,
+      occurredAt: now,
+      payload: {
+        id: threadId,
+        projectId: ProjectId.make("project"),
+        title: "Prepare a ticket",
+        createdBy: "system",
+        creationSource: "server",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+        runtimeMode: "auto",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+        forkedFrom: null,
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+        settledOverride: "settled",
+        settledAt: now,
+        lastVisitedAt: null,
+        deletedAt: null,
+      },
+    });
+    yield* sql`INSERT INTO workflow_runs (id, project_id, run_json)
+      VALUES ('ticket', 'project', ${JSON.stringify({ id: "ticket", kind: "tickets", threadId, phase: "preparing" })})`;
+    yield* store.apply({
+      id: EventId.make("visit-preparation"),
+      type: "thread.visited",
+      threadId,
+      occurredAt: now,
+      payload: { ...(yield* store.getThreadProjection(threadId)).thread, lastVisitedAt: now },
+    });
+    yield* sql`UPDATE workflow_runs SET run_json = json_set(run_json, '$.phase', 'review')
+      WHERE id = 'ticket'`;
+    expect((yield* store.getThreadShell(threadId))?.backgroundWorkflowId).toBe("ticket");
+    yield* store.apply({
+      id: EventId.make("open-refinement"),
+      type: "thread.unsettled",
+      threadId,
+      occurredAt: now,
+      payload: {
+        ...(yield* store.getThreadProjection(threadId)).thread,
+        settledOverride: "active",
+        settledAt: null,
+        unsettledAt: now,
+        refinementOpened: true,
+      },
+    });
+    expect((yield* store.getThreadShell(threadId))?.backgroundWorkflowId).toBeUndefined();
+    expect(
+      (yield* store.getShellSnapshot()).threads.find((thread) => thread.id === threadId)
+        ?.backgroundWorkflowId,
+    ).toBeUndefined();
+    yield* store.apply({
+      id: EventId.make("visit-refinement"),
+      type: "thread.visited",
+      threadId,
+      occurredAt: now,
+      payload: { ...(yield* store.getThreadProjection(threadId)).thread, lastVisitedAt: now },
+    });
+    yield* store.apply({
+      id: EventId.make("settle-refinement"),
+      type: "thread.settled",
+      threadId,
+      occurredAt: now,
+      payload: {
+        ...(yield* store.getThreadProjection(threadId)).thread,
+        settledOverride: "settled",
+        settledAt: now,
+        unsettledAt: null,
+      },
+    });
+    expect((yield* store.getThreadShell(threadId))?.backgroundWorkflowId).toBeUndefined();
   }).pipe(
     Effect.provide(ProjectionStore.layer.pipe(Layer.provideMerge(Sqlite.layerMemory))),
     Effect.scoped,

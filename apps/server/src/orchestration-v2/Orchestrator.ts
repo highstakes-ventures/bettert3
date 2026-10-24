@@ -2967,9 +2967,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           };
         }
         case "thread.unsettle": {
-          const alreadyPinnedActive = thread.settledOverride === "active";
+          const alreadyPinnedActive =
+            thread.settledOverride === "active" &&
+            (command.reason !== "refinement" || thread.refinementOpened === true);
           return {
             ...thread,
+            ...(command.reason === "refinement" ? { refinementOpened: true } : {}),
             settledOverride: "active",
             settledAt: null,
             unsettledAt: alreadyPinnedActive ? (thread.unsettledAt ?? null) : now,

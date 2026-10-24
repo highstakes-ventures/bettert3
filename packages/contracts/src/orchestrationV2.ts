@@ -405,6 +405,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   unsettledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
+  /** The user opened this ticket's chat for human refinement. Survives settlement. */
+  refinementOpened: Schema.optional(Schema.Boolean),
   snoozedUntil: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   /** Manual wakes restart inactivity without changing the sidebar's sort position. */
@@ -1945,7 +1947,7 @@ export type OrchestrationV2LatestVisibleMessageSummary =
 export const OrchestrationV2ThreadShell = Schema.Struct({
   /** Ticket preparation/refinement conversation, derived from its workflow record. */
   ticketWorkflowId: Schema.optional(TrimmedNonEmptyString),
-  /** Hidden scanner conversation owned by this workflow, derived from its record. */
+  /** Hidden scan or unopened ticket conversation, derived from its workflow. */
   backgroundWorkflowId: Schema.optional(TrimmedNonEmptyString),
   /** Actual attached runtime, not the thread's requested runDestination. */
   executionDestination: Schema.optional(Schema.NullOr(CodexCloudDestination)),
@@ -2795,7 +2797,7 @@ export const OrchestrationV2Command = Schema.Union([
     type: Schema.Literal("thread.unsettle"),
     commandId: CommandId,
     threadId: ThreadId,
-    reason: Schema.Literal("user"),
+    reason: Schema.Literals(["user", "refinement"]),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.snooze"),

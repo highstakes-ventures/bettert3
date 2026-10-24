@@ -370,7 +370,7 @@ it.each(["Success", "Failure"])(
     await approve();
     expect(state.unsettle).toHaveBeenCalledExactlyOnceWith({
       environmentId,
-      input: { threadId: "chat-next", reason: "user" },
+      input: { threadId: "chat-next", reason: "refinement" },
     });
     expect(state.navigate).not.toHaveBeenCalled();
     expect(state.decision).not.toHaveBeenCalled();
@@ -432,7 +432,7 @@ it("keeps the current ticket while the queue reorders and wraps after approving 
   });
   expect(state.unsettle).toHaveBeenCalledExactlyOnceWith({
     environmentId,
-    input: { threadId: "chat-priority-prerequisite", reason: "user" },
+    input: { threadId: "chat-priority-prerequisite", reason: "refinement" },
   });
   const ref = scopeThreadRef(environmentId, ThreadId.make("chat-priority-prerequisite"));
   expect(useRightPanelStore.getState().byThreadKey).toMatchObject({
@@ -629,8 +629,8 @@ it.each(["Approve", "Reject", "Delay"])(
     });
     expect(undoLatestThreadAction()).toBe(false);
     expect(state.unsettle.mock.calls.map(([request]) => request.input)).toEqual([
-      { threadId: label === "Delay" ? "chat-next" : "chat-dependent", reason: "user" },
-      { threadId: "chat-current", reason: "user" },
+      { threadId: label === "Delay" ? "chat-next" : "chat-dependent", reason: "refinement" },
+      { threadId: "chat-current", reason: "refinement" },
     ]);
     expect(state.navigate).toHaveBeenLastCalledWith(
       expect.objectContaining({ params: { environmentId, threadId: "chat-current" } }),

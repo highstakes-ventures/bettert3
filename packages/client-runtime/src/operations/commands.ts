@@ -92,7 +92,7 @@ export type UnarchiveThreadInput = ThreadCommandInput;
 export type SettleThreadInput = ThreadCommandInput;
 
 export interface UnsettleThreadInput extends ThreadCommandInput {
-  readonly reason: "user";
+  readonly reason: "user" | "refinement";
 }
 
 export interface PinThreadInput extends ThreadCommandInput {

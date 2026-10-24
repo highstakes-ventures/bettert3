@@ -1854,10 +1854,11 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         type: "thread.unsettle",
         commandId: CommandId.make("runtime-layer-lifecycle-auto-unsettle"),
         threadId,
-        reason: "user",
+        reason: "refinement",
       });
       // An explicit un-settle outranks the sweep even with a fresh snapshot.
       const postUnsettleProjection = yield* orchestrator.getThreadProjection(threadId);
+      assert.isTrue(postUnsettleProjection.thread.refinementOpened);
       const overriddenAutoSettle = yield* orchestrator
         .dispatch({
           type: "thread.auto-settle",
@@ -1876,6 +1877,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       const settledProjection = yield* orchestrator.getThreadProjection(threadId);
       assert.equal(settledProjection.thread.settledOverride, "settled");
       assert.isNotNull(settledProjection.thread.settledAt);
+      assert.isTrue(settledProjection.thread.refinementOpened);
 
       yield* orchestrator.dispatch({
         type: "thread.unsettle",

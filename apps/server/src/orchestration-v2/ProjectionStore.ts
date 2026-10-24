@@ -5364,7 +5364,16 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               (
                 SELECT workflow.id FROM workflow_runs workflow
                 WHERE json_extract(workflow.run_json, '$.threadId') = t.thread_id
-                  AND json_extract(workflow.run_json, '$.kind') IN ('performance', 'refactor')
+                  AND (
+                    json_extract(workflow.run_json, '$.kind') IN ('performance', 'refactor')
+                    OR (
+                      json_extract(workflow.run_json, '$.kind') = 'tickets'
+                      AND (
+                        json_extract(workflow.run_json, '$.phase') IN ('queued', 'preparing')
+                        OR json_extract(t.payload_json, '$.refinementOpened') IS NOT 1
+                      )
+                    )
+                  )
                 LIMIT 1
               ) AS background_workflow_id,
               CASE

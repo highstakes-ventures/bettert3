@@ -22,11 +22,11 @@ export function useOpenWorkflowRun(environmentId: EnvironmentId) {
     const threadId = run.threadId ?? run.implementationThreadId;
     if (!threadId) return false;
     if (run.phase === "review") {
-      // Preparation can settle a chat before its first human message. Opening
-      // refinement keeps it in the sidebar when the user moves to another ticket.
+      // Record the refinement open before navigation so the background chat
+      // becomes visible and stays in history after the user settles it.
       const result = await unsettle({
         environmentId,
-        input: { threadId, reason: "user" },
+        input: { threadId, reason: "refinement" },
       });
       // Undo or another open can supersede this request while restoration runs.
       if (result._tag !== "Success" || request !== latestOpen.current) return false;

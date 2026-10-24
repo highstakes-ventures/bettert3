@@ -267,9 +267,9 @@ it.each(["button", "shortcut", "command"])(
       params: { environmentId: "test", threadId: "chat-next" },
     });
     expect(state.unsettle.mock.calls.map(([request]) => request.input)).toEqual([
-      { threadId: "chat-next", reason: "user" },
-      { threadId: "chat-earlier", reason: "user" },
-      { threadId: "chat-next", reason: "user" },
+      { threadId: "chat-next", reason: "refinement" },
+      { threadId: "chat-earlier", reason: "refinement" },
+      { threadId: "chat-next", reason: "refinement" },
     ]);
   },
 );
@@ -390,7 +390,7 @@ it.each(["Success", "Failure"])(
     await act(async () => requestWorkflowAction("refine"));
     expect(state.unsettle).toHaveBeenCalledExactlyOnceWith({
       environmentId: "test",
-      input: { threadId: "chat-next", reason: "user" },
+      input: { threadId: "chat-next", reason: "refinement" },
     });
     expect(state.navigate).not.toHaveBeenCalled();
     expect(useRightPanelStore.getState().byThreadKey).toEqual({});
