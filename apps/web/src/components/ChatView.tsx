@@ -1807,6 +1807,9 @@ export default function ChatView(props: ChatViewProps) {
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
   );
+  const composerModelSelectionExplicit = useComposerDraftStore(
+    (store) => store.getComposerDraft(composerDraftTarget)?.modelSelectionExplicit,
+  );
   const composerSelectedModelSelection = useComposerDraftStore((store) => {
     const draft = store.getComposerDraft(composerDraftTarget);
     return draft?.activeProvider
@@ -1834,6 +1837,7 @@ export default function ChatView(props: ChatViewProps) {
   const setComposerDraftReviewComments = useComposerDraftStore((store) => store.setReviewComments);
   const setComposerDraftThreadContexts = useComposerDraftStore((store) => store.setThreadContexts);
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
+  const syncThreadModelSelection = useComposerDraftStore((store) => store.syncThreadModelSelection);
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
@@ -2120,6 +2124,19 @@ export default function ChatView(props: ChatViewProps) {
   );
   const isServerThread = serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
+  useLayoutEffect(() => {
+    if (serverThread) {
+      syncThreadModelSelection(
+        scopeThreadRef(serverThread.environmentId, serverThread.id),
+        serverThread.modelSelection,
+      );
+    }
+  }, [
+    serverThread,
+    composerSelectedModelSelection,
+    composerModelSelectionExplicit,
+    syncThreadModelSelection,
+  ]);
   const runDestination = serverThread?.source.runDestination ?? draftThread?.runDestination ?? null;
   const canOperateTerminal = terminalOperatePermission && !runDestination;
   const canReadTerminal = terminalReadPermission && !runDestination;
@@ -3276,8 +3293,8 @@ export default function ChatView(props: ChatViewProps) {
         entries: providerInstanceEntries,
         candidateInstanceIds: [
           selectedProviderByThreadId,
-          activeRuntime?.providerInstanceId,
           activeThread?.modelSelection.instanceId,
+          activeRuntime?.providerInstanceId,
           activeProjectDefaultModelSelection?.instanceId,
         ],
         lockedProvider,

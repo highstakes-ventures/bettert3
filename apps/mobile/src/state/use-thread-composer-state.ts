@@ -81,6 +81,7 @@ import {
   scheduleUnusedComposerAttachmentCleanup,
   setComposerDraftText,
   updateComposerDraftSettings,
+  syncComposerDraftModelSelection,
   useComposerDraft,
 } from "./use-composer-drafts";
 import {
@@ -334,6 +335,14 @@ export function useThreadComposerState() {
   const draftAttachments = editedDraft?.attachments ?? [];
   const selectedThreadQueueCount = selectedThreadQueuedMessages.length;
   const selectedThread = selectedThreadShell;
+  useEffect(() => {
+    if (selectedThread) {
+      syncComposerDraftModelSelection(
+        scopedThreadKey(selectedThread.environmentId, selectedThread.id),
+        selectedThread.modelSelection,
+      );
+    }
+  }, [selectedThread, selectedDraft?.modelSelection]);
   const modelSelection = selectedDraft?.modelSelection ?? selectedThread?.modelSelection ?? null;
   const pendingHandoff = useMemo(
     () =>

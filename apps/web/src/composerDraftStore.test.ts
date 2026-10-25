@@ -1938,6 +1938,85 @@ describe("composerDraftStore modelSelection", () => {
     resetComposerDraftStore();
   });
 
+  it("follows an agent provider switch after a sent selection without losing draft content", () => {
+    const store = useComposerDraftStore.getState();
+    const direct = createModelSelection(CODEX_SECONDARY_INSTANCE, "gpt-5.4", [
+      { id: "reasoningEffort", value: "xhigh" },
+    ]);
+    const proxy = createModelSelection(CODEX_INSTANCE, "gpt-5.4");
+    store.setModelSelection(threadRef, direct, { explicit: true });
+    store.setStickyModelSelection(direct);
+    store.clearComposerContent(threadRef);
+    store.syncThreadModelSelection(threadRef, direct);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBeUndefined();
+    store.setPrompt(threadRef, "continue");
+    store.setModelSelection(scopeThreadRef(OTHER_TEST_ENVIRONMENT_ID, threadId), direct);
+
+    store.syncThreadModelSelection(threadRef, proxy);
+
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft?.activeProvider).toBe(proxy.instanceId);
+    expect(draft?.modelSelectionByProvider[proxy.instanceId]).toEqual(proxy);
+    expect(draft?.prompt).toBe("continue");
+    expect(draft?.modelSelectionExplicit).toBeUndefined();
+    expect(draftFor(threadId, OTHER_TEST_ENVIRONMENT_ID)?.activeProvider).toBe(direct.instanceId);
+    expect(useComposerDraftStore.getState().stickyActiveProvider).toBe(direct.instanceId);
+  });
+
+  it("keeps the retry provider after a failed send and reopening the thread", () => {
+    const store = useComposerDraftStore.getState();
+    const saved = createModelSelection(CODEX_INSTANCE, "gpt-5.4");
+    const retry = createModelSelection(CODEX_SECONDARY_INSTANCE, "gpt-5.4");
+    store.setModelSelection(threadRef, retry, { explicit: true });
+    store.clearComposerContent(threadRef);
+    store.setPrompt(threadRef, "retry the rejected send");
+
+    // A rejected send leaves the saved thread selection unchanged. Mounting
+    // the thread again must preserve the user's rejected provider choice.
+    store.syncThreadModelSelection(threadRef, saved);
+
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(retry.instanceId);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBe(true);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("retry the rejected send");
+  });
+
+  it("preserves an unsent user selection until the server accepts it", () => {
+    const store = useComposerDraftStore.getState();
+    const direct = createModelSelection(CODEX_SECONDARY_INSTANCE, "gpt-5.4");
+    const proxy = createModelSelection(CODEX_INSTANCE, "gpt-5.4");
+    store.setModelSelection(threadRef, direct, { explicit: true });
+
+    store.syncThreadModelSelection(threadRef, proxy);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(direct.instanceId);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBe(true);
+
+    store.syncThreadModelSelection(threadRef, direct);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBeUndefined();
+    store.syncThreadModelSelection(threadRef, proxy);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(proxy.instanceId);
+  });
+
+  it("replaces stale options on the same provider with the saved thread selection", () => {
+    const store = useComposerDraftStore.getState();
+    store.setModelSelection(
+      threadRef,
+      modelSelection(CODEX_DRIVER, "gpt-5.4", {
+        reasoningEffort: "xhigh",
+        fastMode: true,
+      }),
+    );
+    const reported = modelSelection(CODEX_DRIVER, "gpt-5.3-codex");
+
+    store.syncThreadModelSelection(threadRef, reported);
+
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE],
+    ).toEqual(reported);
+    const synchronized = useComposerDraftStore.getState();
+    store.syncThreadModelSelection(threadRef, reported);
+    expect(useComposerDraftStore.getState()).toBe(synchronized);
+  });
+
   it("stores a model selection in the draft", () => {
     const store = useComposerDraftStore.getState();
     store.setModelSelection(

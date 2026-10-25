@@ -38,7 +38,11 @@ import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
 import * as Effect from "effect/Effect";
 import { DeepMutable } from "effect/Types";
-import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  createModelSelection,
+  modelSelectionsEqual,
+  normalizeModelSlug,
+} from "@t3tools/shared/model";
 import { useMemo } from "react";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
 import { readThreadPreviewState } from "./previewStateStore";
@@ -627,6 +631,7 @@ interface ComposerDraftStoreState {
       replaceOptions?: boolean;
     },
   ) => void;
+  syncThreadModelSelection: (threadRef: ScopedThreadRef, modelSelection: ModelSelection) => void;
   /** Replace the model options for one or more providers in the draft. */
   setModelOptions: (
     threadRef: ComposerThreadTarget,
@@ -3250,6 +3255,21 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             }
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
+        },
+        syncThreadModelSelection: (threadRef, modelSelection) => {
+          const draft = get().getComposerDraft(threadRef);
+          if (!draft) return;
+          const selected = draft.activeProvider
+            ? draft.modelSelectionByProvider[draft.activeProvider]
+            : undefined;
+          // An unsent picker choice wins until the server accepts it. A sent
+          // choice must not override a later agent or remote-client switch.
+          if (
+            draft.modelSelectionExplicit &&
+            (!selected || !modelSelectionsEqual(selected, modelSelection))
+          )
+            return;
+          get().setModelSelection(threadRef, modelSelection, { replaceOptions: true });
         },
         setModelSelection: (threadRef, modelSelection, opts) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";

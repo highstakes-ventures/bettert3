@@ -20,6 +20,7 @@ import {
   type RuntimeMode,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { useEffect } from "react";
 import { Atom } from "effect/reactivity";
 
@@ -1511,6 +1512,18 @@ export function updateComposerDraftSettings(
       ...settings,
     };
     return withComposerDraft(current, draftKey, draft);
+  });
+}
+
+/** Drop a local choice only after the saved thread has accepted that selection. */
+export function syncComposerDraftModelSelection(draftKey: string, selection: ModelSelection): void {
+  updateComposerDrafts((current) => {
+    const draft = current[draftKey];
+    if (!draft?.modelSelection || !modelSelectionsEqual(draft.modelSelection, selection)) {
+      return current;
+    }
+    const { modelSelection: _modelSelection, ...retained } = draft;
+    return withComposerDraft(current, draftKey, retained);
   });
 }
 

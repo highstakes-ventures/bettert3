@@ -2181,8 +2181,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         entries: providerInstanceEntries,
         candidateInstanceIds: [
           selectedProviderByThreadId,
-          activeThread?.runtime?.providerInstanceId,
           activeThreadModelSelection?.instanceId,
+          activeThread?.runtime?.providerInstanceId,
           activeProjectDefaultModelSelection?.instanceId,
         ],
         lockedProvider,

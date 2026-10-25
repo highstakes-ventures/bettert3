@@ -159,6 +159,7 @@ import {
   archiveCloudComposerDrafts,
   clearComposerDraftContent,
   clearComposerDraftContentState,
+  syncComposerDraftModelSelection,
   clearComposerDraftsEnvironment,
   ComposerDraftPersistenceError,
   composerDraftsAtom,
@@ -2158,6 +2159,45 @@ describe("mobile composer drafts", () => {
         model: "gpt-5.6-sol",
       },
     });
+  });
+
+  it("acknowledges a model restored after the saved thread has already loaded", () => {
+    const draftKey = "environment-1:thread-1";
+    const saved = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" };
+    appAtomRegistry.set(composerDraftsAtom, {});
+    syncComposerDraftModelSelection(draftKey, saved);
+    appAtomRegistry.set(composerDraftsAtom, {
+      [draftKey]: { text: "restored follow-up", attachments: [], modelSelection: saved },
+    });
+
+    syncComposerDraftModelSelection(draftKey, saved);
+
+    expect(getComposerDraftSnapshot(draftKey).modelSelection).toBeUndefined();
+    expect(getComposerDraftSnapshot(draftKey).text).toBe("restored follow-up");
+  });
+
+  it("keeps offline follow-ups on the chosen provider until the thread accepts it", () => {
+    const draftKey = "environment-1:thread-1";
+    const saved = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" };
+    const chosen = { instanceId: ProviderInstanceId.make("codex_secondary"), model: "gpt-5.4" };
+    appAtomRegistry.set(composerDraftsAtom, {
+      [draftKey]: { text: "first offline send", attachments: [], modelSelection: chosen },
+    });
+    const sentSelections = [];
+    for (const text of ["first offline send", "second offline send"]) {
+      setComposerDraftText(draftKey, text);
+      sentSelections.push(getComposerDraftSnapshot(draftKey).modelSelection ?? saved);
+      clearComposerDraftContent(draftKey);
+      syncComposerDraftModelSelection(draftKey, saved);
+    }
+    expect(sentSelections).toEqual([chosen, chosen]);
+
+    setComposerDraftText(draftKey, "continue after delivery");
+    syncComposerDraftModelSelection(draftKey, chosen);
+    expect(getComposerDraftSnapshot(draftKey).modelSelection).toBeUndefined();
+    expect(getComposerDraftSnapshot(draftKey).text).toBe("continue after delivery");
+    // With no unsent override, a later agent switch becomes the send selection.
+    expect(getComposerDraftSnapshot(draftKey).modelSelection ?? saved).toEqual(saved);
   });
 
   it("clears sent content without clearing the selected model or workspace", () => {
