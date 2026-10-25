@@ -20,6 +20,10 @@ const state = vi.hoisted(() => ({
   unsettle: vi.fn(),
   navigate: vi.fn(),
   refresh: vi.fn(),
+  refreshProjects: vi.fn(),
+  projectError: null as string | null,
+  projectsPending: false,
+  projectsAvailable: true,
   projects: [
     { id: "intake", name: "BACKLOG", teamIds: ["team"], initiatives: [] },
     { id: "target", name: "Delivery", teamIds: ["team"], initiatives: [] },
@@ -51,9 +55,12 @@ vi.mock("~/state/query", () => ({
           }
         : key === "detail"
           ? state.detail
-          : { projects: state.projects },
-    refresh: state.refresh,
-    error: null,
+          : state.projectsAvailable
+            ? { projects: state.projects }
+            : null,
+    refresh: key === "connection" ? state.refreshProjects : state.refresh,
+    error: key === "connection" ? state.projectError : null,
+    isPending: key === "connection" && state.projectsPending,
   }),
 }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => state.decision }));
@@ -182,6 +189,10 @@ beforeEach(() => {
   state.unsettle.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   state.navigate.mockReset().mockResolvedValue(undefined);
   state.refresh.mockReset();
+  state.refreshProjects.mockReset();
+  state.projectError = null;
+  state.projectsPending = false;
+  state.projectsAvailable = true;
   useRightPanelStore.setState({ byThreadKey: {} });
 });
 afterEach(async () => {
@@ -439,6 +450,43 @@ it("keeps the current ticket while the queue reorders and wraps after approving 
     [`${ref.environmentId}:${ref.threadId}`]: { activeSurfaceId: "ticket:priority-prerequisite" },
   });
 });
+it("retries the failed project list and allows selection after recovery", async () => {
+  state.projectsAvailable = false;
+  state.projectError = "Linear could not complete this request.";
+  await render();
+  expect(renderer!.root.findByProps({ role: "alert" }).props.children).toContain(
+    state.projectError,
+  );
+  expect(renderer!.root.findAllByType("select")[0]!.props.disabled).toBe(true);
+  await click("Refresh");
+  expect(state.refreshProjects).toHaveBeenCalledOnce();
+  expect(state.refresh).toHaveBeenCalledOnce();
+
+  state.projectError = null;
+  state.projectsAvailable = true;
+  await act(async () => {
+    renderer!.update(
+      <WorkflowTicketPanel
+        environmentId={environmentId}
+        projectId={projectId}
+        runId="current"
+        cwd="/project"
+      />,
+    );
+  });
+  expect(renderer!.root.findAllByProps({ role: "alert" })).toHaveLength(0);
+  const selector = renderer!.root.findAllByType("select")[0]!;
+  expect(selector.props.disabled).toBe(false);
+  expect(selector.findAllByType("option").map((option) => option.props.value)).toEqual([
+    "",
+    "target",
+  ]);
+  await act(async () => selector.props.onChange({ currentTarget: { value: "target" } }));
+  await approve();
+  await expire();
+  expect(state.decision.mock.calls[0]?.[0].input.targetProjectId).toBe("target");
+});
+
 it.each([{ id: null }, { id: "intake" }])(
   "requires a delivery project when the current project is $id",
   async ({ id }) => {

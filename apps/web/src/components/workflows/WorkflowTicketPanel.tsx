@@ -53,11 +53,15 @@ export function WorkflowTicketPanel(props: {
   const connection = useEnvironmentQuery(
     serverEnvironment.workflowConnection({ environmentId: props.environmentId, input: {} }),
   );
+  function refresh() {
+    detail.refresh();
+    connection.refresh();
+  }
   if (!detail.data)
     return (
       <div role="status" className="p-5 text-sm text-muted-foreground">
         {detail.error ?? "Loading ticket…"}
-        <Button variant="ghost" size="xs" onClick={detail.refresh}>
+        <Button variant="ghost" size="xs" onClick={refresh}>
           Refresh
         </Button>
       </div>
@@ -68,9 +72,11 @@ export function WorkflowTicketPanel(props: {
       {...props}
       detail={detail.data}
       projects={connection.data?.projects ?? []}
+      projectError={connection.error}
+      projectsLoading={connection.isPending || (connection.data === null && !connection.error)}
       intakeProjectId={live.data?.configuration?.intakeProjectId}
       queue={live.data?.runs ?? []}
-      refresh={detail.refresh}
+      refresh={refresh}
     />
   );
 }
@@ -78,6 +84,8 @@ function Ticket({
   environmentId,
   detail,
   projects,
+  projectError,
+  projectsLoading,
   intakeProjectId,
   queue,
   cwd,
@@ -86,6 +94,8 @@ function Ticket({
   environmentId: EnvironmentId;
   detail: WorkflowDetail;
   projects: ReadonlyArray<{ id: string; name: string; teamIds: ReadonlyArray<string> }>;
+  projectError: string | null;
+  projectsLoading: boolean;
   intakeProjectId: string | null | undefined;
   queue: ReadonlyArray<WorkflowRun>;
   cwd: string | undefined;
@@ -104,9 +114,16 @@ function Ticket({
       project.id !== intakeProjectId && project.teamIds.includes(detail.ticket?.teamId ?? ""),
   );
   const selectedTarget =
-    intakeProjectId === undefined
+    intakeProjectId === undefined || projectsLoading || projectError !== null
       ? undefined
       : deliveryProjects.find((project) => project.id === target);
+  const projectNotice =
+    projectError ??
+    (projectsLoading
+      ? "Loading delivery projects…"
+      : deliveryProjects.length === 0
+        ? "No delivery projects are available for this ticket's team."
+        : null);
   const busy = useWorkflowDecisions((state) =>
     hasPendingWorkflowDecision(environmentId, detail.run, state.decisions),
   );
@@ -196,30 +213,43 @@ function Ticket({
         </Button>
       }
       projectControl={
-        <Select
-          value={selectedTarget?.id ?? ""}
-          onValueChange={(value) => setTarget(value ?? "")}
-          disabled={
-            busy || detail.run.phase !== "review" || !canDecide || intakeProjectId === undefined
-          }
-        >
-          <SelectTrigger size="sm" aria-label="Target project">
-            <SelectValue>
-              {(value: string) =>
-                deliveryProjects.find((project) => project.id === value)?.name ??
-                "Choose delivery project"
-              }
-            </SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            <SelectItem value="">Choose delivery project</SelectItem>
-            {deliveryProjects.map((project) => (
-              <SelectItem key={project.id} value={project.id}>
-                {project.name}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
+        <div className="space-y-2">
+          <Select
+            value={selectedTarget?.id ?? ""}
+            onValueChange={(value) => setTarget(value ?? "")}
+            disabled={
+              busy ||
+              detail.run.phase !== "review" ||
+              !canDecide ||
+              intakeProjectId === undefined ||
+              projectsLoading ||
+              projectError !== null ||
+              deliveryProjects.length === 0
+            }
+          >
+            <SelectTrigger size="sm" aria-label="Target project">
+              <SelectValue>
+                {(value: string) =>
+                  deliveryProjects.find((project) => project.id === value)?.name ??
+                  "Choose delivery project"
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              <SelectItem value="">Choose delivery project</SelectItem>
+              {deliveryProjects.map((project) => (
+                <SelectItem key={project.id} value={project.id}>
+                  {project.name}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+          {projectNotice && (
+            <p role={projectError ? "alert" : "status"} className="text-xs text-muted-foreground">
+              {projectNotice}
+            </p>
+          )}
+        </div>
       }
       actions={
         detail.run.phase === "review" ? (
