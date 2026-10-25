@@ -282,25 +282,18 @@ const make = Effect.gen(function* () {
   const http = yield* HttpClient.HttpClient;
   const authenticate = Effect.fn("CodexCloudChats.authenticate")(function* (
     expectedAccount: string | null,
-    instanceId?: ProviderInstanceId,
+    instanceId: ProviderInstanceId = ProviderInstanceId.make("codex"),
   ) {
     return yield* Effect.scoped(
       Effect.gen(function* () {
         const current = yield* settings.getSettings.pipe(
           Effect.mapError(() => new CloudChatError({ reason: "authentication" })),
         );
-        const configured = Object.entries(current.providerInstances)
-          .filter(([, p]) => p.driver === "codex")
-          .map(([id, config]) => ({ ...config, id }));
-        const instance =
-          instanceId === undefined
-            ? configured.find(resolveProviderInstanceEnabled)
-            : instanceId === "codex" && current.providerInstances[instanceId] === undefined
-              ? { id: instanceId, config: {}, environment: undefined }
-              : configured.find((p) => p.id === instanceId && resolveProviderInstanceEnabled(p));
-        // An unconfigured T3 uses its default CLI login. Explicit account settings must
-        // never fall through to that login when every configured instance is disabled.
-        if ((configured.length > 0 || instanceId !== undefined) && !instance)
+        // Cloud history belongs to the default CLI account, independent of custom accounts.
+        const instance = current.providerInstances[instanceId];
+        if (!instance && instanceId !== "codex")
+          return yield* new CloudChatError({ reason: "authentication" });
+        if (instance && (instance.driver !== "codex" || !resolveProviderInstanceEnabled(instance)))
           return yield* new CloudChatError({ reason: "authentication" });
         const config = yield* decodeConfig(instance?.config ?? {}).pipe(
           Effect.mapError(() => new CloudChatError({ reason: "authentication" })),
@@ -334,7 +327,7 @@ const make = Effect.gen(function* () {
         const accountId = parsedClaims["https://api.openai.com/auth"].chatgpt_account_id;
         if (expectedAccount !== null && accountId !== expectedAccount)
           return yield* new CloudChatError({ reason: "accountChanged" });
-        return { token, accountId, instanceId: ProviderInstanceId.make(instance?.id ?? "codex") };
+        return { token, accountId, instanceId };
       }),
     );
   });

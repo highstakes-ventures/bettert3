@@ -593,6 +593,34 @@ it.effect("uses the configured account's shadow home and environment", () =>
   ),
 );
 
+it.effect.each([{ setupMode: "managed" as const }, { shadowHomePath: "/test/other-account" }])(
+  "keeps Cloud history on the default CLI account alongside a custom account %j",
+  (config) =>
+    provide(
+      Effect.gen(function* () {
+        const service = yield* CodexCloudChats.CodexCloudChats;
+        const result = yield* service.list();
+        expect(result.accountId).toBe("account-a");
+        expect(result.chats[0]?.id).toBe(threadId);
+        expect((yield* service.read({ threadId, accountId: result.accountId })).messages).toEqual([
+          { id: "u", role: "user", text: "My question" },
+          { id: "a", role: "assistant", text: "The answer" },
+        ]);
+        expect(wire.authInputs).toHaveLength(2);
+        expect(wire.authInputs.every((input) => input.homePath === undefined)).toBe(true);
+      }),
+      {
+        providerInstances: {
+          [ProviderInstanceId.make("codex-other")]: {
+            driver: ProviderDriverKind.make("codex"),
+            enabled: true,
+            config,
+          },
+        },
+      },
+    ),
+);
+
 it.effect("does not use an API-key login for cloud history", () =>
   provide(
     Effect.gen(function* () {
@@ -722,7 +750,7 @@ it.effect("validates the chosen Cloud workspace and account before opening execu
   ),
 );
 
-it.effect.each(["codex", "missing-codex"])(
+it.effect.each(["codex", "codex-other", "missing-codex"])(
   "resolves the %s destination account with default settings",
   (instanceId) =>
     provide(
@@ -743,17 +771,28 @@ it.effect.each(["codex", "missing-codex"])(
         const result = yield* service
           .destinations(ProviderInstanceId.make(instanceId))
           .pipe(Effect.provideService(FetchHttpClient.Fetch, fetch), Effect.result);
-        if (instanceId === "codex") {
+        if (instanceId !== "missing-codex") {
           expect(result).toMatchObject({
             _tag: "Success",
             success: [{ accountId: "account-a", environmentConfigId: "workspace" }],
           });
           expect(wire.authInputs).toHaveLength(1);
+          expect(wire.authInputs[0]?.homePath).toBe(
+            instanceId === "codex-other" ? "/test/other-account" : undefined,
+          );
         } else {
           expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "authentication" } });
           expect(wire.authInputs).toHaveLength(0);
         }
       }),
+      {
+        providerInstances: {
+          [ProviderInstanceId.make("codex-other")]: {
+            driver: ProviderDriverKind.make("codex"),
+            config: { homePath: "/test/other-account" },
+          },
+        },
+      },
     ),
 );
 
