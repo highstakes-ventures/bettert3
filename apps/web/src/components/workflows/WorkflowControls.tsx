@@ -16,7 +16,7 @@ import type {
   WorkflowListResult,
 } from "@t3tools/contracts";
 import { useParams } from "@tanstack/react-router";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ListFilterIcon, TicketPlusIcon } from "lucide-react";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useComposerDraftStore } from "~/composerDraftStore";
@@ -175,6 +175,8 @@ function WorkflowControls(
   };
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState(false);
+  const intakePopupRef = useRef<HTMLDivElement>(null);
+  const ticketRequestRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [requestId, setRequestId] = useState<string | null>(null);
@@ -292,7 +294,17 @@ function WorkflowControls(
             </span>
           </TooltipPopup>
         </Tooltip>
-        <PopoverPopup side="top" align="start" width="auto">
+        <PopoverPopup
+          ref={intakePopupRef}
+          side="top"
+          align="start"
+          width="auto"
+          initialFocus={(interactionType) => {
+            if (interactionType === "touch") return intakePopupRef.current;
+            const request = ticketRequestRef.current;
+            return request && !request.disabled ? request : true;
+          }}
+        >
           <div className="w-80 max-w-full space-y-3 p-3">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-medium">Add a ticket</h2>
@@ -314,6 +326,7 @@ function WorkflowControls(
                 <label className="block text-xs text-muted-foreground">
                   What should we work on?
                   <Textarea
+                    ref={ticketRequestRef}
                     aria-label="Ticket request"
                     value={text}
                     maxLength={20_000}
