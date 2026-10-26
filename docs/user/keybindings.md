@@ -29,6 +29,11 @@ workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
 current checkout, a new worktree, and the previous worktree when available.
 Use `mod+shift+l` to reuse the previous worktree directly.
 
+To change effort one step without opening the picker, bind
+**Composer: Increase Effort** and **Composer: Decrease Effort** in Keybindings.
+Both are unbound by default. Increase wraps from the highest level to the
+lowest, and decrease wraps from the lowest level to the highest.
+
 In the model picker, press Left in an empty search field or Shift+Tab to reach
 the provider list. Use Up/Down to move and Enter to choose. Right returns to
 model search. `mod+shift+up` and `mod+shift+down` switch providers directly and clear the
@@ -154,10 +159,11 @@ shortcut; assign one in **Settings → Keybindings**.
 bottom of the sidebar, such as unpin, settle, snooze, archive, or discarding a
 draft. It also cancels a pending ticket approval, rejection, or delay before
 the decision reaches Linear. Ticket decisions undo one at a time. Consecutive
-thread actions of the same kind undo together. The notice remains available for
-five seconds after the latest action. Reloading during that window cancels pending
-ticket decisions. The default shortcut skips text fields and
-terminals so native undo keeps working there.
+thread actions of the same kind undo together. Reloading during the undo window
+cancels pending ticket decisions. The notice remains available for five
+seconds after the latest action. Right after an action, the shortcut works even
+in a text field such as the composer. Once you type or press another key, the
+field gets its own undo back. Terminals always keep their native shortcut.
 
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.

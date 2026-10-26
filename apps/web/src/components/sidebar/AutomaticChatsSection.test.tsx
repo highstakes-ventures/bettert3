@@ -250,7 +250,7 @@ it("keeps an opened chat beyond the first page visible only in its destination e
   expect(container.textContent).toContain("automatic-39");
   expect(container.textContent).not.toContain("automatic-38");
 
-  state.params.cloudEnvironmentId = "other-env";
+  state.params = { ...state.params, cloudEnvironmentId: "other-env" };
   await render(true);
   expect(container.querySelectorAll("a")).toHaveLength(10);
   expect(container.textContent).not.toContain("automatic-39");

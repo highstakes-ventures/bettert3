@@ -26,14 +26,6 @@ const v2TableCount = Effect.gen(function* () {
 });
 
 describe("runMigrations", () => {
-  it.effect("migrates a fresh database through the whole manifest", () =>
-    Effect.gen(function* () {
-      yield* runMigrations();
-      assert.deepStrictEqual(yield* history, migrationManifest);
-      assert.isAbove(yield* v2TableCount, 0);
-    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
-  );
-
   it.effect("refuses to start when another migration took a V2 id", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -72,6 +64,38 @@ describe("runMigrations", () => {
       assert.deepStrictEqual(yield* history, before);
       assert.strictEqual(yield* v2TableCount, 0);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect(
+    "keeps BetterT3 workflow data and migration identities while applying upstream updates",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations({ toMigrationInclusive: 65 });
+        const configuration = '{"linearProjectId":"existing-project"}';
+        const run = '{"threadId":"existing-thread","phase":"refinement"}';
+        yield* sql`INSERT INTO workflow_configurations (project_id, configuration_json) VALUES ('existing-project', ${configuration})`;
+        yield* sql`INSERT INTO workflow_runs (id, project_id, run_json) VALUES ('existing-run', 'existing-project', ${run})`;
+        const expected = migrationManifest.filter(([id]) => id > 65);
+        assert.deepStrictEqual(yield* runMigrations(), expected);
+        assert.deepStrictEqual(
+          (yield* history).filter(([id]) => id >= 63 && id <= 65),
+          [
+            [63, "ProjectSections"],
+            [64, "Workflows"],
+            [65, "WorkflowThreadLookup"],
+          ],
+        );
+        assert.deepStrictEqual(yield* sql`SELECT configuration_json FROM workflow_configurations`, [
+          { configuration_json: configuration },
+        ]);
+        assert.deepStrictEqual(yield* sql`SELECT run_json FROM workflow_runs`, [{ run_json: run }]);
+        assert.deepStrictEqual(
+          yield* sql`SELECT name FROM pragma_table_info('projection_projects') WHERE name = 'sections_json'`,
+          [{ name: "sections_json" }],
+        );
+        assert.deepStrictEqual(yield* runMigrations(), []);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect("upgrades a database at exactly 54", () =>

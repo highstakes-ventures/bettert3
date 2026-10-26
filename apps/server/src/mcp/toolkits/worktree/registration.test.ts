@@ -1,3 +1,5 @@
+import * as Context from "effect/Context";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as WorkflowService from "../../../workflows/WorkflowService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
@@ -85,11 +87,12 @@ const decodeToolsListPayload = Schema.decodeUnknownEffect(ToolsListPayload);
 it.effect("production mcp layer lists worktree tools over http", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const layerRoutes = McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer));
-      yield* HttpRouter.serve(layerRoutes, {
+      const layerRoutes = McpHttpServer.layer;
+      const services = yield* HttpRouter.serve(layerRoutes, {
         disableListenLog: true,
         disableLogger: true,
       }).pipe(
+        Layer.provideMerge(McpSessionRegistry.layer),
         Layer.provide(
           Layer.mock(ServerEnvironment.ServerEnvironment)({
             getEnvironmentId: Effect.succeed("environment-scratch" as never),
@@ -98,10 +101,11 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         Layer.provide(PreviewAutomationBroker.layer),
         Layer.provide(PreviewBrowser.layer),
         Layer.provide(layerStubServices),
+        Layer.provide(McpProviderSessions.layer),
         Layer.build,
       );
 
-      const registry = McpSessionRegistry.issueActiveMcpCredential({
+      const registry = Context.get(services, McpSessionRegistry.McpSessionRegistry).issue({
         threadId: ThreadId.make("thread-scratch"),
         providerInstanceId: ProviderInstanceId.make("claudeAgent"),
       });
