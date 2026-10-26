@@ -108,6 +108,8 @@ const executeBundle = (source, sandboxModules) => {
     {
       process: sandboxProcess,
       require: requireSandboxModule,
+      // Bridge verification runs before any browser lifecycle event fires.
+      window: { addEventListener: () => undefined },
     },
     {
       filename: "desktop-preload.cjs",

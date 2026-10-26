@@ -67,6 +67,16 @@ describe("desktop preload bundle verifier", () => {
     );
   });
 
+  it("accepts preload lifecycle listener registration", () => {
+    assert.doesNotThrow(() =>
+      verifyPreloadBundle(`
+        ${validPreload}
+        window.addEventListener("DOMContentLoaded", () => {}, { once: true });
+        window.addEventListener("resize", () => {});
+      `),
+    );
+  });
+
   it("accepts Electron sandbox module aliases", () => {
     assert.doesNotThrow(() =>
       verifyPreloadBundle(`
