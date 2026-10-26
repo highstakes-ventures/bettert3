@@ -15,6 +15,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as EffectOutbox from "./EffectOutbox.ts";
@@ -208,6 +209,28 @@ export const make = Effect.gen(function* () {
       const runs = [] as Array<OrchestrationV2ThreadProjection["runs"][number]>;
       for (const run of nonterminalRuns(projection)) {
         if (externalRuns.has(run.id)) continue;
+        const attempt = projection.attempts.find(
+          (candidate) => candidate.id === run.activeAttemptId,
+        );
+        if (
+          projection.thread.archivedAt === null &&
+          projection.thread.deletedAt === null &&
+          run.status === "starting" &&
+          attempt?.status === "pending" &&
+          (attempt.capacityRetryCount ?? 0) > 0
+        ) {
+          const timer = yield* outbox.get(`effect:capacity-retry:${attempt.id}`).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderRuntimeRecoveryError({
+                  operation: "reconcile",
+                  threadId: projection.thread.id,
+                  cause,
+                }),
+            ),
+          );
+          if (Option.isSome(timer) && timer.value.status === "pending") continue;
+        }
         if (run.status === "waiting") {
           const checkpointEffects = yield* outbox
             .listByCommandId(CommandId.make(`command:effect:checkpoint.capture:${run.id}`))
@@ -650,6 +673,7 @@ export const make = Effect.gen(function* () {
             threadId: projection.thread.id,
             effectTypes: EffectOutbox.PROCESS_BOUND_EFFECT_TYPES,
             reason: detail,
+            preservePendingCapacityRetries: true,
           })
           .pipe(
             Effect.mapError(
@@ -675,6 +699,7 @@ export const make = Effect.gen(function* () {
             cancelUnsettledEffects: {
               effectTypes: EffectOutbox.PROCESS_BOUND_EFFECT_TYPES,
               reason: detail,
+              preservePendingCapacityRetries: true,
             },
           })
           .pipe(

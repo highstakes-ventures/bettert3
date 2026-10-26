@@ -3440,12 +3440,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (command.type === "thread.archive") {
       const projection = yield* loadProjectionForCommand(
         command,
-        ["runs", "attempts", "nodes", "subagents", "messages"],
-        { turnItemTypes: [], messageRoles: ["user"] },
+        ["runs", "attempts", "nodes", "subagents", "messages", "turnItems"],
+        { turnItemTypes: ["error"], messageRoles: ["user"] },
       );
       const emitEvent = emit(events, command);
       const activeRunIds = new Set(
-        projection.runs.filter((run) => run.status === "queued").map((run) => run.id),
+        projection.runs
+          .filter(
+            (run) =>
+              run.status === "queued" ||
+              (run.status === "starting" &&
+                projection.attempts.some(
+                  (attempt) =>
+                    attempt.id === run.activeAttemptId && (attempt.capacityRetryCount ?? 0) > 0,
+                )),
+          )
+          .map((run) => run.id),
       );
       for (const run of projection.runs.filter((candidate) => activeRunIds.has(candidate.id))) {
         yield* emitEvent({
@@ -3488,6 +3498,30 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           providerInstanceId: run.providerInstanceId,
           occurredAt: now,
           payload: { ...node, status: "cancelled", completedAt: now },
+        });
+      }
+      for (const item of projection.turnItems) {
+        if (
+          item.runId === null ||
+          !activeRunIds.has(item.runId) ||
+          item.type !== "error" ||
+          item.status !== "running" ||
+          item.retry === undefined
+        )
+          continue;
+        yield* emitEvent({
+          type: "turn-item.updated",
+          threadId: command.threadId,
+          runId: item.runId,
+          providerInstanceId: thread.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            ...item,
+            status: "cancelled",
+            title: "Provider retry stopped",
+            completedAt: now,
+            updatedAt: now,
+          },
         });
       }
       yield* disposeAllDelegatedCompletionCohorts({
@@ -9428,6 +9462,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         // work can belong to an earlier run than the one Stop targets.
         {
           turnItemTypes: [
+            "error",
             "command_execution",
             "dynamic_tool",
             "subagent",
@@ -9581,6 +9616,30 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             },
           });
         }
+      }
+
+      for (const item of projection.turnItems) {
+        if (
+          item.type !== "error" ||
+          item.runId !== run.id ||
+          item.status !== "running" ||
+          item.retry === undefined
+        )
+          continue;
+        yield* emitEvent({
+          type: "turn-item.updated",
+          threadId: command.threadId,
+          runId: run.id,
+          providerInstanceId: run.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            ...item,
+            status: "interrupted",
+            title: "Provider retry stopped",
+            completedAt: now,
+            updatedAt: now,
+          },
+        });
       }
 
       if (
@@ -11130,6 +11189,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         );
       }
       case "thread.archive":
+        yield* dispatchThreadMutation(command, events, effects);
+        cancelUnsettledEffects = {
+          effectTypes: ["provider-turn.start"],
+          reason: "Thread archived.",
+        };
+        break;
       case "thread.unarchive":
       case "thread.settle":
       case "thread.unsettle":

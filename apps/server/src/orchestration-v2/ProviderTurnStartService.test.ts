@@ -2,6 +2,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
+  ChatAttachmentId,
+  ProviderTurnId,
+  TurnItemId,
   CheckpointScopeId,
   MessageId,
   NodeId,
@@ -168,6 +171,8 @@ function makeLocalCommandHarness(input: {
   readonly worktreePath?: string;
   readonly fileSystem?: FileSystem.FileSystem;
   readonly previousNativeSession?: boolean;
+  readonly nativeThreadId?: string;
+  readonly resumedNativeThreadId?: string;
   readonly previousMessages?: ReadonlyArray<string>;
   readonly logoutFailure?: string;
   readonly openFailure?: unknown;
@@ -220,7 +225,14 @@ function makeLocalCommandHarness(input: {
     providerSessionId,
     appThreadId: threadId,
     ownerNodeId: null,
-    nativeThreadRef: null,
+    nativeThreadRef:
+      input.nativeThreadId === undefined
+        ? null
+        : {
+            driver: ProviderDriverKind.make("codex"),
+            nativeId: input.nativeThreadId,
+            strength: "strong",
+          },
     nativeConversationHeadRef: null,
     status: "not_loaded",
     firstRunOrdinal: 2,
@@ -443,6 +455,18 @@ function makeLocalCommandHarness(input: {
                     lastError: null,
                   },
                   ensureThread: () => Effect.succeed(providerThread),
+                  resumeThread: () =>
+                    Effect.succeed({
+                      ...providerThread,
+                      nativeThreadRef:
+                        input.resumedNativeThreadId === undefined
+                          ? providerThread.nativeThreadRef
+                          : {
+                              driver: providerThread.driver,
+                              nativeId: input.resumedNativeThreadId,
+                              strength: "strong",
+                            },
+                    }),
                 } as never)
               : Effect.die("A local command must not open a native session."),
   );
@@ -1052,3 +1076,159 @@ for (const previousMessages of [[], ["/compact", " /COMPACT "]]) {
       }),
   );
 }
+
+effectIt.effect.each([
+  "accepted",
+  "unaccepted",
+  "resume-fails",
+  "replaced",
+  "open-fails",
+  "archived",
+  "archive-race",
+] as const)("capacity retries preserve the conversation and settle startup: %s", (scenario) =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Apply the requested change",
+      nativeThreadId: "native-capacity",
+      failReadsAfterRunning: true,
+      ...(scenario === "resume-fails"
+        ? { historyReadFailureAfterFallback: new Error("resume refused") }
+        : {}),
+      ...(scenario === "open-fails" ? { openFailure: new Error("session refused") } : {}),
+      ...(scenario === "replaced" ? { resumedNativeThreadId: "replacement-conversation" } : {}),
+    });
+    const accepted = scenario !== "unaccepted";
+    const projection = harness.projection();
+    const attempt = projection.attempts[0]!;
+    const prior = {
+      ...attempt,
+      id: RunAttemptId.make("prior-capacity-attempt"),
+      status: "failed" as const,
+      nativeThreadId: "native-capacity",
+    };
+    const providerThread = projection.providerThreads[0]!;
+    const nativeThreadRef = {
+      driver: providerThread.driver,
+      nativeId: "native-capacity",
+      strength: "strong" as const,
+    };
+    const attachment = {
+      type: "image" as const,
+      id: ChatAttachmentId.make("capacity-image"),
+      name: "input.png",
+      mimeType: "image/png",
+      sizeBytes: 10,
+    };
+    harness.setProjection({
+      ...projection,
+      thread: {
+        ...projection.thread,
+        archivedAt: scenario === "archived" ? DateTime.makeUnsafe("2026-09-04T12:00:00Z") : null,
+      },
+      turnItems: [
+        {
+          id: TurnItemId.make("capacity-retry-row"),
+          threadId: projection.thread.id,
+          runId: attempt.runId,
+          nodeId: attempt.rootNodeId,
+          providerThreadId: providerThread.id,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 2,
+          type: "error",
+          status: "running",
+          title: "Provider retry",
+          startedAt: DateTime.makeUnsafe("2026-09-04T12:00:00Z"),
+          completedAt: null,
+          updatedAt: DateTime.makeUnsafe("2026-09-04T12:00:00Z"),
+          failure: {
+            class: "provider_error",
+            message: "Overloaded",
+            code: "api_error_529",
+            retryable: true,
+          },
+          retry: { attempt: 1, maxAttempts: 7, retryDelayMs: 3000 },
+        },
+        {
+          id: TurnItemId.make("completed-tool"),
+          threadId: projection.thread.id,
+          runId: attempt.runId,
+          nodeId: attempt.rootNodeId,
+          providerThreadId: providerThread.id,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 1,
+          type: "command_execution",
+          status: "completed",
+          input: "apply-change",
+          title: "Change applied",
+          startedAt: null,
+          completedAt: DateTime.makeUnsafe("2026-09-04T12:00:00Z"),
+          updatedAt: DateTime.makeUnsafe("2026-09-04T12:00:00Z"),
+        },
+      ],
+      attempts: [prior, { ...attempt, attemptOrdinal: 2, reason: "retry", capacityRetryCount: 1 }],
+      providerThreads: [{ ...providerThread, nativeThreadRef }],
+      messages: projection.messages.map((message) => ({ ...message, attachments: [attachment] })),
+      providerTurns: accepted
+        ? [
+            {
+              id: ProviderTurnId.make("accepted-capacity-turn"),
+              providerThreadId: providerThread.id,
+              nodeId: attempt.rootNodeId,
+              runAttemptId: prior.id,
+              nativeTurnRef: null,
+              ordinal: 1,
+              status: "failed",
+              startedAt: null,
+              completedAt: null,
+            },
+          ]
+        : [],
+    });
+    if (scenario === "archive-race") {
+      const open = harness.open.getMockImplementation()!;
+      harness.open.mockImplementation(() =>
+        Effect.sync(() => {
+          const current = harness.projection();
+          harness.setProjection({
+            ...current,
+            thread: { ...current.thread, archivedAt: DateTime.makeUnsafe("2026-09-04T12:00:00Z") },
+          });
+        }).pipe(Effect.andThen(open())),
+      );
+    }
+    yield* harness.start;
+    if (scenario === "archived" || scenario === "archive-race") {
+      expect(harness.startRootRun).not.toHaveBeenCalled();
+      if (scenario === "archived") expect(harness.open).not.toHaveBeenCalled();
+      return;
+    }
+    if (scenario === "resume-fails" || scenario === "open-fails" || scenario === "replaced") {
+      expect(harness.startRootRun).not.toHaveBeenCalled();
+      expect(harness.projection().runs.at(-1)?.status).toBe("failed");
+      expect(
+        harness
+          .projection()
+          .turnItems.some((item) => item.type === "error" && item.status === "running"),
+      ).toBe(false);
+      expect(
+        harness.projection().turnItems.find((item) => item.id === TurnItemId.make("completed-tool"))
+          ?.status,
+      ).toBe("completed");
+      return;
+    }
+    expect(harness.startRootRun).toHaveBeenCalledOnce();
+    const delivered = harness.startRootRun.mock.calls[0]![0].message;
+    if (accepted) {
+      expect(delivered.text).toContain("Continue the unfinished request");
+      expect(delivered.text).not.toContain("Apply the requested change");
+      expect(delivered.attachments).toEqual([]);
+    } else {
+      expect(delivered.text).toBe("Apply the requested change");
+      expect(delivered.attachments).toEqual([attachment]);
+    }
+  }),
+);

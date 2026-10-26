@@ -136,7 +136,12 @@ export const layer: Layer.Layer<
         projectionStore.getRuntimeRecoveryProjection(input.threadId).pipe(
           Effect.map((current) => {
             const run = current.runs.find((candidate) => candidate.id === input.runId);
-            return run?.activeAttemptId === input.attemptId && run.status === expectedStatus;
+            return (
+              current.thread.archivedAt == null &&
+              current.thread.deletedAt == null &&
+              run?.activeAttemptId === input.attemptId &&
+              run.status === expectedStatus
+            );
           }),
         );
       return {
@@ -230,7 +235,11 @@ export const layer: Layer.Layer<
       if (run === undefined) {
         return yield* new ProviderTurnStartError({ runId, cause: `Run ${runId} was not found.` });
       }
-      if (run.status !== "starting") {
+      if (
+        projection.thread.archivedAt != null ||
+        projection.thread.deletedAt != null ||
+        run.status !== "starting"
+      ) {
         // The effect is idempotent once the run has advanced or terminalized.
         return;
       }
@@ -333,6 +342,26 @@ export const layer: Layer.Layer<
             ...input.item,
           };
           const eventPayloads = [
+            ...projection.turnItems.flatMap((retryItem) =>
+              retryItem.runId === runId &&
+              retryItem.type === "error" &&
+              retryItem.status === "running" &&
+              retryItem.retry !== undefined
+                ? [
+                    {
+                      type: "turn-item.updated" as const,
+                      payload: {
+                        ...retryItem,
+                        status,
+                        title: input.item.title,
+                        ...(input.item.type === "error" ? { failure: input.item.failure } : {}),
+                        completedAt: now,
+                        updatedAt: now,
+                      },
+                    },
+                  ]
+                : [],
+            ),
             { type: "turn-item.updated", payload: item },
             { type: "run.updated", payload: { ...run, status, ...started, completedAt: now } },
             {
@@ -691,6 +720,10 @@ export const layer: Layer.Layer<
           return resumed.success;
         }
 
+        // A capacity retry must retain this run's native tool results. The ordinary
+        // fallback handoff covers earlier runs only, so it cannot safely replay this run.
+        if (attempt.capacityRetryCount)
+          return yield* loadFromProvider(Effect.fail(resumed.failure));
         yield* Effect.logWarning("Provider resume failed; attempting a fresh native session", {
           driver: session.driver,
           providerThreadId: providerThread.id,
@@ -785,6 +818,20 @@ export const layer: Layer.Layer<
       if (!(yield* isCurrentAttemptInStatus("starting"))) {
         return;
       }
+      if (
+        attempt.capacityRetryCount &&
+        providerThread.nativeThreadRef !== null &&
+        loadedProviderThread.nativeThreadRef?.nativeId !== providerThread.nativeThreadRef.nativeId
+      ) {
+        yield* settleStartFailure({
+          signal: "capacity-conversation-lost",
+          title: "Provider conversation could not be resumed",
+          error: new Error(
+            "The capacity retry could not resume the original conversation. The request was not sent again.",
+          ),
+        });
+        return;
+      }
       const now = yield* DateTime.now;
       // Only started runs reached the provider-thread update below. Queued runs and
       // failures during session setup cannot establish a new telemetry selection.
@@ -844,7 +891,7 @@ export const layer: Layer.Layer<
       const runningRun: OrchestrationV2Run = {
         ...run,
         status: "running",
-        startedAt: now,
+        startedAt: attempt.capacityRetryCount ? (run.startedAt ?? now) : now,
       };
       const runningAttempt: OrchestrationV2RunAttempt = {
         ...attempt,
@@ -938,7 +985,29 @@ export const layer: Layer.Layer<
           payload: runningRootNode,
         },
       ];
+      if (attempt.capacityRetryCount) {
+        for (const item of projection.turnItems) {
+          if (item.type !== "error" || item.status !== "running" || item.retry === undefined)
+            continue;
+          events.push({
+            id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+            type: "turn-item.updated",
+            threadId: projection.thread.id,
+            runId: run.id,
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: now,
+            payload: {
+              ...item,
+              status: "completed",
+              title: "Provider retry started",
+              completedAt: now,
+              updatedAt: now,
+            },
+          });
+        }
+      }
       const runningWrite = yield* eventSink.writeIfRunCurrent({
+        requireActiveThread: true,
         threadId: projection.thread.id,
         runId: run.id,
         activeAttemptId: attempt.id,
@@ -951,10 +1020,29 @@ export const layer: Layer.Layer<
       const routableSubagents = projection.subagents.filter((subagent) =>
         RunExecutionService.canRouteRelatedSubagent(subagent.status),
       );
-      const userText = projectComposerContextForProvider({
-        text: message.text,
-        records: message.context?.records ?? [],
-      });
+      const deliveredAttemptIds = new Set(
+        projection.providerTurns.map((turn) => turn.runAttemptId),
+      );
+      const capacityContinuation =
+        attempt.capacityRetryCount &&
+        sameNativeThread &&
+        runningProviderThread.nativeThreadRef != null &&
+        projection.attempts.some(
+          (previous) =>
+            previous.runId === run.id &&
+            previous.id !== attempt.id &&
+            deliveredAttemptIds.has(previous.id) &&
+            previous.nativeThreadId === runningProviderThread.nativeThreadRef?.nativeId,
+        );
+      // The original prompt and tool results already exist in this native conversation.
+      // A continuation must not submit that request and its attachments a second time.
+      const turnAttachments = capacityContinuation ? [] : message.attachments;
+      const userText = capacityContinuation
+        ? "Continue the unfinished request after the temporary capacity overload. Use the existing conversation and completed tool results. Do not repeat completed actions."
+        : projectComposerContextForProvider({
+            text: message.text,
+            records: message.context?.records ?? [],
+          });
       // Delivered once: this run's provider turn marks the work as told. A
       // restart continuation is prompted by its own text or resumes natively.
       const noteContinuation = isRestartNoteContinuation(
@@ -998,9 +1086,6 @@ export const layer: Layer.Layer<
         ...deliveredItemIds,
         ...settledHandoffs.flatMap((handoff) => handoff.delivery?.omittedItemIds ?? []),
       ]);
-      const deliveredAttemptIds = new Set(
-        projection.providerTurns.map((turn) => turn.runAttemptId),
-      );
       const acceptedAttempts = projection.attempts.filter(
         (source) =>
           source.providerThreadId === providerThread.id && deliveredAttemptIds.has(source.id),
@@ -1132,7 +1217,7 @@ export const layer: Layer.Layer<
                 modelContextWindow,
                 // The note is sent with the user text, so it spends the same allowance.
                 userText: restartNote === "" ? userText : `${restartNote}\n\n${userText}`,
-                attachments: message.attachments,
+                attachments: turnAttachments,
                 providerThread: budgetProviderThread,
                 nativeContextEstimate:
                   budgetProviderThread.contextUsage?.usedTokens === undefined
@@ -1266,7 +1351,7 @@ export const layer: Layer.Layer<
         message: {
           messageId: message.id,
           text: userText,
-          attachments: message.attachments,
+          attachments: turnAttachments,
           createdBy: message.createdBy,
           creationSource: message.creationSource,
           ...(message.scheduledTaskId === undefined

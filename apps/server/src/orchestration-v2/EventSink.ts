@@ -90,6 +90,7 @@ export interface EventSinkV2Shape {
     readonly runId: RunId;
     readonly activeAttemptId: RunAttemptId;
     readonly expectedStatus: OrchestrationV2Run["status"];
+    readonly requireActiveThread?: boolean;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
     readonly effects?: ReadonlyArray<EffectOutbox.PendingOrchestrationEffectV2>;
   }) => Effect.Effect<
@@ -146,6 +147,7 @@ export interface EventSinkV2Shape {
     readonly cancelUnsettledEffects?: {
       readonly effectTypes: ReadonlyArray<EffectOutbox.OrchestrationEffectRequestV2["type"]>;
       readonly reason: string;
+      readonly preservePendingCapacityRetries?: boolean;
     };
   }) => Effect.Effect<
     {
@@ -436,6 +438,16 @@ const layerBase: Layer.Layer<
             FROM orchestration_v2_projection_runs
             WHERE run_id = ${input.runId}
               AND thread_id = ${input.threadId}
+              AND ${
+                input.requireActiveThread === true
+                  ? sql`EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_threads AS thread
+                WHERE thread.thread_id = ${input.threadId}
+                  AND json_extract(thread.payload_json, '$.archivedAt') IS NULL
+                  AND json_extract(thread.payload_json, '$.deletedAt') IS NULL
+              )`
+                  : sql`1 = 1`
+              }
             LIMIT 1
           `;
             const current = rows[0];

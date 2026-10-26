@@ -183,6 +183,14 @@ describe("V2 session presentation", () => {
     expect(
       providerErrorPresentation({
         ...retryItem,
+        status: "completed",
+        title: "Provider retry started",
+        completedAt: now,
+      }),
+    ).toMatchObject({ label: "Provider retry started (2/10)" });
+    expect(
+      providerErrorPresentation({
+        ...retryItem,
         status: "failed",
         retry: { ...retryItem.retry, attempt: 10 },
         completedAt: now,

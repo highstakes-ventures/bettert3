@@ -411,7 +411,9 @@ export function providerErrorPresentation(
     item.status === "running"
       ? `Retrying provider (${progress})`
       : item.status === "completed"
-        ? `Provider recovered (${progress} retries)`
+        ? item.title === "Provider retry started"
+          ? `Provider retry started (${progress})`
+          : `Provider recovered (${progress} retries)`
         : item.status === "failed"
           ? `${item.failure.class === "usage_limit" ? "Usage limit reached" : "Provider error"} after ${progress} retries`
           : `Provider retry stopped (${progress})`;

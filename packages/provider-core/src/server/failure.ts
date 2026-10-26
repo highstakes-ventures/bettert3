@@ -144,6 +144,36 @@ function boundedText(value: string, maxLength: number): string {
   return `${redacted.slice(0, end)}…`;
 }
 
+/** Capacity overloads can recover without changing credentials or waiting for a quota reset. */
+export function isProviderCapacityFailure(failure: OrchestrationV2ProviderFailure): boolean {
+  if (
+    failure.class === "usage_limit" ||
+    failure.class === "permission_error" ||
+    failure.class === "validation_error" ||
+    failure.resetAt != null
+  )
+    return false;
+  const code = failure.code?.replace(/[_\s-]/g, "").toLowerCase();
+  if (
+    code !== undefined &&
+    /^(?:apierror(?:401|403|429)|authenticationerror|unauthorized|permissiondenied|invalidapikey|insufficientquota|quotaexceeded|usagelimit|ratelimitexceeded)$/.test(
+      code,
+    )
+  )
+    return false;
+  return (
+    code === "apierror529" ||
+    code === "serveroverloaded" ||
+    code === "overloaded" ||
+    code === "overloadederror" ||
+    code === "capacityexceeded" ||
+    code === "modelcapacityexceeded" ||
+    /\b(?:overloaded|at capacity|capacity overload|no (?:available )?capacity)\b/i.test(
+      failure.message,
+    )
+  );
+}
+
 export function makeProviderFailure(input: {
   readonly cause?: unknown;
   readonly message?: string | undefined;

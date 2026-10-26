@@ -44,9 +44,12 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import type { ProjectionStoreV2Error } from "./ProjectionStore.ts";
+import type { PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
 import {
   makeProviderFailure,
   makeProviderFailureTurnItem,
+  makeProviderRetryTurnItem,
+  isProviderCapacityFailure,
 } from "@t3tools/provider-core/server/failure";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
 
@@ -81,6 +84,8 @@ type ProviderTerminalEvent = Extract<
   ProviderAdapter.ProviderAdapterV2Event,
   { readonly type: "turn.terminal" }
 >;
+
+const CAPACITY_RETRY_DELAYS_MS = [3_000, 5_000, 10_000, 20_000, 40_000, 60_000, 120_000];
 
 function isTerminalProviderTurnStatus(status: OrchestrationV2ProviderTurn["status"]): boolean {
   return (
@@ -693,7 +698,10 @@ export const layer: Layer.Layer<
         // Stopped runs capture too: their checkpoint is the rollback point for
         // the next message. The capture is enqueued with these terminal events,
         // ahead of any later run's start on this thread's effect lane.
-        const finalization = {
+        const finalization: {
+          effects: Array<PendingOrchestrationEffectV2>;
+          events: Array<OrchestrationV2DomainEvent>;
+        } = {
           effects:
             input.checkpointScope !== null &&
             (input.terminal.status === "completed" ||
@@ -804,6 +812,119 @@ export const layer: Layer.Layer<
             },
           ],
         } satisfies Parameters<typeof eventSink.writeWithEffects>[0];
+        let terminalEvents: ReadonlyArray<OrchestrationV2DomainEvent> | undefined;
+        const retryCount = input.attempt.capacityRetryCount ?? 0;
+        const retryDelayMs = CAPACITY_RETRY_DELAYS_MS[retryCount];
+        if (
+          input.terminal.status === "failed" &&
+          input.terminal.threadDisposition === "reusable" &&
+          isProviderCapacityFailure(input.terminal.failure) &&
+          retryDelayMs !== undefined
+        ) {
+          const attemptOrdinal = input.attempt.attemptOrdinal + 1;
+          const attemptId = idAllocator.derive.runAttempt({ runId: input.run.id, attemptOrdinal });
+          const rootNodeId = idAllocator.derive.rootNodeAttempt({
+            runId: input.run.id,
+            attemptOrdinal,
+          });
+          const retryRun: OrchestrationV2Run = {
+            ...finalizedRun,
+            status: "starting",
+            activeAttemptId: attemptId,
+            rootNodeId,
+            completedAt: null,
+          };
+          // The ownership guard commits the failed attempt, replacement and timer together.
+          // No running effect is held while this delay elapses.
+          terminalEvents = finalization.events;
+          finalization.events = finalization.events.filter((event) => event.id !== runEventId);
+          finalization.events.push(
+            {
+              id: yield* allocateEventId(),
+              type: "run-attempt.updated",
+              threadId: input.run.threadId,
+              runId: input.run.id,
+              nodeId: rootNodeId,
+              providerInstanceId: input.run.providerInstanceId,
+              occurredAt: completedAt,
+              payload: {
+                ...input.attempt,
+                id: attemptId,
+                attemptOrdinal,
+                capacityRetryCount: retryCount + 1,
+                rootNodeId,
+                providerTurnId: null,
+                reason: "retry",
+                status: "pending",
+                startedAt: null,
+                completedAt: null,
+              },
+            },
+            {
+              id: yield* allocateEventId(),
+              type: "node.updated",
+              threadId: input.run.threadId,
+              runId: input.run.id,
+              nodeId: rootNodeId,
+              providerInstanceId: input.run.providerInstanceId,
+              occurredAt: completedAt,
+              payload: {
+                ...input.rootNode,
+                id: rootNodeId,
+                rootNodeId,
+                providerTurnId: null,
+                nativeItemRef: null,
+                status: "pending",
+                startedAt: null,
+                completedAt: null,
+              },
+            },
+            {
+              id: yield* allocateEventId(),
+              type: "run.updated",
+              threadId: input.run.threadId,
+              runId: input.run.id,
+              nodeId: rootNodeId,
+              providerInstanceId: input.run.providerInstanceId,
+              occurredAt: completedAt,
+              payload: retryRun,
+            },
+            {
+              id: yield* allocateEventId(),
+              type: "turn-item.updated",
+              threadId: input.run.threadId,
+              runId: input.run.id,
+              nodeId: input.rootNode.id,
+              providerInstanceId: input.run.providerInstanceId,
+              occurredAt: completedAt,
+              payload: makeProviderRetryTurnItem({
+                driver: input.terminal.driver,
+                threadId: input.run.threadId,
+                runId: input.run.id,
+                nodeId: input.rootNode.id,
+                providerThreadId: input.terminal.providerThreadId,
+                providerTurnId: input.terminal.providerTurnId,
+                itemOrdinal: input.terminal.failureItemOrdinal,
+                failure: input.terminal.failure,
+                retry: {
+                  attempt: retryCount + 1,
+                  maxAttempts: CAPACITY_RETRY_DELAYS_MS.length,
+                  retryDelayMs,
+                },
+                status: "running",
+                startedAt: completedAt,
+                updatedAt: completedAt,
+              }),
+            },
+          );
+          finalization.effects.push({
+            id: `effect:capacity-retry:${attemptId}`,
+            commandId: CommandId.make(`command:capacity-retry:${attemptId}`),
+            threadId: input.run.threadId,
+            availableAt: DateTime.add(completedAt, { milliseconds: retryDelayMs }),
+            request: { type: "provider-turn.start", runId: input.run.id },
+          });
+        }
         if (input.writeIfRunCurrent !== undefined) {
           const result = yield* eventSink.writeIfRunCurrent({
             threadId: input.run.threadId,
@@ -812,9 +933,20 @@ export const layer: Layer.Layer<
             expectedStatus: input.writeIfRunCurrent.expectedStatus,
             events: finalization.events,
             effects: finalization.effects,
+            requireActiveThread: terminalEvents !== undefined,
           });
           if (!result.committed) {
-            return;
+            if (terminalEvents === undefined) return;
+            // Archive can win after the ownership read. Settle the failed turn,
+            // while the same attempt still owns it, without scheduling a retry.
+            const terminalWrite = yield* eventSink.writeIfRunCurrent({
+              threadId: input.run.threadId,
+              runId: input.run.id,
+              activeAttemptId: input.writeIfRunCurrent.activeAttemptId,
+              expectedStatus: input.writeIfRunCurrent.expectedStatus,
+              events: terminalEvents,
+            });
+            if (!terminalWrite.committed) return;
           }
         } else {
           yield* eventSink.writeWithEffects(finalization);

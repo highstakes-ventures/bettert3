@@ -3814,11 +3814,89 @@ it.effect("keeps completed runs completed when pull request refresh fails", () =
   }),
 );
 
+it.effect.each([3, 5, 10, 20, 40, 60, 120, null])(
+  "backs off a capacity overload on attempt %$ for %s seconds, then stops",
+  (seconds) =>
+    Effect.gen(function* () {
+      const retryCount = [3, 5, 10, 20, 40, 60, 120, null].indexOf(seconds);
+      const now = yield* DateTime.now;
+      const result = yield* captureRootRunTermination({
+        key: `capacity:${retryCount}`,
+        capacityRetryCount: retryCount,
+        shouldFinalizeRun: () => Effect.succeed(true),
+        events: (ids) =>
+          Stream.make({
+            ...rootTerminalEvent(ids, "failed"),
+            status: "failed",
+            failureItemOrdinal: 101,
+            failure: {
+              class: "provider_error",
+              code: "serverOverloaded",
+              message: "At capacity",
+              retryable: true,
+            },
+          }),
+      });
+      assert.equal(result.committedEffects.length, seconds === null ? 0 : 1);
+      const run = result.finalEvents.findLast((event) => event.type === "run.updated");
+      assert.equal(run?.payload.status, seconds === null ? "failed" : "starting");
+      if (seconds === null) return;
+      const effect = result.committedEffects[0]!;
+      assert.equal(effect.request.type, "provider-turn.start");
+      assert.equal(
+        DateTime.toEpochMillis(effect.availableAt!) - DateTime.toEpochMillis(now),
+        seconds * 1000,
+      );
+      const next = result.finalEvents.findLast((event) => event.type === "run-attempt.updated");
+      assert.equal(next?.payload.reason, "retry");
+      assert.equal(next?.payload.capacityRetryCount, retryCount + 1);
+      assert.notEqual(next?.payload.id, backgroundScenarioIds(`capacity:${retryCount}`).attemptId);
+      const retryItem = result.written.findLast((item) => item.type === "error");
+      assert.equal(
+        retryItem?.type === "error" ? retryItem.retry?.retryDelayMs : undefined,
+        seconds * 1000,
+      );
+    }),
+);
+
+it.effect.each(["stopped", "superseded", "archived"] as const)(
+  "does not commit a capacity retry after the run is %s",
+  (scenario) =>
+    Effect.gen(function* () {
+      const result = yield* captureRootRunTermination({
+        key: `capacity:${scenario}`,
+        shouldFinalizeRun: () => Effect.succeed(scenario !== "superseded"),
+        rejectTerminalWrite: scenario === "stopped",
+        archivedBeforeWrite: scenario === "archived",
+        events: (ids) =>
+          Stream.make({
+            ...rootTerminalEvent(ids, "failed"),
+            status: "failed",
+            failureItemOrdinal: 101,
+            failure: {
+              class: "provider_error",
+              code: "api_error_529",
+              message: "Overloaded",
+              retryable: true,
+            },
+          }),
+      });
+      assert.deepEqual(result.committedEffects, []);
+      if (scenario === "archived")
+        assert.equal(
+          result.finalEvents.findLast((event) => event.type === "run.updated")?.payload.status,
+          "failed",
+        );
+    }),
+);
+
 function captureRootRunTermination(input: {
   readonly key: string;
   readonly cloud?: boolean;
+  readonly capacityRetryCount?: number;
   readonly shouldFinalizeRun: () => Effect.Effect<boolean, ProjectionStore.ProjectionStoreV2Error>;
   readonly rejectTerminalWrite?: boolean;
+  readonly archivedBeforeWrite?: boolean;
   readonly hasUnpairedRunInterruptRequest?: () => Effect.Effect<boolean, never>;
   readonly seedOpenSubagent?: boolean;
   readonly events?: (
@@ -3844,11 +3922,13 @@ function captureRootRunTermination(input: {
     const observed = yield* Ref.make<ReadonlyArray<string>>([]);
     const submittedEffects = yield* Ref.make<ReadonlyArray<PendingOrchestrationEffectV2>>([]);
     const committedEffects = yield* Ref.make<ReadonlyArray<PendingOrchestrationEffectV2>>([]);
+    const finalEvents = yield* Ref.make<ReadonlyArray<OrchestrationV2DomainEvent>>([]);
     const ingestionDone = yield* Deferred.make<void>();
     const captureTurnItem = (payload: OrchestrationV2TurnItem) =>
       Ref.update(writtenItems, (current) => [...current, payload]);
     const captureFinalEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
       Effect.gen(function* () {
+        yield* Ref.update(finalEvents, (current) => [...current, ...events]);
         for (const event of events) {
           if (event.type === "turn-item.updated") {
             yield* captureTurnItem(event.payload);
@@ -3887,7 +3967,10 @@ function captureRootRunTermination(input: {
               Effect.gen(function* () {
                 const effects = payload.effects ?? [];
                 yield* Ref.update(submittedEffects, (current) => [...current, ...effects]);
-                if (input.rejectTerminalWrite === true) {
+                if (
+                  input.rejectTerminalWrite === true ||
+                  (input.archivedBeforeWrite === true && payload.requireActiveThread === true)
+                ) {
                   return { committed: false, storedEvents: [] };
                 }
                 yield* Ref.update(committedEffects, (current) => [...current, ...effects]);
@@ -3984,6 +4067,8 @@ function captureRootRunTermination(input: {
         } as OrchestrationV2ProviderThread,
         attempt: {
           id: ids.attemptId,
+          attemptOrdinal: 1 + (input.capacityRetryCount ?? 0),
+          capacityRetryCount: input.capacityRetryCount,
           providerTurnId: ids.rootProviderTurnId,
         } as OrchestrationV2RunAttempt,
         attemptId: ids.attemptId,
@@ -4022,6 +4107,7 @@ function captureRootRunTermination(input: {
       observed: yield* Ref.get(observed),
       submittedEffects: yield* Ref.get(submittedEffects),
       committedEffects: yield* Ref.get(committedEffects),
+      finalEvents: yield* Ref.get(finalEvents),
     };
   });
 }

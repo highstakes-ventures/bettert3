@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 
 import {
   makeProviderFailure,
+  isProviderCapacityFailure,
   makeProviderFailureTurnItem,
   MAX_PROVIDER_FAILURE_CODE_LENGTH,
   MAX_PROVIDER_FAILURE_MESSAGE_LENGTH,
@@ -207,3 +208,53 @@ it.effect("keys terminal failure items by provider turn across retries and fallb
     assert.equal(firstAttempt.ordinal, 101);
   }).pipe(Effect.provide(IdAllocator.layer)),
 );
+
+it("recognizes explicit capacity failures after native retries are exhausted", () => {
+  for (const code of [
+    "api_error_529",
+    "serverOverloaded",
+    "overloaded_error",
+    "capacity_exceeded",
+    "model_capacity_exceeded",
+  ]) {
+    assert.isTrue(
+      isProviderCapacityFailure(
+        makeProviderFailure({
+          code,
+          message: "Request failed",
+          class: "provider_error",
+          retryable: false,
+        }),
+      ),
+    );
+  }
+  for (const message of [
+    "529 overloaded",
+    "The model is currently at capacity due to high demand.",
+    "There is no available capacity.",
+  ]) {
+    assert.isTrue(isProviderCapacityFailure(makeProviderFailure({ message, retryable: false })));
+  }
+});
+
+it("does not retry authentication, quota, validation, or ambiguous transport failures as capacity", () => {
+  for (const failure of [
+    makeProviderFailure({ class: "usage_limit", message: "Model at capacity", code: "overloaded" }),
+    makeProviderFailure({ class: "permission_error", message: "Model at capacity" }),
+    makeProviderFailure({ class: "validation_error", message: "Model at capacity" }),
+    ...["api_error_401", "api_error_403", "api_error_429", "insufficient_quota"].map((code) =>
+      makeProviderFailure({ code, message: "Model at capacity" }),
+    ),
+    makeProviderFailure({
+      class: "transport_error",
+      message: "Connection closed unexpectedly",
+      retryable: true,
+    }),
+    makeProviderFailure({
+      class: "provider_error",
+      message: "Service unavailable",
+      retryable: true,
+    }),
+  ])
+    assert.isFalse(isProviderCapacityFailure(failure));
+});

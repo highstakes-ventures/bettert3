@@ -3611,6 +3611,183 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
+  it.effect.each(["due", "stop", "archive", "restart", "shutdown"] as const)(
+    "a delayed capacity retry respects its due time and %s",
+    (action) =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const eventSink = yield* EventSink.EventSinkV2;
+        const outbox = yield* EffectOutbox.EffectOutboxV2;
+        const threadId = ThreadId.make(`capacity-retry-${action}`);
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`capacity-create-${action}`),
+          threadId,
+          projectId: ProjectId.make(`capacity-project-${action}`),
+          title: "Capacity retry",
+          createdBy: "user",
+          creationSource: "web",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: "/tmp/capacity-retry-test",
+        });
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make(`capacity-message-${action}`),
+          threadId,
+          messageId: MessageId.make(`capacity-message-${action}`),
+          text: "Finish the work",
+          attachments: [],
+          modelSelection,
+          createdBy: "user",
+          creationSource: "web",
+          dispatchMode: { type: "start_immediately" },
+        });
+        const projection = yield* orchestrator.getThreadProjection(threadId);
+        const run = projection.runs[0]!;
+        const attempt = projection.attempts[0]!;
+        const now = yield* DateTime.now;
+        const recovering = action === "restart" || action === "shutdown";
+        const retryDelayMs = recovering ? 40_000 : 3_000;
+        // RunExecutionService owns producing this state; exercise the durable timer
+        // and user commands here without opening an external provider session.
+        yield* outbox.cancelUnsettled({
+          threadId,
+          effectTypes: ["provider-turn.start"],
+          reason: "Replace initial start with retry fixture",
+        });
+        const effectId = `effect:capacity-retry:${attempt.id}`;
+        const retryItemId = TurnItemId.make(`capacity-status-${action}`);
+        yield* eventSink.writeWithEffects({
+          events: [
+            {
+              id: EventId.make(`capacity-attempt-${action}`),
+              type: "run-attempt.updated",
+              threadId,
+              runId: run.id,
+              occurredAt: now,
+              payload: { ...attempt, capacityRetryCount: 1 },
+            },
+            {
+              id: EventId.make(`capacity-status-event-${action}`),
+              type: "turn-item.updated",
+              threadId,
+              runId: run.id,
+              occurredAt: now,
+              payload: {
+                id: retryItemId,
+                threadId,
+                runId: run.id,
+                nodeId: run.rootNodeId,
+                providerThreadId: run.providerThreadId,
+                providerTurnId: null,
+                nativeItemRef: null,
+                parentItemId: null,
+                ordinal: 2,
+                type: "error",
+                status: "running",
+                title: "Provider retry",
+                failure: {
+                  class: "provider_error",
+                  message: "Model overloaded",
+                  code: "overloaded",
+                  retryable: false,
+                },
+                retry: { attempt: 1, maxAttempts: 7, retryDelayMs },
+                startedAt: now,
+                completedAt: null,
+                updatedAt: now,
+              },
+            },
+          ],
+          effects: [
+            {
+              id: effectId,
+              commandId: CommandId.make(`capacity-effect-${action}`),
+              threadId,
+              availableAt: DateTime.add(now, { milliseconds: retryDelayMs }),
+              request: { type: "provider-turn.start", runId: run.id },
+            },
+          ],
+        });
+        const executed: Array<string> = [];
+        const workerLayer = EffectWorker.layerWithOptions({
+          workerId: `capacity-worker-${action}`,
+        }).pipe(
+          Layer.provide(Layer.succeed(EffectOutbox.EffectOutboxV2, outbox)),
+          Layer.provide(
+            Layer.succeed(EffectWorker.OrchestrationEffectExecutorV2, {
+              execute: (effect) =>
+                Effect.sync(() => {
+                  executed.push(effect.id);
+                }),
+            }),
+          ),
+        );
+        yield* Effect.gen(function* () {
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          yield* worker.drain();
+          yield* TestClock.adjust(recovering ? "1 second" : "2999 millis");
+          if (recovering) {
+            const recovery = yield* ProviderRuntimeRecoveryService.ProviderRuntimeRecoveryService;
+            yield* recovery.reconcile(action === "restart" ? "startup" : "shutdown");
+            yield* recovery.reconcile("startup");
+            const waiting = yield* orchestrator.getThreadProjection(threadId);
+            assert.equal(waiting.runs[0]?.status, "starting");
+            assert.equal(waiting.attempts[0]?.status, "pending");
+            const saved = yield* outbox.get(effectId);
+            assert.isTrue(Option.isSome(saved));
+            if (Option.isSome(saved))
+              assert.equal(
+                Date.parse(saved.value.availableAt),
+                DateTime.toEpochMillis(now) + retryDelayMs,
+              );
+            yield* worker.drain();
+            assert.notInclude(executed, effectId);
+            yield* TestClock.adjust("38999 millis");
+          }
+          yield* worker.drain();
+          assert.notInclude(executed, effectId);
+          if (action === "stop")
+            yield* orchestrator.dispatch({
+              type: "run.interrupt",
+              commandId: CommandId.make(`capacity-stop-${action}`),
+              threadId,
+              runId: run.id,
+              holdQueue: true,
+            });
+          if (action === "archive")
+            yield* orchestrator.dispatch({
+              type: "thread.archive",
+              commandId: CommandId.make(`capacity-archive-${action}`),
+              threadId,
+            });
+          yield* TestClock.adjust("1 millis");
+          yield* worker.drain();
+        }).pipe(Effect.provide(workerLayer));
+        const effect = yield* outbox.get(effectId);
+        assert.isTrue(Option.isSome(effect));
+        if (Option.isSome(effect))
+          assert.equal(
+            effect.value.status,
+            action === "due" || recovering ? "succeeded" : "cancelled",
+          );
+        if (action === "due" || recovering)
+          assert.equal(executed.filter((id) => id === effectId).length, 1);
+        else {
+          assert.notInclude(executed, effectId);
+          const stopped = yield* orchestrator.getThreadProjection(threadId);
+          const status = action === "stop" ? "interrupted" : "cancelled";
+          assert.equal(stopped.runs[0]?.status, status);
+          assert.equal(stopped.attempts[0]?.status, status);
+          assert.equal(stopped.nodes.find((node) => node.id === run.rootNodeId)?.status, status);
+          assert.equal(stopped.turnItems.find((item) => item.id === retryItemId)?.status, status);
+        }
+      }),
+  );
+
   it.effect("cancels queued work when a thread is archived", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;

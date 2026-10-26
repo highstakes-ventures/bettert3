@@ -609,6 +609,8 @@ export const OrchestrationV2RunAttempt = Schema.Struct({
   nativeThreadId: Schema.optional(Schema.String),
   runId: RunId,
   attemptOrdinal: PositiveInt,
+  /** App-owned capacity retries within this run, separate from the provider's native retries. */
+  capacityRetryCount: Schema.optional(NonNegativeInt),
   rootNodeId: NodeId,
   providerInstanceId: ProviderInstanceId,
   providerThreadId: ProviderThreadId,

@@ -227,6 +227,7 @@ export interface EffectOutboxV2Shape {
     readonly threadId: ThreadId;
     readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
     readonly reason: string;
+    readonly preservePendingCapacityRetries?: boolean;
   }) => Effect.Effect<ReadonlyArray<string>, EffectOutboxError>;
   readonly signalCancellations: (effectIds: ReadonlyArray<string>) => Effect.Effect<void>;
   readonly awaitCancellation: (effectId: string) => Effect.Effect<void>;
@@ -315,6 +316,23 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
     // authoritative. Retaining a small burst lets multiple worker slots wake
     // for distinct threads without allowing notifications to grow unbounded.
     const available = yield* Queue.dropping<void>(64);
+    // A pending capacity timer owns no live provider process. Its deadline and
+    // current, never-started attempt survive process loss together.
+    const pendingCapacityRetry = sql`
+      status = 'pending' AND effect_type = 'provider-turn.start' AND EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_runs AS run
+        JOIN orchestration_v2_projection_run_attempts AS attempt
+          ON attempt.attempt_id = json_extract(run.payload_json, '$.activeAttemptId')
+        JOIN orchestration_v2_projection_threads AS thread ON thread.thread_id = run.thread_id
+        WHERE run.thread_id = orchestration_v2_effect_outbox.thread_id
+          AND run.run_id = json_extract(orchestration_v2_effect_outbox.payload_json, '$.runId')
+          AND run.status = 'starting' AND attempt.status = 'pending'
+          AND json_extract(attempt.payload_json, '$.capacityRetryCount') > 0
+          AND orchestration_v2_effect_outbox.effect_id = 'effect:capacity-retry:' || attempt.attempt_id
+          AND json_extract(thread.payload_json, '$.archivedAt') IS NULL
+          AND json_extract(thread.payload_json, '$.deletedAt') IS NULL
+      )
+    `;
     const cancellationSignals = new Map<string, Deferred.Deferred<void>>();
     const settledSignals = new Map<string, Deferred.Deferred<void>>();
     const signalSettled = (effectIds: ReadonlyArray<string>) =>
@@ -464,7 +482,12 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
               : new EffectOutboxError({ operation: "list", cause }),
           ),
         ),
-      cancelUnsettled: ({ threadId, effectTypes, reason }) =>
+      cancelUnsettled: ({
+        threadId,
+        effectTypes,
+        reason,
+        preservePendingCapacityRetries = false,
+      }) =>
         Effect.gen(function* () {
           if (effectTypes.length === 0) return [];
           const now = DateTime.formatIso(yield* DateTime.now);
@@ -480,6 +503,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
             WHERE thread_id = ${threadId}
               AND status IN ('pending', 'running')
               AND effect_type IN ${sql.in(effectTypes)}
+              AND ${preservePendingCapacityRetries ? sql`NOT (${pendingCapacityRetry})` : sql`1 = 1`}
             RETURNING effect_id
           `;
           return rows.map(({ effect_id }) => effect_id);
@@ -534,6 +558,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
             last_error = 'Cancelled because the server process ended before the effect completed.'
           WHERE status IN ('pending', 'running')
             AND effect_type IN ${sql.in(PROCESS_BOUND_EFFECT_TYPES)}
+            AND NOT (${pendingCapacityRetry})
           RETURNING effect_id
         `;
         const requeuedRows = yield* sql<{ readonly effect_id: string }>`
