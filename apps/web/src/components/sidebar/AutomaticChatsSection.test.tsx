@@ -275,3 +275,51 @@ it("keeps an imported automatic chat visible on its normal thread route within t
   expect(container.querySelectorAll("a")).toHaveLength(10);
   expect(container.textContent).not.toContain("automatic-39");
 });
+
+it("uses the latest run's timestamps for elapsed time and freezes completed runs", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-10-26T12:02:00Z"));
+    const startedAt = Date.parse("2026-10-26T12:00:00Z") / 1000;
+    state.chats = [
+      {
+        ...chat("timed"),
+        createdAt: startedAt - 86400,
+        latestTurn: { startedAt, completedAt: null },
+      },
+    ];
+    await render(true);
+    const row = container.querySelector("a")!;
+    expect(row.querySelector('[aria-label="Codex Cloud"]')).not.toBeNull();
+    expect(row.querySelector('[aria-label="Current run duration"]')?.textContent).toBe("2m");
+    await act(() => vi.advanceTimersByTime(60_000));
+    expect(row.querySelector('[aria-label="Current run duration"]')?.textContent).toBe("3m");
+
+    state.chats = [
+      {
+        ...state.chats[0]!,
+        status: "idle",
+        latestTurn: { startedAt, completedAt: startedAt + 150 },
+      },
+    ];
+    await render(true);
+    expect(row.querySelector('[aria-label="Last run duration"]')?.textContent).toBe("2m");
+    await act(() => vi.advanceTimersByTime(60_000));
+    expect(row.querySelector('[aria-label="Last run duration"]')?.textContent).toBe("2m");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each([
+  { status: "active", latestTurn: undefined },
+  { status: "idle", latestTurn: { startedAt: 100, completedAt: null } },
+  { status: "unknown", latestTurn: null },
+  { status: "active", latestTurn: { startedAt: null, completedAt: null } },
+])("does not substitute chat age for unavailable run timing: %j", async (timing) => {
+  state.chats = [{ ...chat("untimed"), ...timing }];
+  await render(true);
+  const row = container.querySelector("a")!;
+  expect(row.querySelector('[aria-label="Codex Cloud"]')).not.toBeNull();
+  expect(row.querySelector('[aria-label$="run duration"]')).toBeNull();
+});

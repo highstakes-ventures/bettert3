@@ -30,6 +30,14 @@ export const CloudChatSummary = Schema.Struct({
   origin: Schema.Literals(["user", "automatic", "unknown"]),
   repository: Schema.NullOr(Schema.String),
   githubRunUrl: Schema.NullOr(Schema.String),
+  latestTurn: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        startedAt: Schema.NullOr(Schema.Number),
+        completedAt: Schema.NullOr(Schema.Number),
+      }),
+    ),
+  ),
 });
 export type CloudChatSummary = typeof CloudChatSummary.Type;
 

@@ -1,6 +1,6 @@
 import { Link, useParams } from "@tanstack/react-router";
 import type { CloudChatSummary } from "@t3tools/contracts";
-import { CheckCheckIcon, CloudIcon, PlusIcon } from "lucide-react";
+import { CheckCheckIcon, ClockIcon, CloudIcon, PlusIcon } from "lucide-react";
 import { useLayoutEffect, useState } from "react";
 import { cloudChatVisitKey, isUnopenedAutomaticChat } from "../../lib/cloudChatVisits";
 import { cn } from "../../lib/utils";
@@ -12,6 +12,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useUiStateStore } from "../../uiStateStore";
 import { ProjectMonogram } from "../ProjectMonogram";
+import { AgentElapsed } from "../chat/AgentElapsed";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -45,6 +46,17 @@ function AutomaticChatRow({
       params.threadId === normalThreadId &&
       params.environmentId === environmentId);
   const running = chat.status === "active";
+  const turn = chat.latestTurn;
+  const elapsed =
+    turn?.startedAt != null && (running || turn.completedAt != null)
+      ? {
+          status: running ? ("running" as const) : ("completed" as const),
+          startedAt: new Date(turn.startedAt * 1000).toISOString(),
+          completedAt:
+            turn.completedAt != null ? new Date(turn.completedAt * 1000).toISOString() : null,
+        }
+      : null;
+  const durationLabel = running ? "Current run duration" : "Last run duration";
   const repositoryName = chat.repository?.split("/").at(-1);
   const identity = repositoryName ? deriveProjectIdentity(repositoryName) : null;
   const updatedAt = new Date(chat.updatedAt * 1000).toISOString();
@@ -113,6 +125,41 @@ function AutomaticChatRow({
         >
           {chat.title}
         </span>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                role="img"
+                aria-label="Codex Cloud"
+                className="inline-flex shrink-0 items-center text-secondary-label"
+              />
+            }
+          >
+            <CloudIcon aria-hidden className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup>Codex Cloud</TooltipPopup>
+        </Tooltip>
+        {elapsed ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  aria-label={durationLabel}
+                  className="inline-flex shrink-0 items-center gap-1 text-xs text-secondary-label"
+                />
+              }
+            >
+              <ClockIcon aria-hidden className="size-3" />
+              <AgentElapsed agent={elapsed} compact />
+            </TooltipTrigger>
+            <TooltipPopup>
+              {durationLabel} · Started {new Date(elapsed.startedAt).toLocaleString()}
+              {elapsed.completedAt
+                ? ` · Finished ${new Date(elapsed.completedAt).toLocaleString()}`
+                : ""}
+            </TooltipPopup>
+          </Tooltip>
+        ) : null}
         {unopened ? (
           <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
         ) : null}

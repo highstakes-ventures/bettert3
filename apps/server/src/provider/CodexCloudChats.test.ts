@@ -239,12 +239,29 @@ it.effect(
           method === "thread/list"
             ? { data: [{ ...thread, threadSource: "automation" }], nextCursor: null }
             : params.sortDirection === "desc"
-              ? { data: [{ id: "latest", status, items: [] }], nextCursor: null }
+              ? {
+                  data: [
+                    {
+                      id: "latest",
+                      status,
+                      startedAt: 120,
+                      completedAt: status === "completed" ? 180 : null,
+                      items: [],
+                    },
+                  ],
+                  nextCursor: null,
+                }
               : page;
 
-        expect((yield* service.list()).chats[0]?.status).toBe("active");
+        expect((yield* service.list()).chats[0]).toMatchObject({
+          status: "active",
+          latestTurn: { startedAt: 120, completedAt: null },
+        });
         status = "completed";
-        expect((yield* service.list()).chats[0]?.status).toBe("idle");
+        expect((yield* service.list()).chats[0]).toMatchObject({
+          status: "idle",
+          latestTurn: { startedAt: 120, completedAt: 180 },
+        });
         const activityReads = wire.requests.filter(
           ({ method, params }) => method === "thread/turns/list" && params.sortDirection === "desc",
         );
@@ -276,6 +293,7 @@ it.effect.each(["protocol-error", "missing-status"])(
           id: threadId,
           title: "My question",
           status: "unknown",
+          latestTurn: failure === "protocol-error" ? null : { startedAt: null, completedAt: null },
         });
       }),
     ),

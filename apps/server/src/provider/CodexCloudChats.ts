@@ -627,6 +627,7 @@ const make = Effect.gen(function* () {
                     summaries.set(thread.id, summary);
                 }
                 let status = thread.status.type;
+                let latestTurn: CloudChatSummary["latestTurn"];
                 if (summary.provenance.origin === "automatic") {
                   // Cloud's list can say idle while a turn is running. Read only the
                   // newest turn's metadata, without downloading its tool output.
@@ -638,8 +639,11 @@ const make = Effect.gen(function* () {
                     "desc",
                     "notLoaded",
                   ).pipe(Effect.result);
-                  const turnStatus =
-                    latest._tag === "Success" ? latest.success.data[0]?.status : undefined;
+                  const turn = latest._tag === "Success" ? latest.success.data[0] : undefined;
+                  latestTurn = turn
+                    ? { startedAt: turn.startedAt ?? null, completedAt: turn.completedAt ?? null }
+                    : null;
+                  const turnStatus = turn?.status;
                   status =
                     turnStatus === "inProgress"
                       ? "active"
@@ -659,6 +663,7 @@ const make = Effect.gen(function* () {
                   origin: summary.provenance.origin,
                   repository: summary.provenance.repository,
                   githubRunUrl: summary.provenance.githubRunUrl,
+                  ...(latestTurn !== undefined ? { latestTurn } : {}),
                 };
               }),
             { concurrency: 4 },
