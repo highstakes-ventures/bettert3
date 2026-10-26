@@ -441,6 +441,7 @@ const make = Effect.gen(function* () {
         ),
         threadId: (implementation ? record.implementationThreadId : record.threadId)!,
         projectId: record.projectId,
+        ...(record.kind === "tickets" ? {} : { automationOrigin: "t3" as const }),
         title: `${implementation ? "Implement" : record.kind === "tickets" ? "Prepare" : "Scan"}: ${record.title}`,
         modelSelection: config.modelSelection,
         runtimeMode: config.runtimeMode,

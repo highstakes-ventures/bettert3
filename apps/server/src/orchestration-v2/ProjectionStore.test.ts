@@ -24,6 +24,7 @@ import {
   RuntimeRequestId,
   RunAttemptId,
   RunId,
+  ScheduledTaskId,
   ThreadId,
   TurnItemId,
   type ThreadPullRequestLink,
@@ -1106,6 +1107,57 @@ const assertProjectScopedShells = Effect.fn("assertProjectScopedShells")(functio
   );
   return { projectId, activeThreadId, forkThreadId, otherThreadId };
 });
+
+it.effect.each([
+  { name: "memory", layer: ProjectionStore.layerMemory },
+  { name: "SQL", layer: layerTest },
+] as const)(
+  "$name shells retain scheduled provenance after later manual messages",
+  ({ name, layer }) =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = yield* addRolledBackRecoveryCandidate(`scheduled-${name}`);
+      const now = yield* DateTime.now;
+      for (const scheduled of [true, false]) {
+        yield* store.apply({
+          id: EventId.make(`event:${name}:${scheduled}`),
+          type: "message.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            id: MessageId.make(`message:${name}:${scheduled}`),
+            threadId,
+            runId: null,
+            nodeId: null,
+            createdBy: scheduled ? "agent" : "user",
+            creationSource: "mcp",
+            role: "user",
+            ...(scheduled
+              ? { scheduledTaskId: ScheduledTaskId.make("scheduled-task:webhook") }
+              : {}),
+            text: scheduled ? "Native cycle wake" : "Show progress",
+            attachments: [],
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      }
+      assert.equal(
+        (yield* store.getThreadShell(threadId))?.scheduledTaskId,
+        "scheduled-task:webhook",
+      );
+      assert.equal(
+        (yield* store.getShellSnapshot()).threads.find((thread) => thread.id === threadId)
+          ?.scheduledTaskId,
+        "scheduled-task:webhook",
+      );
+      const projected = ProjectionStore.threadShellFromProjection(
+        yield* store.getThreadProjection(threadId),
+      );
+      assert.equal(projected.scheduledTaskId, "scheduled-task:webhook");
+    }).pipe(Effect.provide(layer)),
+);
 
 const assertExecutionDestinationShell = Effect.gen(function* () {
   const store = yield* ProjectionStore.ProjectionStoreV2;

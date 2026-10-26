@@ -60,6 +60,7 @@ import {
   OrchestrationV2TurnItemJson as OrchestrationV2TurnItemJsonSchema,
   orchestrationV2RunWorkStartedAt,
   RunId,
+  ScheduledTaskId,
   MessageId,
   RuntimeRequestId,
   CheckpointScopeId,
@@ -1056,6 +1057,7 @@ type ShellPendingTurnItemRow = PayloadRow & {
 
 type ShellThreadRow = {
   readonly thread_id: string;
+  readonly scheduled_task_id: string | null;
   readonly ticket_workflow_id: string | null;
   readonly background_workflow_id: string | null;
   readonly payload_json: string;
@@ -1595,7 +1597,16 @@ export function threadShellFromProjection(
   const executionDestination = executionSession
     ? executionSession.executionDestination
     : importedCloudDestination;
+  const scheduledTaskId = projection.messages.find(
+    (message) => message.scheduledTaskId !== undefined,
+  )?.scheduledTaskId;
   return {
+    ...(projection.thread.automationOrigin !== undefined
+      ? { automationOrigin: projection.thread.automationOrigin }
+      : scheduledTaskId !== undefined
+        ? { automationOrigin: null }
+        : {}),
+    ...(scheduledTaskId === undefined ? {} : { scheduledTaskId }),
     ...(executionDestination === undefined ? {} : { executionDestination }),
     ...(projection.thread.runDestination === undefined
       ? {}
@@ -1730,6 +1741,7 @@ function isActivityRunForShell(
 }
 
 type ShellThreadState = {
+  readonly scheduledTaskId: OrchestrationV2ThreadShell["scheduledTaskId"];
   readonly ticketWorkflowId: string | null;
   readonly backgroundWorkflowId: string | null;
   readonly executionDestination: OrchestrationV2ThreadShell["executionDestination"];
@@ -1863,6 +1875,16 @@ function shellFromState(input: {
   readonly visibleItemCount: number;
 }): OrchestrationV2ThreadShell {
   return {
+    ...(input.state.thread.automationOrigin !== undefined
+      ? { automationOrigin: input.state.thread.automationOrigin }
+      : input.state.backgroundWorkflowId !== null && input.state.ticketWorkflowId === null
+        ? { automationOrigin: "t3" as const }
+        : input.state.scheduledTaskId !== undefined
+          ? { automationOrigin: null }
+          : {}),
+    ...(input.state.scheduledTaskId === undefined
+      ? {}
+      : { scheduledTaskId: input.state.scheduledTaskId }),
     ...(input.state.ticketWorkflowId === null
       ? {}
       : { ticketWorkflowId: input.state.ticketWorkflowId }),
@@ -5688,6 +5710,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               t.thread_id,
               t.payload_json,
               (
+                SELECT json_extract(message.payload_json, '$.scheduledTaskId')
+                FROM orchestration_v2_projection_messages message
+                WHERE message.thread_id = t.thread_id
+                  AND json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
+                ORDER BY message.created_at, message.message_id
+                LIMIT 1
+              ) AS scheduled_task_id,
+              (
                 SELECT workflow.id FROM workflow_runs workflow
                 WHERE json_extract(workflow.run_json, '$.threadId') = t.thread_id
                   AND json_extract(workflow.run_json, '$.kind') = 'tickets'
@@ -6334,6 +6364,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ? undefined
               : yield* decodeExecutionDestinationPayload(row.execution_destination_json),
           thread,
+          scheduledTaskId:
+            row.scheduled_task_id === null
+              ? undefined
+              : ScheduledTaskId.make(row.scheduled_task_id),
           latestRunId,
           latestRunStatus,
           latestRunRequestedAt,

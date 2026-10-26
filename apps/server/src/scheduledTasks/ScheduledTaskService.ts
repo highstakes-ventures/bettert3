@@ -833,6 +833,7 @@ export const layer = Layer.effect(
                 threadLaunch
                   .launch({
                     commandId,
+                    automationOrigin: trigger === "webhook" ? "external" : "t3",
                     projectId: active.projectId,
                     title: active.title,
                     modelSelection: active.modelSelection,

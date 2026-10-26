@@ -2514,6 +2514,262 @@ describe("composerDraftStore attachment references", () => {
 
 describe("remembered run destination", () => {
   beforeEach(resetComposerDraftStore);
+  it.each([TEST_ENVIRONMENT_ID, OTHER_TEST_ENVIRONMENT_ID])(
+    "checks uploads against the remembered destination when moving a draft from %s",
+    (sourceEnvironmentId) => {
+      const source = scopeProjectRef(sourceEnvironmentId, ProjectId.make("source-project"));
+      const localTarget = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("target-local"));
+      const remoteTarget = scopeProjectRef(
+        OTHER_TEST_ENVIRONMENT_ID,
+        ProjectId.make("target-remote"),
+      );
+      const saved = DraftId.make("saved-target");
+      const moving = DraftId.make("moving-upload");
+      const store = useComposerDraftStore.getState();
+      store.setLogicalProjectDraftThreadId("target", remoteTarget, saved);
+      store.setDraftThreadContext(saved, { environmentSelection: "manual" });
+      store.setLogicalProjectDraftThreadId("source", source, moving);
+      store.addFiles(moving, [
+        {
+          ...makeFile("uploaded-file"),
+          file: null,
+          uploadedAttachmentId: "source-upload",
+          uploadEnvironmentId: sourceEnvironmentId,
+        },
+      ]);
+      store.setLogicalProjectDraftThreadId("target", localTarget, moving);
+      expect(store.getDraftSession(moving)?.environmentId).toBe(OTHER_TEST_ENVIRONMENT_ID);
+      const file = store.getComposerDraft(moving)?.files[0];
+      if (sourceEnvironmentId === OTHER_TEST_ENVIRONMENT_ID) {
+        expect(file?.uploadedAttachmentId).toBe("source-upload");
+      } else {
+        expect(file?.uploadedAttachmentId).toBeUndefined();
+        expect(file?.uploadEnvironmentId).toBeUndefined();
+        expect(file && composerFileNeedsReattach(file)).toBe(true);
+      }
+    },
+  );
+
+  it("does not carry Cloud routing into a different project without saved choices", () => {
+    const source = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("cloud-source"));
+    const target = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("unconfigured-target"));
+    const draft = DraftId.make("cloud-project-switch");
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(source, draft);
+    store.setDraftThreadContext(draft, {
+      environmentSelection: "manual",
+      runDestination: {
+        kind: "codexCloud",
+        accountId: "account",
+        environmentConfigId: "cloud-env",
+        name: "Cloud",
+        cwd: "/workspace",
+      },
+    });
+    store.setPrompt(draft, "Keep this prompt");
+    store.setProjectDraftThreadId(target, draft, { envMode: "worktree", startFromOrigin: true });
+    expect(store.getDraftSession(draft)).toMatchObject({
+      ...target,
+      runDestination: null,
+      environmentSelection: "auto",
+      envMode: "worktree",
+      startFromOrigin: true,
+      branch: null,
+      worktreePath: null,
+    });
+    expect(store.getComposerDraft(draft)?.prompt).toBe("Keep this prompt");
+  });
+
+  it("keeps a selected machine when reopening its empty draft from another project member", () => {
+    const local = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("local-project"));
+    const remote = scopeProjectRef(EnvironmentId.make("remote"), ProjectId.make("remote-project"));
+    const draft = DraftId.make("machine-draft");
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId("shared-project", local, draft);
+    store.setDraftThreadContext(draft, {
+      projectRef: remote,
+      runDestination: null,
+      environmentSelection: "manual",
+    });
+    store.setLogicalProjectDraftThreadId("shared-project", local, draft, { envMode: "local" });
+    expect(store.getDraftSession(draft)).toMatchObject(remote);
+  });
+
+  it.each([false, true])(
+    "lets a prepared checkout retarget an existing draft with Cloud=%s",
+    (cloud) => {
+      const local = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("checkout-local"));
+      const remote = scopeProjectRef(OTHER_TEST_ENVIRONMENT_ID, ProjectId.make("checkout-remote"));
+      const draft = DraftId.make("prepared-checkout");
+      const store = useComposerDraftStore.getState();
+      store.setLogicalProjectDraftThreadId("checkout-project", remote, draft);
+      store.setDraftThreadContext(draft, {
+        environmentSelection: "manual",
+        ...(cloud
+          ? {
+              runDestination: {
+                kind: "codexCloud" as const,
+                accountId: "account",
+                environmentConfigId: "cloud",
+                name: "Cloud",
+                cwd: "/workspace",
+              },
+            }
+          : {}),
+      });
+      store.setPrompt(draft, "Keep this prompt");
+      store.setLogicalProjectDraftThreadId("checkout-project", local, draft, {
+        branch: "pr-7",
+        worktreePath: "/local/pr-7",
+        envMode: "worktree",
+        environmentSelection: "manual",
+        runDestination: null,
+      });
+      expect(store.getDraftSession(draft)).toMatchObject({
+        ...local,
+        runDestination: null,
+        branch: "pr-7",
+        worktreePath: "/local/pr-7",
+      });
+      expect(store.getComposerDraft(draft)?.prompt).toBe("Keep this prompt");
+    },
+  );
+
+  it("restores each project's workspace after persistence without reusing a newly created worktree", () => {
+    const project = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("workspace-project"));
+    const other = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("other-project"));
+    const first = DraftId.make("workspace-first");
+    const otherDraft = DraftId.make("other-draft");
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(project, first);
+    store.setDraftThreadContext(first, {
+      envMode: "worktree",
+      startFromOrigin: true,
+      rememberWorkspace: true,
+    });
+    // The launched task's path is not a new workspace preference.
+    store.setDraftThreadContext(first, { branch: "t3/task", worktreePath: "/new-task" });
+    store.setProjectDraftThreadId(other, otherDraft, { envMode: "worktree" });
+    store.setDraftThreadContext(otherDraft, { envMode: "local", rememberWorkspace: true });
+    const hydrated = useComposerDraftStore.persist.getOptions().merge!(
+      JSON.parse(
+        JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
+      ),
+      useComposerDraftStore.getInitialState(),
+    );
+    useComposerDraftStore.setState(hydrated);
+    const restored = useComposerDraftStore.getState();
+    const next = DraftId.make("workspace-next");
+    const nextOther = DraftId.make("other-next");
+    restored.setProjectDraftThreadId(project, next, { envMode: "local" });
+    restored.setProjectDraftThreadId(other, nextOther, { envMode: "worktree" });
+    expect(restored.getDraftSession(next)).toMatchObject({
+      envMode: "worktree",
+      startFromOrigin: true,
+      branch: null,
+      worktreePath: null,
+    });
+    expect(restored.getDraftSession(nextOther)?.envMode).toBe("local");
+  });
+
+  it("restores an explicitly selected existing worktree when changing the draft's project", () => {
+    const project = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("previous-project"));
+    const other = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("other-project"));
+    const first = DraftId.make("previous-first");
+    const moving = DraftId.make("moving-draft");
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId("previous-project", project, first);
+    store.setDraftThreadContext(first, {
+      envMode: "worktree",
+      branch: "t3/existing",
+      worktreePath: "/existing",
+      rememberWorkspace: true,
+    });
+    store.setLogicalProjectDraftThreadId("other-project", other, moving);
+    store.setPrompt(moving, "Keep this prompt");
+    store.setLogicalProjectDraftThreadId("previous-project", project, moving);
+    expect(store.getDraftSession(moving)).toMatchObject({
+      envMode: "worktree",
+      branch: "t3/existing",
+      worktreePath: "/existing",
+    });
+    expect(store.getComposerDraft(moving)?.prompt).toBe("Keep this prompt");
+  });
+
+  it("remembers selecting the current workspace even when the draft itself does not change", () => {
+    const project = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("unchanged-workspace"));
+    const first = DraftId.make("unchanged-first");
+    const next = DraftId.make("unchanged-next");
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(project, first, { envMode: "local" });
+    store.setDraftThreadContext(first, { envMode: "local", rememberWorkspace: true });
+    store.setProjectDraftThreadId(project, next, { envMode: "worktree" });
+    expect(store.getDraftSession(next)?.envMode).toBe("local");
+  });
+
+  it("lets explicit workspace actions override saved routing and keeps paths on their machine", () => {
+    const local = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("local-project"));
+    const remote = scopeProjectRef(EnvironmentId.make("remote"), ProjectId.make("remote-project"));
+    const first = DraftId.make("explicit-first");
+    const next = DraftId.make("explicit-next");
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId("shared-project", remote, first);
+    store.setDraftThreadContext(first, {
+      envMode: "worktree",
+      worktreePath: "/remote-worktree",
+      branch: "remote-branch",
+      environmentSelection: "manual",
+      rememberWorkspace: true,
+    });
+    store.setLogicalProjectDraftThreadId("shared-project", local, next, {
+      environmentSelection: "manual",
+      runDestination: null,
+      envMode: "worktree",
+      worktreePath: null,
+      branch: "main",
+    });
+    expect(store.getDraftSession(next)).toMatchObject({
+      ...local,
+      envMode: "worktree",
+      worktreePath: null,
+      branch: "main",
+    });
+    const later = DraftId.make("explicit-later");
+    store.setLogicalProjectDraftThreadId("shared-project", local, later);
+    expect(store.getDraftSession(later)?.worktreePath).toBeNull();
+  });
+
+  it("remembers returning to automatic routing without pinning the last machine or worktree", () => {
+    const local = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("local-project"));
+    const remote = scopeProjectRef(EnvironmentId.make("remote"), ProjectId.make("remote-project"));
+    const first = DraftId.make("auto-first");
+    const next = DraftId.make("auto-next");
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId("shared-project", remote, first);
+    store.setDraftThreadContext(first, {
+      envMode: "worktree",
+      worktreePath: "/remote-worktree",
+      branch: "remote-branch",
+      environmentSelection: "manual",
+      rememberWorkspace: true,
+    });
+    store.setDraftThreadContext(first, {
+      environmentSelection: "auto",
+      loadBalancedEnvironmentId: null,
+      runDestination: null,
+      branch: null,
+      worktreePath: null,
+    });
+    store.setLogicalProjectDraftThreadId("shared-project", local, next);
+    expect(store.getDraftSession(next)).toMatchObject({
+      ...local,
+      environmentSelection: "auto",
+      envMode: "worktree",
+      branch: null,
+      worktreePath: null,
+    });
+  });
+
   it("restores the explicit Cloud destination after persistence, and remembers returning to a machine", () => {
     const projectRef = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("project-destination"));
     const key = scopedProjectKey(projectRef);
@@ -2528,6 +2784,7 @@ describe("remembered run destination", () => {
     };
     const store = useComposerDraftStore.getState();
     store.setLogicalProjectDraftThreadId(key, projectRef, first);
+    store.setDraftThreadContext(first, { envMode: "worktree", rememberWorkspace: true });
     store.setDraftThreadContext(first, {
       runDestination: cloud,
       environmentSelection: "manual",
@@ -2558,7 +2815,11 @@ describe("remembered run destination", () => {
       .setDraftThreadContext(second, { runDestination: null, environmentSelection: "manual" });
     const third = DraftId.make("draft-destination-third");
     useComposerDraftStore.getState().setLogicalProjectDraftThreadId(key, projectRef, third);
-    expect(useComposerDraftStore.getState().getDraftSession(third)?.runDestination).toBeNull();
+    expect(useComposerDraftStore.getState().getDraftSession(third)).toMatchObject({
+      runDestination: null,
+      envMode: "worktree",
+      worktreePath: null,
+    });
   });
 });
 

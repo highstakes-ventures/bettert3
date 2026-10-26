@@ -1444,6 +1444,7 @@ it.effect("launches one fresh task per enabled scanner and local day after resum
     yield* h.service.resume();
     yield* (yield* h.restart()).resume();
     expect(h.launches).toHaveLength(2);
+    expect(h.launches.map((entry) => entry.automationOrigin)).toEqual(["t3", "t3"]);
     expect((yield* h.service.list(projectId)).runs.map((entry) => entry.id).sort()).toEqual([
       "performance:test-project:2026-10-23",
       "refactor:test-project:2026-10-23",

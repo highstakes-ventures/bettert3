@@ -12,6 +12,8 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vite-plus/test";
 
+vi.mock("@tanstack/router-core/isServer", () => ({ isServer: false }));
+
 const state = vi.hoisted(() => ({
   threads: [] as EnvironmentThreadShell[],
   open: vi.fn(),
@@ -20,7 +22,10 @@ vi.mock("../../state/entities", () => ({
   useThreadShells: () => state.threads,
   waitForThreadShell: () => Promise.resolve(true),
 }));
-vi.mock("../../state/environments", () => ({ usePrimaryEnvironmentId: () => "env" }));
+vi.mock("../../state/environments", () => ({
+  usePrimaryEnvironmentId: () => "env",
+  useEnvironmentMachines: () => new Map(),
+}));
 vi.mock("../../state/cloudChats", () => ({
   cloudChats: { list: () => null, open: { permissionAtom: () => null } },
 }));
@@ -31,6 +36,7 @@ vi.mock("../../state/query", () => ({
     error: null,
     data: {
       accountId: "account",
+      tasks: [],
       hasMore: false,
       chats: [
         { id: "native", title: "Nightly", origin: "automatic", status: "idle", updatedAt: 1 },
@@ -99,13 +105,19 @@ it("returns to an imported automatic chat without reopening its Cloud fetch rout
       await router.load();
       root.render(<RouterProvider router={router} />);
     });
-    await act(async () => container.querySelector<HTMLAnchorElement>("a")!.click());
+    await act(async () => {
+      container.querySelector<HTMLAnchorElement>("a")!.click();
+      await router.latestLoadPromise;
+    });
     expect(state.open).toHaveBeenCalledOnce();
     expect(container.textContent).toContain("Cached normal conversation");
     await act(() => router.navigate({ to: "/" }));
     await act(() => useUiStateStore.setState({ threadLastVisitedAtById: {} }));
     state.open.mockImplementation(() => new Promise(() => {}));
-    await act(async () => container.querySelector<HTMLAnchorElement>("a")!.click());
+    await act(async () => {
+      container.querySelector<HTMLAnchorElement>("a")!.click();
+      await router.latestLoadPromise;
+    });
     expect(container.textContent).toContain("Cached normal conversation");
     expect(container.textContent).not.toContain("Opening Cloud conversation");
     expect(state.open).toHaveBeenCalledOnce();

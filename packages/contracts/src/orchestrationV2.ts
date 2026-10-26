@@ -372,6 +372,8 @@ export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
 export type OrchestrationV2LimitRecoveryUpdate = typeof OrchestrationV2LimitRecoveryUpdate.Type;
 
 export const OrchestrationV2AppThread = Schema.Struct({
+  /** Original automatic kickoff. Null means automatic with unknown historical origin. */
+  automationOrigin: Schema.optional(Schema.NullOr(Schema.Literals(["t3", "external"]))),
   runDestination: Schema.optional(CodexCloudDestination),
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -1816,6 +1818,9 @@ export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
 export const OrchestrationV2ThreadShell = Schema.Struct({
+  automationOrigin: OrchestrationV2AppThread.fields.automationOrigin,
+  /** Derived from persisted scheduled user messages, including fresh webhook threads. */
+  scheduledTaskId: Schema.optional(ScheduledTaskId),
   /** Ticket preparation/refinement conversation, derived from its workflow record. */
   ticketWorkflowId: Schema.optional(TrimmedNonEmptyString),
   /** Hidden scan or unopened ticket conversation, derived from its workflow. */
@@ -2592,6 +2597,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("thread.create"),
+    automationOrigin: OrchestrationV2AppThread.fields.automationOrigin,
     runDestination: Schema.optional(CodexCloudDestination),
     sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     ...OrchestrationV2CreationFields,

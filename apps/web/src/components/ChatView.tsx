@@ -1,7 +1,6 @@
 import { createModelSelection } from "@t3tools/shared/model";
 import { Atom } from "effect/reactivity";
 import type { OrchestrationV2ShellSnapshot } from "@t3tools/contracts";
-import { useMemo } from "react";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
 import { usePasteToFocusComposer } from "./chat/usePasteToFocusComposer";
 import {
@@ -21,8 +20,6 @@ import { type TerminalLaunchContext, useChatTerminalActions } from "./chat/useCh
 import { useComposerSend } from "./chat/useComposerSend";
 import { useComposerResume } from "./chat/useComposerResume";
 import { useImplementPlanInNewThread } from "./chat/useProposedPlanSend";
-import { ProjectId as WorkflowProjectId } from "@t3tools/contracts";
-import { WorkflowTicketPanel } from "./workflows/WorkflowTicketPanel";
 import type { CodexCloudDestination } from "@t3tools/contracts";
 import { cloudChats } from "../state/cloudChats";
 import { ThreadFind, ThreadFindCanvas, type ThreadFindControls } from "./chat/ThreadFindProvider";

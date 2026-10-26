@@ -80,7 +80,19 @@ it.effect("keeps ticket chats in the background until opened for refinement", ()
       manual: undefined,
       sales: undefined,
     });
+    expect(
+      Object.fromEntries(listed.map((thread) => [thread.id, thread.automationOrigin])),
+    ).toEqual({
+      scan: "t3",
+      prepare: undefined,
+      implementation: undefined,
+      manual: undefined,
+      sales: undefined,
+    });
     for (const thread of listed) {
+      expect((yield* store.getThreadShell(thread.id))?.automationOrigin).toBe(
+        thread.automationOrigin,
+      );
       expect((yield* store.getThreadShell(thread.id))?.backgroundWorkflowId).toBe(
         thread.backgroundWorkflowId,
       );

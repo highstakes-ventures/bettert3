@@ -2512,6 +2512,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const emitEvent = emit(events, command);
     yield* validateSection(command, command.projectId, command.sectionId);
     const thread: OrchestrationV2AppThread = {
+      ...(command.automationOrigin === undefined
+        ? {}
+        : { automationOrigin: command.automationOrigin }),
       createdBy: command.createdBy,
       creationSource: command.creationSource,
       id: command.threadId,

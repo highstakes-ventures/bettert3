@@ -40,7 +40,6 @@ export function usePullRequestDraftThread(input: PullRequestDraftThreadInput) {
     canCheckoutPullRequestIntoThread,
   } = input;
   const navigate = useNavigate();
-  const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
     (store) => store.getDraftSessionByLogicalProjectKey,
   );
@@ -71,16 +70,20 @@ export function usePullRequestDraftThread(input: PullRequestDraftThreadInput) {
       activeProject,
       projectGroupingSettings,
     );
+    const workspaceOptions = {
+      ...input,
+      environmentSelection: "manual" as const,
+      runDestination: null,
+    };
     const storedDraftSession = getDraftSessionByLogicalProjectKey(logicalProjectKey);
     if (storedDraftSession) {
-      setDraftThreadContext(storedDraftSession.draftId, input);
       setLogicalProjectDraftThreadId(
         logicalProjectKey,
         activeProjectRef,
         storedDraftSession.draftId,
         {
           threadId: storedDraftSession.threadId,
-          ...input,
+          ...workspaceOptions,
         },
       );
       if (routeKind !== "draft" || draftId !== storedDraftSession.draftId) {
@@ -94,13 +97,12 @@ export function usePullRequestDraftThread(input: PullRequestDraftThreadInput) {
 
     const activeDraftSession = routeKind === "draft" && draftId ? getDraftSession(draftId) : null;
     if (!isServerThread && activeDraftSession?.logicalProjectKey === logicalProjectKey && draftId) {
-      setDraftThreadContext(draftId, input);
       setLogicalProjectDraftThreadId(logicalProjectKey, activeProjectRef, draftId, {
         threadId: activeDraftSession.threadId,
         createdAt: activeDraftSession.createdAt,
         runtimeMode: activeDraftSession.runtimeMode,
         interactionMode: activeDraftSession.interactionMode,
-        ...input,
+        ...workspaceOptions,
       });
       return activeDraftSession.threadId;
     }
@@ -113,7 +115,7 @@ export function usePullRequestDraftThread(input: PullRequestDraftThreadInput) {
       runtimeMode: resolveProjectSettings(settings, activeProject.id, activeProject).settings
         .defaultRuntimeMode,
       interactionMode: DEFAULT_INTERACTION_MODE,
-      ...input,
+      ...workspaceOptions,
     });
     await navigate({
       to: "/draft/$draftId",

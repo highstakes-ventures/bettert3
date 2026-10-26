@@ -51,13 +51,16 @@ interface NewThreadWorkspaceOptions {
 }
 
 function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undefined) {
-  return {
+  const workspace = {
     ...(options?.sectionId !== undefined ? { sectionId: options.sectionId } : {}),
     ...(options?.branch !== undefined ? { branch: options.branch } : {}),
     ...(options?.worktreePath !== undefined ? { worktreePath: options.worktreePath } : {}),
     ...(options?.envMode !== undefined ? { envMode: options.envMode } : {}),
     ...(options?.startFromOrigin !== undefined ? { startFromOrigin: options.startFromOrigin } : {}),
   };
+  return Object.keys(workspace).length > 0
+    ? { ...workspace, environmentSelection: "manual" as const, runDestination: null }
+    : workspace;
 }
 
 export function useNewThreadHandler() {
@@ -142,6 +145,7 @@ export function useNewThreadHandler() {
         destinationDraftId,
       });
     const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
+      if (rememberedWorkspace) return rememberedWorkspace.envMode;
       const consultProjectFile =
         project !== undefined && projectSettings.settings.defaultThreadEnvMode === null;
       const projectFile = consultProjectFile
@@ -166,10 +170,21 @@ export function useNewThreadHandler() {
     const logicalProjectKey = project
       ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
       : scopedProjectKey(projectRef);
+    const preference =
+      useComposerDraftStore.getState().lastRunDestinationByProject[logicalProjectKey];
+    const rememberedWorkspace = preference?.runDestination
+      ? { envMode: "local" as const, startFromOrigin: false, branch: null, worktreePath: null }
+      : preference?.workspace;
     const hasBranchOption = options?.branch !== undefined;
     const hasWorktreePathOption = options?.worktreePath !== undefined;
     const hasEnvModeOption = options?.envMode !== undefined;
     const hasStartFromOriginOption = options?.startFromOrigin !== undefined;
+    const hasExplicitWorkspaceOption =
+      options?.sectionId !== undefined ||
+      hasBranchOption ||
+      hasWorktreePathOption ||
+      hasEnvModeOption ||
+      hasStartFromOriginOption;
     const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
     const storedDraftThreadRef = storedDraftThread
       ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
@@ -199,12 +214,6 @@ export function useNewThreadHandler() {
         const isDraftAlreadyOpen =
           currentRouteTarget?.kind === "draft" &&
           currentRouteTarget.draftId === emptyStoredDraftThread.draftId;
-        const hasExplicitWorkspaceOption =
-          options?.sectionId !== undefined ||
-          hasBranchOption ||
-          hasWorktreePathOption ||
-          hasEnvModeOption ||
-          hasStartFromOriginOption;
         let workspaceContext: NewThreadWorkspaceOptions | null = null;
         if (hasExplicitWorkspaceOption) {
           workspaceContext = pickExplicitWorkspaceOptions(options);
@@ -243,6 +252,7 @@ export function useNewThreadHandler() {
               envMode: defaultEnvMode,
               newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
             }),
+            ...rememberedWorkspace,
           };
         }
         if (workspaceContext) {
@@ -376,6 +386,8 @@ export function useNewThreadHandler() {
           }),
         runtimeMode: defaultRuntimeMode,
         ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+        ...(!hasExplicitWorkspaceOption ? rememberedWorkspace : {}),
+        ...pickExplicitWorkspaceOptions(options),
       });
       applyStickyState(draftId);
       const modelSelectionOverride = resolveModelSelectionOverride(draftId);
