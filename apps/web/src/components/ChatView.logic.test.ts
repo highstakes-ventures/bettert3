@@ -10,6 +10,9 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
+import { useComposerDraftStore } from "../composerDraftStore";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { createModelSelection } from "@t3tools/shared/model";
 import type { RightPanelSurface } from "../rightPanelStore";
 import {
   CommandId,
@@ -36,6 +39,7 @@ import type { Thread, TurnDiffSummary } from "../types";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../test-fixtures";
 import {
   agentControlledBrowserCloseConfirmation,
+  awaitComposerTurnAcceptance,
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   getAntigravitySendBlockReason,
   resolveBackgroundDraftWorkspaceOptions,
@@ -91,6 +95,49 @@ const environmentId = EnvironmentId.make("environment-local");
 const projectId = ProjectId.make("project-1");
 const threadId = ThreadId.make("thread-1");
 const now = "2026-03-29T00:00:00.000Z";
+
+describe("accepted composer turn", () => {
+  const ref = scopeThreadRef(environmentId, ThreadId.make("accepted-turn-seam"));
+  const old = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4");
+  const chosen = createModelSelection(ProviderInstanceId.make("claudeAgent"), "sonnet");
+
+  afterEach(() => {
+    useComposerDraftStore.setState({ draftsByThreadKey: {} });
+  });
+
+  it("retires only the choice the accepted dispatch sent and holds it through shell lag", async () => {
+    const store = useComposerDraftStore.getState();
+    const messageId = MessageId.make("accepted-turn-message");
+    store.setModelSelection(ref, chosen, { explicit: true });
+    await awaitComposerTurnAcceptance({
+      startPromise: Promise.resolve(AsyncResult.success({ sequence: 10 })),
+      threadRef: ref,
+      submittedExplicitSelection: chosen,
+      sentSelection: chosen,
+      messageId,
+      acknowledge: store.acknowledgeSubmittedModelSelection,
+    });
+    const queued = {
+      runs: [{ userMessageId: messageId, status: "queued" }],
+    } as unknown as import("@t3tools/contracts").OrchestrationV2ThreadProjection;
+    store.syncThreadModelSelection(ref, old, {
+      shellSequence: 11,
+      projection: queued,
+      projectionSequence: 10,
+    });
+    const draft = store.getComposerDraft(ref);
+    expect(draft?.activeProvider).toBe(chosen.instanceId);
+    const migrated = createModelSelection(ProviderInstanceId.make("cursor"), "cursor-model");
+    store.syncThreadModelSelection(ref, migrated, {
+      shellSequence: 14,
+      projection: {
+        runs: [{ userMessageId: messageId, status: "completed" }],
+      } as unknown as import("@t3tools/contracts").OrchestrationV2ThreadProjection,
+      projectionSequence: 13,
+    });
+    expect(store.getComposerDraft(ref)?.activeProvider).toBe(migrated.instanceId);
+  });
+});
 const helloWorldTemplate: CodexArtifactTemplate = {
   artifactKind: "document",
   displayName: "Hello World",

@@ -5,6 +5,7 @@ import {
   type EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import type { AcceptedModelSelection } from "@t3tools/client-runtime/handoff";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import {
   AuthOrchestrationOperateScope,
@@ -74,6 +75,8 @@ import {
   getComposerDraftSnapshot,
   mergeComposerDraftContent,
   replaceComposerDraftAttachments,
+  acceptComposerDraftModelSelection,
+  syncComposerDraftModelSelection,
   removeDeliveredCloudQueuedMessage,
   undoComposerDraftMerge,
   updateComposerDraftSettings,
@@ -288,13 +291,21 @@ function isQueuedMessagePayloadCurrent(
 export async function completeQueuedMessageDelivery(
   queuedMessage: QueuedThreadMessage,
   deliveryRevision: number,
+  accepted?: AcceptedModelSelection,
 ): Promise<"removed" | "edited" | "failed"> {
   // The server took it after all: an error left by an earlier failed recovery
   // of this same message no longer applies.
-  clearThreadComposerError(
-    scopedThreadKey(queuedMessage.environmentId, queuedMessage.threadId),
-    queuedMessage.messageId,
-  );
+  const threadKey = scopedThreadKey(queuedMessage.environmentId, queuedMessage.threadId);
+  clearThreadComposerError(threadKey, queuedMessage.messageId);
+  // The composer may have unmounted before the thread echoed this send. Keep a
+  // server-queued choice until its run starts, even if the outbox row is gone.
+  if (!queuedMessage.creation && queuedMessage.modelSelection) {
+    if (accepted) {
+      acceptComposerDraftModelSelection(threadKey, queuedMessage.modelSelection, accepted);
+    } else if (queuedMessage.dispatchMode !== "queue") {
+      syncComposerDraftModelSelection(threadKey, queuedMessage.modelSelection);
+    }
+  }
   try {
     await removeDeliveredCloudQueuedMessage(queuedMessage).catch((error) => {
       console.warn("[thread-outbox] could not update sign-out snapshot after delivery", {
@@ -960,8 +971,17 @@ export function useThreadOutboxDrain(): void {
         return restoreQueuedMessage(persistedMessage, failure.message);
       }
       acknowledgedExistingThreadMessageIdsRef.current.add(persistedMessage.messageId);
+      const accepted =
+        AsyncResult.isSuccess(deliveryResult) && "sequence" in deliveryResult.value
+          ? {
+              messageId: persistedMessage.messageId,
+              sequence: deliveryResult.value.sequence,
+              selection: sendSettings.modelSelection,
+            }
+          : undefined;
       const delivered =
-        (await completeQueuedMessageDelivery(persistedMessage, deliveryRevision)) === "removed";
+        (await completeQueuedMessageDelivery(persistedMessage, deliveryRevision, accepted)) ===
+        "removed";
       if (delivered) {
         acknowledgedExistingThreadMessageIdsRef.current.delete(persistedMessage.messageId);
       }

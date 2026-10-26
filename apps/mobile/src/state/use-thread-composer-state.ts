@@ -22,6 +22,7 @@ import {
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   type EnvironmentId,
   type ModelSelection,
+  type OrchestrationV2ShellSnapshot,
   type ProviderInteractionMode,
   type RuntimeMode,
   type ThreadId,
@@ -111,11 +112,14 @@ import {
 import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { dispatchingQueuedMessageIdAtom, useThreadOutboxMessages } from "./use-thread-outbox";
-import { threadEnvironment } from "./threads";
+import { threadEnvironment, useEnvironmentThread } from "./threads";
 import { useAtomCommand } from "./use-atom-command";
 
 const EMPTY_QUEUE_WORKFLOW_ATOM = Atom.make<null>(null).pipe(
   Atom.withLabel("mobile-thread-queue-workflow:empty"),
+);
+const EMPTY_HANDOFF_SHELL_ATOM = Atom.make<OrchestrationV2ShellSnapshot | null>(null).pipe(
+  Atom.withLabel("mobile-handoff-shell:empty"),
 );
 
 export function appendReviewCommentToDraft(input: {
@@ -188,8 +192,22 @@ export function useThreadComposerState() {
     selectedEnvironmentRuntime,
   } = useThreadSelection();
   const selectedThreadProjection = useSelectedThreadProjection();
-  const selectedThreadVisibleTurnItems = useSelectedThreadVisibleTurnItems();
+  const selectedThreadState = useEnvironmentThread(
+    selectedThreadShell?.environmentId ?? null,
+    selectedThreadShell?.id ?? null,
+  );
   const composerDrafts = useAtomValue(composerDraftsAtom);
+  const acceptedSelection = selectedThreadShell
+    ? composerDrafts[scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id)]
+        ?.acceptedModelSelection
+    : undefined;
+  const selectedShellSequence = useAtomValue(
+    selectedThreadShell && acceptedSelection
+      ? threadEnvironment.snapshotAtom(selectedThreadShell.environmentId)
+      : EMPTY_HANDOFF_SHELL_ATOM,
+    (snapshot) => snapshot?.snapshotSequence ?? null,
+  );
+  const selectedThreadVisibleTurnItems = useSelectedThreadVisibleTurnItems();
   const acknowledgedMessages = useAtomValue(acknowledgedThreadMessagesAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
   const dispatchingQueuedMessageId = useAtomValue(dispatchingQueuedMessageIdAtom);
@@ -340,18 +358,45 @@ export function useThreadComposerState() {
       syncComposerDraftModelSelection(
         scopedThreadKey(selectedThread.environmentId, selectedThread.id),
         selectedThread.modelSelection,
+        {
+          shellSequence: selectedShellSequence,
+          shellLatestRun: selectedThread.latestRun,
+          projection: selectedThreadProjection?.projection ?? null,
+          projectionSequence: selectedThreadProjection
+            ? selectedThreadState.lastAppliedSequence
+            : null,
+        },
       );
     }
-  }, [selectedThread, selectedDraft?.modelSelection]);
+  }, [
+    selectedThread,
+    selectedDraft?.modelSelection,
+    selectedShellSequence,
+    selectedThreadProjection,
+    selectedThreadState.lastAppliedSequence,
+  ]);
   const modelSelection = selectedDraft?.modelSelection ?? selectedThread?.modelSelection ?? null;
+  const pendingHandoffSelection =
+    selectedThread &&
+    isModelSelectionUnavailable(
+      selectedEnvironmentRuntime?.serverConfig,
+      modelSelection,
+      selectedThread.projectId,
+    )
+      ? null
+      : modelSelection;
   const pendingHandoff = useMemo(
     () =>
       resolvePendingHandoff(
         selectedThreadProjection?.projection,
-        modelSelection,
+        pendingHandoffSelection,
         selectedEnvironmentRuntime?.serverConfig?.providers ?? [],
       ),
-    [modelSelection, selectedThreadProjection, selectedEnvironmentRuntime?.serverConfig?.providers],
+    [
+      pendingHandoffSelection,
+      selectedThreadProjection,
+      selectedEnvironmentRuntime?.serverConfig?.providers,
+    ],
   );
   const runtimeMode = selectedDraft?.runtimeMode ?? selectedThread?.runtimeMode ?? null;
   const selectedProvider = selectedEnvironmentRuntime?.serverConfig?.providers.find(
@@ -636,6 +681,14 @@ export function useThreadComposerState() {
 
       const modelSelection = draft.modelSelection ?? thread.modelSelection;
       const serverConfig = selectedEnvironmentRuntime?.serverConfig;
+      if (
+        selectedEnvironmentRuntime?.connectionState === "connected" &&
+        serverConfig &&
+        !serverConfig.providers.some((entry) => entry.instanceId === modelSelection.instanceId)
+      ) {
+        Alert.alert("Provider unavailable", "Choose an available provider before sending.");
+        return null;
+      }
       if (
         selectedEnvironmentRuntime?.connectionState === "connected" &&
         isModelSelectionUnavailable(serverConfig, modelSelection, thread.projectId)

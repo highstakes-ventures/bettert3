@@ -7,6 +7,7 @@ export type EnvironmentThreadStatus = "empty" | "cached" | "synchronizing" | "li
 
 export interface EnvironmentThreadState {
   readonly data: Option.Option<OrchestrationV2ThreadProjection>;
+  readonly lastAppliedSequence: number;
   readonly status: EnvironmentThreadStatus;
   readonly error: Option.Option<string>;
   /**
@@ -19,6 +20,7 @@ export interface EnvironmentThreadState {
 
 export const EMPTY_ENVIRONMENT_THREAD_STATE: EnvironmentThreadState = {
   data: Option.none(),
+  lastAppliedSequence: 0,
   status: "empty",
   error: Option.none(),
   history: EMPTY_THREAD_HISTORY_META,

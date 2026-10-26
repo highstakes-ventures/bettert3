@@ -8,6 +8,7 @@ import {
   defaultInstanceIdForDriver,
   EnvironmentId,
   ModelSelection,
+  MessageId,
   ProjectId,
   ProviderInstanceId,
   ProviderInteractionMode,
@@ -81,6 +82,11 @@ import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
 import { createDeferredStorage, createMemoryStorage } from "./lib/storage";
+import {
+  acceptedModelSelectionPending,
+  type AcceptedModelSelection,
+  type AcceptedModelSelectionEvidence,
+} from "@t3tools/client-runtime/handoff";
 import { getDefaultServerModel } from "./providerModels";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
@@ -262,6 +268,13 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   // selections (project default / sticky) leave it unset so later seeds can
   // replace them; legacy entries predate the flag and read as seeded too.
   modelSelectionExplicit: Schema.optionalKey(Schema.Boolean),
+  acceptedModelSelection: Schema.optionalKey(
+    Schema.Struct({
+      messageId: MessageId,
+      sequence: Schema.Number,
+      selection: ModelSelection,
+    }),
+  ),
   runtimeMode: Schema.optionalKey(RuntimeMode),
   interactionMode: Schema.optionalKey(ProviderInteractionMode),
 });
@@ -428,6 +441,8 @@ export interface ComposerThreadDraftState {
    * may replace it. Legacy entries predate the flag and read as seeded.
    */
   modelSelectionExplicit?: boolean;
+  /** Successful submission waiting for its queued run and shell to converge. */
+  acceptedModelSelection?: AcceptedModelSelection;
   runtimeMode: RuntimeMode | null;
   interactionMode: ProviderInteractionMode | null;
 }
@@ -631,7 +646,16 @@ interface ComposerDraftStoreState {
       replaceOptions?: boolean;
     },
   ) => void;
-  syncThreadModelSelection: (threadRef: ScopedThreadRef, modelSelection: ModelSelection) => void;
+  syncThreadModelSelection: (
+    threadRef: ScopedThreadRef,
+    modelSelection: ModelSelection,
+    evidence?: AcceptedModelSelectionEvidence,
+  ) => void;
+  acknowledgeSubmittedModelSelection: (
+    threadRef: ComposerThreadTarget,
+    submittedSelection: ModelSelection,
+    accepted?: AcceptedModelSelection,
+  ) => void;
   /** Replace the model options for one or more providers in the draft. */
   setModelOptions: (
     threadRef: ComposerThreadTarget,
@@ -2168,6 +2192,12 @@ function normalizePersistedDraftsByThreadId(
             modelSelectionByProvider: compactModelSelectionByProvider(modelSelectionByProvider),
             activeProvider,
             ...(modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
+            ...(draftCandidate.acceptedModelSelection
+              ? {
+                  acceptedModelSelection:
+                    draftCandidate.acceptedModelSelection as DeepMutable<AcceptedModelSelection>,
+                }
+              : {}),
           }
         : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
@@ -2199,6 +2229,7 @@ function stripLegacyModelSeedsFromEmptyDraftSessions(
       if (
         draftThreadsByThreadKey[threadKey] === undefined ||
         draft.modelSelectionExplicit === true ||
+        draft.acceptedModelSelection !== undefined ||
         persistedComposerDraftHasUserContent(draft)
       ) {
         return [[threadKey, draft]];
@@ -2338,6 +2369,12 @@ export function partializeComposerDraftStoreState(
             ),
             activeProvider: draft.activeProvider,
             ...(draft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
+            ...(draft.acceptedModelSelection
+              ? {
+                  acceptedModelSelection:
+                    draft.acceptedModelSelection as DeepMutable<AcceptedModelSelection>,
+                }
+              : {}),
           }
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
@@ -2621,6 +2658,9 @@ function toHydratedThreadDraft(
     modelSelectionByProvider,
     activeProvider,
     ...(persistedDraft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
+    ...(persistedDraft.acceptedModelSelection
+      ? { acceptedModelSelection: persistedDraft.acceptedModelSelection }
+      : {}),
     runtimeMode: persistedDraft.runtimeMode ?? null,
     interactionMode: persistedDraft.interactionMode ?? null,
   };
@@ -3256,9 +3296,19 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
-        syncThreadModelSelection: (threadRef, modelSelection) => {
+        syncThreadModelSelection: (threadRef, modelSelection, evidence) => {
           const draft = get().getComposerDraft(threadRef);
           if (!draft) return;
+          if (
+            draft.acceptedModelSelection &&
+            (!evidence ||
+              acceptedModelSelectionPending({
+                accepted: draft.acceptedModelSelection,
+                threadSelection: modelSelection,
+                ...evidence,
+              }))
+          )
+            return;
           const selected = draft.activeProvider
             ? draft.modelSelectionByProvider[draft.activeProvider]
             : undefined;
@@ -3270,6 +3320,59 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           )
             return;
           get().setModelSelection(threadRef, modelSelection, { replaceOptions: true });
+          const accepted = draft.acceptedModelSelection;
+          if (accepted) {
+            const threadKey = resolveComposerDraftKey(get(), threadRef);
+            if (threadKey) {
+              set((state) => {
+                const current = state.draftsByThreadKey[threadKey];
+                if (current?.acceptedModelSelection !== accepted) return state;
+                const { acceptedModelSelection: _accepted, ...retained } = current;
+                return {
+                  draftsByThreadKey: { ...state.draftsByThreadKey, [threadKey]: retained },
+                };
+              });
+            }
+          }
+        },
+        acknowledgeSubmittedModelSelection: (threadRef, submittedSelection, accepted) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef);
+          if (!threadKey) return;
+          set((state) => {
+            const draft = state.draftsByThreadKey[threadKey];
+            const selected = draft?.activeProvider
+              ? draft.modelSelectionByProvider[draft.activeProvider]
+              : undefined;
+            if (
+              !draft?.modelSelectionExplicit ||
+              !selected ||
+              !modelSelectionsEqual(selected, submittedSelection)
+            )
+              return state;
+            const {
+              modelSelectionExplicit: _sent,
+              acceptedModelSelection: _previous,
+              ...retained
+            } = draft;
+            return {
+              draftsByThreadKey: {
+                ...state.draftsByThreadKey,
+                [threadKey]: {
+                  ...retained,
+                  ...(accepted
+                    ? {
+                        activeProvider: accepted.selection.instanceId,
+                        modelSelectionByProvider: {
+                          ...draft.modelSelectionByProvider,
+                          [accepted.selection.instanceId]: accepted.selection,
+                        },
+                      }
+                    : {}),
+                  ...(accepted ? { acceptedModelSelection: accepted } : {}),
+                },
+              },
+            };
+          });
         },
         setModelSelection: (threadRef, modelSelection, opts) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
@@ -3311,9 +3414,16 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             // Last writer defines intent: picker writes mark the selection
             // explicit; seeding writes leave it unset so future seeds can
             // replace it.
-            const { modelSelectionExplicit: _previousExplicit, ...restBase } = base;
+            const {
+              modelSelectionExplicit: _previousExplicit,
+              acceptedModelSelection: _previousAccepted,
+              ...restBase
+            } = base;
             const nextDraft: ComposerThreadDraftState = {
               ...restBase,
+              ...(opts?.explicit !== true && base.acceptedModelSelection
+                ? { acceptedModelSelection: base.acceptedModelSelection }
+                : {}),
               modelSelectionByProvider: nextMap,
               activeProvider: nextActiveProvider,
               ...(opts?.explicit === true ? { modelSelectionExplicit: true as const } : {}),
@@ -3465,7 +3575,11 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 
             // Trait edits are user-driven intent: mark the selection explicit
             // so later seeds cannot silently replace the chosen options.
-            const { modelSelectionExplicit: _previousExplicit, ...restBase } = base;
+            const {
+              modelSelectionExplicit: _previousExplicit,
+              acceptedModelSelection: _previousAccepted,
+              ...restBase
+            } = base;
             const nextDraft: ComposerThreadDraftState = {
               ...restBase,
               ...(options?.instanceId ? { activeProvider: instanceKey } : {}),

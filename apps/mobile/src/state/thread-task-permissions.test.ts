@@ -1,4 +1,9 @@
-import { AuthOrchestrationOperateScope, RuntimeRequestId } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  RuntimeRequestId,
+  ProviderInstanceId,
+  type ModelSelection,
+} from "@t3tools/contracts";
 import type { DraftComposerImageAttachment } from "../lib/composerImages";
 import type { PendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import { AsyncResult, type Atom } from "effect/reactivity";
@@ -7,7 +12,11 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 const state = vi.hoisted(() => ({
   grantedEnvironments: new Set<string>(),
   connectionState: "connected",
-  draft: { text: "Keep my draft", attachments: [] as DraftComposerImageAttachment[] },
+  draft: {
+    text: "Keep my draft",
+    attachments: [] as DraftComposerImageAttachment[],
+    modelSelection: undefined as ModelSelection | undefined,
+  },
   pendingRequests: { approvals: [], userInputs: [] } as PendingThreadRequests,
   enqueue: vi.fn(async () => undefined),
   clearDraft: vi.fn(),
@@ -86,8 +95,10 @@ vi.mock("./use-atom-command", () => ({ useAtomCommand: <A>(command: A) => comman
 vi.mock("./threads", async () => {
   const { Atom } = await import("effect/reactivity");
   return {
+    useEnvironmentThread: () => ({ lastAppliedSequence: 0 }),
     environmentThreadDetails: { queueWorkflowAtom: () => Atom.make(null) },
     threadEnvironment: {
+      snapshotAtom: () => Atom.make(null),
       respondToApproval: state.approve,
       respondToUserInput: state.answer,
       uploadFeedback: state.feedback,
@@ -151,7 +162,7 @@ import { useSelectedThreadRequests } from "./use-selected-thread-requests";
 beforeEach(() => {
   state.grantedEnvironments = new Set(["primary"]);
   state.connectionState = "connected";
-  state.draft = { text: "Keep my draft", attachments: [] };
+  state.draft = { text: "Keep my draft", attachments: [], modelSelection: undefined };
   state.pendingRequests = {
     approvals: [
       {
@@ -180,6 +191,22 @@ describe("mobile task permissions", () => {
     expect(state.draft.text).toBe("Edited locally");
     expect(state.updateSettings).toHaveBeenCalledWith("secondary:thread", {
       interactionMode: "plan",
+    });
+  });
+
+  it("does not submit a persisted choice for a provider missing from the current environment", async () => {
+    state.grantedEnvironments.add("secondary");
+    state.draft.modelSelection = {
+      instanceId: ProviderInstanceId.make("removed-provider"),
+      model: "old-model",
+    };
+
+    expect(await useThreadComposerState().onSendMessage()).toBeNull();
+    expect(state.enqueue).not.toHaveBeenCalled();
+    expect(state.clearDraft).not.toHaveBeenCalled();
+    expect(state.draft.modelSelection).toEqual({
+      instanceId: "removed-provider",
+      model: "old-model",
     });
   });
 

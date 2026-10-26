@@ -6,6 +6,7 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -462,6 +463,212 @@ describe("thread outbox drain delivery cleanup", () => {
 
     expect(remainingMessages()).toEqual([edited]);
     expect(harness.removePersistedFile).not.toHaveBeenCalled();
+  });
+
+  it("keeps a rejected send's provider choice in the restored retry draft", async () => {
+    const draftKey = "environment-1:thread-1";
+    const chosen = { instanceId: ProviderInstanceId.make("codex-secondary"), model: "gpt-5.6-sol" };
+    const message = {
+      ...queuedMessage({ messageId: "provider-choice-rejected", text: "retry this" }),
+      modelSelection: chosen,
+    };
+    await harness.manager.enqueue(message);
+
+    await expect(restoreRejectedQueuedMessage(message, "Send rejected")).resolves.toBe("restored");
+
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey)).toMatchObject({
+      text: "retry this",
+      modelSelection: chosen,
+    });
+  });
+
+  it("retires a delivered provider choice after navigation misses thread acceptance", async () => {
+    const draftKey = "environment-1:thread-1";
+    const chosen = {
+      instanceId: ProviderInstanceId.make("codex-secondary"),
+      model: "gpt-5.6-sol",
+      options: [{ id: "reasoningEffort", value: "xhigh" }],
+    };
+    const savedAfterMigration = {
+      instanceId: ProviderInstanceId.make("claude"),
+      model: "sonnet",
+    };
+    const message = {
+      ...queuedMessage({ messageId: "provider-choice-delivered", text: "sent with choice" }),
+      modelSelection: chosen,
+    };
+    appAtomRegistry.set(composerDrafts.composerDraftsAtom, {
+      [draftKey]: {
+        text: "follow-up typed during delivery",
+        attachments: [],
+        modelSelection: chosen,
+      },
+    });
+    await harness.manager.enqueue(message);
+
+    await expect(
+      completeQueuedMessageDelivery(message, harness.manager.revisionOf(message.messageId)),
+    ).resolves.toBe("removed");
+    composerDrafts.syncComposerDraftModelSelection(draftKey, savedAfterMigration);
+
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey)).toMatchObject({
+      text: "follow-up typed during delivery",
+      attachments: [],
+    });
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey).modelSelection).toBeUndefined();
+  });
+
+  it("keeps an accepted queued choice for the next follow-up until the thread applies it", async () => {
+    const draftKey = "environment-1:thread-1";
+    const chosen = {
+      instanceId: ProviderInstanceId.make("codex-secondary"),
+      model: "gpt-5.6-sol",
+    };
+    const message = {
+      ...queuedMessage({ messageId: "queued-provider-choice", text: "switch provider" }),
+      modelSelection: chosen,
+      dispatchMode: "queue" as const,
+    };
+    appAtomRegistry.set(composerDrafts.composerDraftsAtom, {
+      [draftKey]: { text: "next follow-up", attachments: [], modelSelection: chosen },
+    });
+    composerDrafts.updateComposerDraftSettings(draftKey, { modelSelection: chosen });
+    await harness.manager.enqueue(message);
+
+    await expect(
+      completeQueuedMessageDelivery(message, harness.manager.revisionOf(message.messageId)),
+    ).resolves.toBe("removed");
+
+    // The saved thread still selects its old provider until this queued run starts.
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey).modelSelection).toEqual(chosen);
+  });
+
+  it("reconciles an accepted queue after remount while preserving a later unsent edit", async () => {
+    const draftKey = "environment-1:thread-1";
+    const old = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" };
+    const chosen = {
+      instanceId: ProviderInstanceId.make("codex-secondary"),
+      model: "gpt-5.6-sol",
+    };
+    const migrated = { instanceId: ProviderInstanceId.make("claude"), model: "sonnet" };
+    const message = {
+      ...queuedMessage({ messageId: "queue-sequence-reconcile", text: "switch" }),
+      modelSelection: chosen,
+      dispatchMode: "queue" as const,
+    };
+    appAtomRegistry.set(composerDrafts.composerDraftsAtom, {
+      [draftKey]: { text: "next follow-up", attachments: [], modelSelection: chosen },
+    });
+    composerDrafts.updateComposerDraftSettings(draftKey, { modelSelection: chosen });
+    await harness.manager.enqueue(message);
+    await expect(
+      completeQueuedMessageDelivery(message, harness.manager.revisionOf(message.messageId), {
+        messageId: message.messageId,
+        sequence: 10,
+        selection: chosen,
+      }),
+    ).resolves.toBe("removed");
+    const acceptedRunId = RunId.make("accepted-mobile-run");
+    const queued = {
+      runs: [{ id: acceptedRunId, ordinal: 2, userMessageId: message.messageId, status: "queued" }],
+    } as unknown as import("@t3tools/contracts").OrchestrationV2ThreadProjection;
+    const completed = {
+      runs: [
+        { id: acceptedRunId, ordinal: 2, userMessageId: message.messageId, status: "completed" },
+      ],
+    } as unknown as import("@t3tools/contracts").OrchestrationV2ThreadProjection;
+    composerDrafts.syncComposerDraftModelSelection(draftKey, old, {
+      shellSequence: 11,
+      projection: queued,
+      projectionSequence: 10,
+    });
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey).modelSelection).toEqual(chosen);
+    await composerDrafts.flushComposerDrafts();
+    appAtomRegistry.set(composerDrafts.composerDraftsAtom, {});
+    composerDrafts.resetComposerDraftsLoadState();
+    await composerDrafts.waitForComposerDraftsLoaded();
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey).modelSelection).toEqual(chosen);
+    composerDrafts.syncComposerDraftModelSelection(draftKey, old, {
+      shellSequence: 11,
+      shellLatestRun: { runId: RunId.make("previous-mobile-run"), status: "completed" },
+      projection: completed,
+      projectionSequence: 12,
+    });
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey).modelSelection).toEqual(chosen);
+    composerDrafts.syncComposerDraftModelSelection(draftKey, migrated, {
+      shellSequence: 12,
+      shellLatestRun: { runId: acceptedRunId, status: "completed" },
+      projection: completed,
+      projectionSequence: 13,
+    });
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey).modelSelection).toBeUndefined();
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey).text).toBe("next follow-up");
+
+    composerDrafts.updateComposerDraftSettings(draftKey, { modelSelection: chosen });
+    composerDrafts.acceptComposerDraftModelSelection(draftKey, chosen, {
+      messageId: MessageId.make("second-accepted"),
+      sequence: 15,
+      selection: chosen,
+    });
+    composerDrafts.updateComposerDraftSettings(draftKey, {
+      modelSelection: { ...chosen, options: [{ id: "reasoningEffort", value: "high" }] },
+    });
+    composerDrafts.syncComposerDraftModelSelection(draftKey, migrated, {
+      shellSequence: 18,
+      projection: completed,
+      projectionSequence: 17,
+    });
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey).modelSelection?.options).toEqual([
+      { id: "reasoningEffort", value: "high" },
+    ]);
+  });
+
+  it("keeps the effective accepted selection when delivery normalizes the queued choice", async () => {
+    const draftKey = "environment-1:thread-1";
+    const submitted = { instanceId: ProviderInstanceId.make("codex-secondary"), model: "old" };
+    const effective = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" };
+    const message = {
+      ...queuedMessage({ messageId: "normalized-queue-choice", text: "send" }),
+      modelSelection: submitted,
+      dispatchMode: "queue" as const,
+    };
+    appAtomRegistry.set(composerDrafts.composerDraftsAtom, {
+      [draftKey]: { text: "next", attachments: [], modelSelection: submitted },
+    });
+    await harness.manager.enqueue(message);
+    await completeQueuedMessageDelivery(message, harness.manager.revisionOf(message.messageId), {
+      messageId: message.messageId,
+      sequence: 10,
+      selection: effective,
+    });
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey).modelSelection).toEqual(effective);
+  });
+
+  it("keeps a newer unsent choice when an older send is delivered", async () => {
+    const draftKey = "environment-1:thread-1";
+    const submitted = {
+      instanceId: ProviderInstanceId.make("codex-secondary"),
+      model: "gpt-5.6-sol",
+    };
+    const newer = { instanceId: ProviderInstanceId.make("claude"), model: "sonnet" };
+    const pending = {
+      ...queuedMessage({ messageId: "provider-choice-pending", text: "pending" }),
+      modelSelection: submitted,
+    };
+    appAtomRegistry.set(composerDrafts.composerDraftsAtom, {
+      [draftKey]: { text: "retry me", attachments: [], modelSelection: submitted },
+    });
+    await harness.manager.enqueue(pending);
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey).modelSelection).toEqual(submitted);
+
+    composerDrafts.updateComposerDraftSettings(draftKey, { modelSelection: newer });
+    await expect(
+      completeQueuedMessageDelivery(pending, harness.manager.revisionOf(pending.messageId)),
+    ).resolves.toBe("removed");
+    expect(composerDrafts.getComposerDraftSnapshot(draftKey)).toMatchObject({
+      text: "retry me",
+      modelSelection: newer,
+    });
   });
 
   it("removes the delivered message when no edit was accepted", async () => {

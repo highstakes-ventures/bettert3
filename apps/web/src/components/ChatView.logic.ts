@@ -47,7 +47,12 @@ import {
   type Thread,
   type TurnDiffSummary,
 } from "../types";
-import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
+import {
+  type ComposerImageAttachment,
+  type ComposerThreadTarget,
+  type DraftThreadState,
+} from "../composerDraftStore";
+import type { AcceptedModelSelection } from "@t3tools/client-runtime/handoff";
 import * as Schema from "effect/Schema";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadShells, environmentThreadDetails } from "../state/threads";
@@ -71,6 +76,36 @@ export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 
 export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000;
+
+/** Tie draft acknowledgement to the actual accepted command result. */
+export async function awaitComposerTurnAcceptance<A extends object, E>(input: {
+  readonly startPromise: Promise<AtomCommandResult<A, E>>;
+  readonly threadRef: ComposerThreadTarget;
+  readonly submittedExplicitSelection: ModelSelection | undefined;
+  readonly sentSelection: ModelSelection;
+  readonly messageId: MessageId;
+  readonly acknowledge: (
+    threadRef: ComposerThreadTarget,
+    submitted: ModelSelection,
+    accepted?: AcceptedModelSelection,
+  ) => void;
+}): Promise<AtomCommandResult<A, E>> {
+  const result = await input.startPromise;
+  if (result._tag === "Success" && input.submittedExplicitSelection) {
+    // Launch replies include the new projection but no sequence. Its message
+    // run still proves acceptance once the thread subscription catches up.
+    const accepted: AcceptedModelSelection = {
+      messageId: input.messageId,
+      sequence:
+        "sequence" in result.value && typeof result.value.sequence === "number"
+          ? result.value.sequence
+          : 0,
+      selection: input.sentSelection,
+    };
+    input.acknowledge(input.threadRef, input.submittedExplicitSelection, accepted);
+  }
+  return result;
+}
 
 export function agentControlledBrowserCloseConfirmation(
   surfaces: readonly RightPanelSurface[],

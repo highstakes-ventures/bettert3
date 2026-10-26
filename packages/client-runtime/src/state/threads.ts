@@ -207,6 +207,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     ? cachedThreadState(retained.state)
     : {
         data: cachedThread,
+        lastAppliedSequence: Option.match(cached, {
+          onNone: () => 0,
+          onSome: (snapshot) => snapshot.snapshotSequence,
+        }),
         status: statusWithoutLiveData(cachedThread),
         error: Option.none(),
         history: Option.match(cached, {
@@ -367,6 +371,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     },
   ) {
     const waiting = yield* Ref.get(awaitingCompletion);
+    const appliedSequence = yield* SubscriptionRef.get(lastSequence);
     // Atomic with concurrent history meta updates: never get-then-set the whole
     // state when only the projection changes. Bounded installs pass history so
     // projection + cursor persist together in one enqueue.
@@ -380,6 +385,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       return {
         ...previous,
         data: Option.some(thread),
+        lastAppliedSequence: appliedSequence,
         // Buffered values from a failed attempt can arrive after its error.
         status: Option.isSome(previous.error)
           ? ("cached" as const)
@@ -417,6 +423,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     yield* Ref.set(awaitingCompletion, false);
     yield* SubscriptionRef.set(state, {
       data: Option.none(),
+      lastAppliedSequence: yield* SubscriptionRef.get(lastSequence),
       status: "deleted",
       error: Option.none(),
       history: EMPTY_THREAD_HISTORY_META,
@@ -529,6 +536,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       const updated: EnvironmentThreadState = {
         ...current,
         data: Option.some(next),
+        lastAppliedSequence: item.sequence,
         status: waiting ? "synchronizing" : "live",
         error: Option.none(),
         history,

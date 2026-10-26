@@ -1,11 +1,71 @@
 import type {
+  MessageId,
   ModelSelection,
   OrchestrationV2Run,
+  OrchestrationV2RunStatus,
   OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
   ProviderInstanceId,
+  RunId,
   ServerProvider,
 } from "@t3tools/contracts";
+import { modelSelectionsEqual } from "@t3tools/shared/model";
+
+export interface AcceptedModelSelection {
+  readonly messageId: MessageId;
+  readonly sequence: number;
+  readonly selection: ModelSelection;
+}
+
+export interface AcceptedModelSelectionEvidence {
+  readonly shellSequence: number | null;
+  readonly shellLatestRun?: {
+    readonly runId: RunId;
+    readonly status: OrchestrationV2RunStatus;
+  } | null;
+  readonly projection: OrchestrationV2ThreadProjection | null;
+  readonly projectionSequence: number | null;
+}
+
+/** Keep a delivered choice until both subscriptions can account for its run. */
+export function acceptedModelSelectionPending(
+  input: AcceptedModelSelectionEvidence & {
+    readonly accepted: AcceptedModelSelection;
+    readonly threadSelection: ModelSelection;
+  },
+): boolean {
+  const { accepted, threadSelection, shellSequence, projection, projectionSequence } = input;
+  if (
+    shellSequence === null ||
+    shellSequence < accepted.sequence ||
+    projectionSequence === null ||
+    projectionSequence < accepted.sequence
+  )
+    return true;
+  const run = projection?.runs.find((candidate) => candidate.userMessageId === accepted.messageId);
+  // A sequenced command can steer an existing run or its run may have been
+  // removed by a later rewind. Both snapshots already cover that acceptance.
+  // Launch replies have no sequence, so they still need the new run as evidence.
+  if (!run) return accepted.sequence === 0;
+  if (run.status === "queued" || run.status === "preparing") return true;
+  const shellRun = input.shellLatestRun;
+  if (
+    shellRun &&
+    shellRun.status !== "queued" &&
+    shellRun.status !== "preparing" &&
+    (shellRun.runId === run.id ||
+      projection?.runs.some(
+        (candidate) => candidate.id === shellRun.runId && candidate.ordinal > run.ordinal,
+      ))
+  )
+    return false;
+  // The shell may still precede the run transition even though it has passed
+  // admission. A matching selection is already authoritative; a different one
+  // needs a shell at least as recent as the projection that saw the transition.
+  return (
+    !modelSelectionsEqual(threadSelection, accepted.selection) && shellSequence < projectionSequence
+  );
+}
 
 /**
  * The subset of a projection run that handoff rows read. Kept minimal so the
@@ -31,6 +91,7 @@ export function resolvePendingHandoff(
   if (from === undefined || selection == null) return null;
   const source = providers.find((provider) => provider.instanceId === from.instanceId);
   const target = providers.find((provider) => provider.instanceId === selection.instanceId);
+  if (!target || target.availability === "unavailable") return null;
   const needsHandoff =
     from.instanceId === selection.instanceId
       ? from.model !== selection.model && target?.requiresNewThreadForModelChange === true

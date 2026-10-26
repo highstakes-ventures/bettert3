@@ -7,6 +7,7 @@ import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import {
   resolveBackgroundDraftWorkspaceOptions,
+  awaitComposerTurnAcceptance,
   resolveDraftHeroState,
   shouldDockDraftHeroForSubmission,
   resolveVisibleWorktreeSetup,
@@ -68,6 +69,7 @@ import {
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
+  type OrchestrationV2ShellSnapshot,
   type ProjectScript,
   type ProjectId,
   type ProviderApprovalDecision,
@@ -387,6 +389,7 @@ import {
   type ComposerFileAttachment,
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
+  useEffectiveComposerModelState,
   useComposerDraftStore,
   DraftId,
 } from "../composerDraftStore";
@@ -423,7 +426,7 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
-import { threadEnvironment } from "../state/threads";
+import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { workspacePreparationRetryRunIds } from "@t3tools/client-runtime/state/turn-item-presentation";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
@@ -623,6 +626,7 @@ import { recallableComposerPrompt } from "./chat/composerPromptHistory";
 import { observeResize } from "~/lib/observeResize";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
+const EMPTY_HANDOFF_SHELL_ATOM = Atom.make<OrchestrationV2ShellSnapshot | null>(null);
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
@@ -1717,6 +1721,10 @@ export default function ChatView(props: ChatViewProps) {
   });
   const serverThreadProjection = useThreadProjection(routeThreadDetailRef);
   const serverProjection = serverThreadProjection?.projection ?? null;
+  const detailSequence = useEnvironmentThread(
+    routeThreadDetailRef?.environmentId ?? null,
+    routeThreadDetailRef?.threadId ?? null,
+  ).lastAppliedSequence;
   const reportedModelSelection = serverProjection
     ? deriveReportedModelSelection(serverProjection)
     : null;
@@ -1810,6 +1818,15 @@ export default function ChatView(props: ChatViewProps) {
   const composerModelSelectionExplicit = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.modelSelectionExplicit,
   );
+  const composerAcceptedModelSelection = useComposerDraftStore(
+    (store) => store.getComposerDraft(composerDraftTarget)?.acceptedModelSelection,
+  );
+  const shellSequence = useAtomValue(
+    composerAcceptedModelSelection
+      ? threadEnvironment.snapshotAtom(environmentId)
+      : EMPTY_HANDOFF_SHELL_ATOM,
+    (snapshot) => snapshot?.snapshotSequence ?? null,
+  );
   const composerSelectedModelSelection = useComposerDraftStore((store) => {
     const draft = store.getComposerDraft(composerDraftTarget);
     return draft?.activeProvider
@@ -1843,6 +1860,9 @@ export default function ChatView(props: ChatViewProps) {
     (store) => store.setInteractionMode,
   );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
+  const acknowledgeSubmittedModelSelection = useComposerDraftStore(
+    (store) => store.acknowledgeSubmittedModelSelection,
+  );
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
     (store) => store.getDraftSessionByLogicalProjectKey,
@@ -2125,16 +2145,24 @@ export default function ChatView(props: ChatViewProps) {
   const isServerThread = serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   useLayoutEffect(() => {
-    if (serverThread) {
-      syncThreadModelSelection(
-        scopeThreadRef(serverThread.environmentId, serverThread.id),
-        serverThread.modelSelection,
-      );
-    }
+    if (!serverThread) return;
+    syncThreadModelSelection(
+      scopeThreadRef(serverThread.environmentId, serverThread.id),
+      serverThread.modelSelection,
+      {
+        shellSequence,
+        shellLatestRun: serverThread.latestRun,
+        projection: serverProjection,
+        projectionSequence: serverProjection ? detailSequence : null,
+      },
+    );
   }, [
     serverThread,
     composerSelectedModelSelection,
     composerModelSelectionExplicit,
+    shellSequence,
+    serverProjection,
+    detailSequence,
     syncThreadModelSelection,
   ]);
   const runDestination = serverThread?.source.runDestination ?? draftThread?.runDestination ?? null;
@@ -3310,8 +3338,40 @@ export default function ChatView(props: ChatViewProps) {
       selectedProviderByThreadId,
     ],
   );
+  const handoffProviderEntry = useMemo(
+    () =>
+      resolveComposerProviderSelection({
+        entries: providerInstanceEntries,
+        candidateInstanceIds: [
+          selectedProviderByThreadId,
+          activeThread?.modelSelection.instanceId,
+          activeRuntime?.providerInstanceId,
+          activeProjectDefaultModelSelection?.instanceId,
+        ],
+        lockedProvider: modelPickerLockedProvider,
+        lockedInstanceId:
+          activeRuntime?.providerInstanceId ?? activeThread?.modelSelection.instanceId,
+      }).selectedProviderEntry,
+    [
+      activeProjectDefaultModelSelection?.instanceId,
+      activeThread?.modelSelection.instanceId,
+      activeRuntime?.providerInstanceId,
+      modelPickerLockedProvider,
+      providerInstanceEntries,
+      selectedProviderByThreadId,
+    ],
+  );
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const activeProviderInstanceId = selectedProviderEntry?.instanceId ?? null;
+  const { selectedModel: resolvedHandoffModel } = useEffectiveComposerModelState({
+    threadRef: composerDraftTarget,
+    providers: providerStatuses,
+    selectedProvider: handoffProviderEntry?.driverKind ?? selectedProvider,
+    selectedInstanceId: handoffProviderEntry?.instanceId ?? null,
+    threadModelSelection: activeThread?.modelSelection,
+    projectModelSelection: activeProjectDefaultModelSelection,
+    settings,
+  });
   const cloudDestinationsQuery = useEnvironmentQuery(
     selectedProvider === "codex" && activeProviderInstanceId && draftId
       ? cloudChats.destinations({ environmentId, input: { instanceId: activeProviderInstanceId } })
@@ -7810,15 +7870,12 @@ export default function ChatView(props: ChatViewProps) {
     () =>
       resolvePendingHandoff(
         serverProjection,
-        composerSelectedModelSelection ?? activeThread?.modelSelection,
+        handoffProviderEntry
+          ? createModelSelection(handoffProviderEntry.instanceId, resolvedHandoffModel)
+          : null,
         providerStatuses,
       ),
-    [
-      serverProjection,
-      composerSelectedModelSelection,
-      activeThread?.modelSelection,
-      providerStatuses,
-    ],
+    [serverProjection, handoffProviderEntry, resolvedHandoffModel, providerStatuses],
   );
   const compactThreadUnavailable =
     !canOperateThread ||
@@ -9027,6 +9084,11 @@ export default function ChatView(props: ChatViewProps) {
       interactionMode: sendInteractionMode,
       interactionModeEnabled: sendInteractionModeEnabled,
     } = sendCtx;
+    const submittedDraft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
+    const submittedExplicitSelection =
+      submittedDraft?.modelSelectionExplicit && submittedDraft.activeProvider
+        ? submittedDraft.modelSelectionByProvider[submittedDraft.activeProvider]
+        : undefined;
     if (
       runDestination &&
       (ctxSelectedProvider !== "codex" ||
@@ -10181,7 +10243,14 @@ export default function ChatView(props: ChatViewProps) {
           );
         }
       }
-      const startResult = await startPromise;
+      const startResult = await awaitComposerTurnAcceptance({
+        startPromise,
+        threadRef: composerDraftTarget,
+        submittedExplicitSelection,
+        sentSelection: ctxSelectedModelSelection,
+        messageId: messageIdForSend,
+        acknowledge: acknowledgeSubmittedModelSelection,
+      });
       if (startResult._tag === "Failure") {
         failure = startResult;
       } else {

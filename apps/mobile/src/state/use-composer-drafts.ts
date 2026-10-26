@@ -3,6 +3,7 @@ import {
   EnvironmentId as EnvironmentIdSchema,
   ModelSelection as ModelSelectionSchema,
   ComposerContextId,
+  MessageId,
   ComposerContextRecord,
   COMPOSER_CONTEXT_MAX_RECORDS,
   ForwardCompatibleArray,
@@ -21,6 +22,11 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
+import {
+  acceptedModelSelectionPending,
+  type AcceptedModelSelection,
+  type AcceptedModelSelectionEvidence,
+} from "@t3tools/client-runtime/handoff";
 import { useEffect } from "react";
 import { Atom } from "effect/reactivity";
 
@@ -331,6 +337,7 @@ export interface ComposerDraft {
   readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly importedShareIds?: ReadonlyArray<string>;
   readonly modelSelection?: ModelSelection;
+  readonly acceptedModelSelection?: AcceptedModelSelection;
   readonly runtimeMode?: RuntimeMode;
   readonly interactionMode?: ProviderInteractionMode;
   readonly workspaceSelection?: ComposerDraftWorkspaceSelection;
@@ -396,6 +403,13 @@ const ComposerDraftSchema = Schema.Struct({
   attachments: Schema.Array(DraftComposerAttachmentSchema),
   importedShareIds: Schema.optional(Schema.Array(Schema.String)),
   modelSelection: Schema.optional(ModelSelectionSchema),
+  acceptedModelSelection: Schema.optional(
+    Schema.Struct({
+      messageId: MessageId,
+      sequence: Schema.Number,
+      selection: ModelSelectionSchema,
+    }),
+  ),
   runtimeMode: Schema.optional(RuntimeModeSchema),
   interactionMode: Schema.optional(ProviderInteractionModeSchema),
   workspaceSelection: Schema.optional(ComposerDraftWorkspaceSelectionSchema),
@@ -1510,19 +1524,57 @@ export function updateComposerDraftSettings(
     const draft = {
       ...normalizeDraft(current[draftKey]),
       ...settings,
+      ...(Object.hasOwn(settings, "modelSelection") ? { acceptedModelSelection: undefined } : {}),
     };
     return withComposerDraft(current, draftKey, draft);
   });
 }
 
-/** Drop a local choice only after the saved thread has accepted that selection. */
-export function syncComposerDraftModelSelection(draftKey: string, selection: ModelSelection): void {
+/** Record an accepted send without discarding its queued next-send choice. */
+export function acceptComposerDraftModelSelection(
+  draftKey: string,
+  submitted: ModelSelection,
+  accepted: AcceptedModelSelection,
+): void {
   updateComposerDrafts((current) => {
     const draft = current[draftKey];
-    if (!draft?.modelSelection || !modelSelectionsEqual(draft.modelSelection, selection)) {
+    if (!draft?.modelSelection || !modelSelectionsEqual(draft.modelSelection, submitted))
+      return current;
+    return withComposerDraft(current, draftKey, {
+      ...draft,
+      modelSelection: accepted.selection,
+      acceptedModelSelection: accepted,
+    });
+  });
+}
+
+/** Reconcile a submitted choice after the accepted run and shell catch up. */
+export function syncComposerDraftModelSelection(
+  draftKey: string,
+  selection: ModelSelection,
+  evidence?: AcceptedModelSelectionEvidence,
+): void {
+  updateComposerDrafts((current) => {
+    const draft = current[draftKey];
+    if (!draft?.modelSelection) return current;
+    if (
+      draft.acceptedModelSelection &&
+      (!evidence ||
+        acceptedModelSelectionPending({
+          accepted: draft.acceptedModelSelection,
+          threadSelection: selection,
+          ...evidence,
+        }))
+    )
+      return current;
+    if (!draft.acceptedModelSelection && !modelSelectionsEqual(draft.modelSelection, selection)) {
       return current;
     }
-    const { modelSelection: _modelSelection, ...retained } = draft;
+    const {
+      modelSelection: _modelSelection,
+      acceptedModelSelection: _accepted,
+      ...retained
+    } = draft;
     return withComposerDraft(current, draftKey, retained);
   });
 }
@@ -1546,13 +1598,16 @@ export function clearComposerDraftContentState(
     importedShareIds: _importedShareIds,
     context: _context,
     modelSelection,
+    acceptedModelSelection,
     workspaceSelection,
     project: _project,
     ...retained
   } = existing;
   const draft = {
     ...retained,
-    ...(options?.clearModelSelection || modelSelection === undefined ? {} : { modelSelection }),
+    ...(options?.clearModelSelection || modelSelection === undefined
+      ? {}
+      : { modelSelection, ...(acceptedModelSelection ? { acceptedModelSelection } : {}) }),
     ...(options?.clearWorkspaceSelection || workspaceSelection === undefined
       ? {}
       : { workspaceSelection }),

@@ -12,6 +12,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  RunId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   ThreadId,
   type ModelSelection,
@@ -1936,6 +1937,157 @@ describe("composerDraftStore modelSelection", () => {
 
   beforeEach(() => {
     resetComposerDraftStore();
+  });
+
+  it("follows a saved provider migration when a sent choice missed the mounted acknowledgement", () => {
+    const store = useComposerDraftStore.getState();
+    const sent = createModelSelection(CODEX_SECONDARY_INSTANCE, "gpt-5.4", [
+      { id: "reasoningEffort", value: "xhigh" },
+    ]);
+    const migrated = createModelSelection(CODEX_INSTANCE, "gpt-5.4");
+    store.setModelSelection(threadRef, sent, { explicit: true });
+    store.setModelSelection(scopeThreadRef(OTHER_TEST_ENVIRONMENT_ID, threadId), sent, {
+      explicit: true,
+    });
+    store.setPrompt(threadRef, "sent before navigating away");
+    store.clearComposerContent(threadRef);
+    store.acknowledgeSubmittedModelSelection(threadRef, sent);
+
+    // The view never observes the accepted `sent` selection before the
+    // server changes the thread to `migrated`.
+    store.syncThreadModelSelection(threadRef, migrated);
+
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(migrated.instanceId);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBeUndefined();
+    expect(draftFor(threadId, OTHER_TEST_ENVIRONMENT_ID)?.activeProvider).toBe(sent.instanceId);
+    expect(draftFor(threadId, OTHER_TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBe(true);
+  });
+
+  it("holds an accepted queued choice through stale shells, remount, and later migration", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = useComposerDraftStore.getState();
+      const old = createModelSelection(CODEX_INSTANCE, "gpt-5.4");
+      const chosen = createModelSelection(CODEX_SECONDARY_INSTANCE, "gpt-5.4");
+      const migrated = createModelSelection(CLAUDE_AGENT_INSTANCE, "claude-opus-4-6");
+      const messageId = MessageId.make("accepted-queued-choice");
+      const acceptedRunId = RunId.make("accepted-queued-run");
+      const queued = {
+        runs: [{ id: acceptedRunId, ordinal: 2, userMessageId: messageId, status: "queued" }],
+      } as unknown as import("@t3tools/contracts").OrchestrationV2ThreadProjection;
+      const completed = {
+        runs: [{ id: acceptedRunId, ordinal: 2, userMessageId: messageId, status: "completed" }],
+      } as unknown as import("@t3tools/contracts").OrchestrationV2ThreadProjection;
+      store.setModelSelection(threadRef, chosen, { explicit: true });
+      store.acknowledgeSubmittedModelSelection(threadRef, chosen, {
+        messageId,
+        sequence: 10,
+        selection: chosen,
+      });
+
+      // Unrelated shell metadata may change after admission while its model stays old.
+      store.syncThreadModelSelection(threadRef, old, {
+        shellSequence: 11,
+        projection: queued,
+        projectionSequence: 10,
+      });
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(chosen.instanceId);
+      await vi.advanceTimersByTimeAsync(300);
+      resetComposerDraftStore();
+      await useComposerDraftStore.persist.rehydrate();
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.acceptedModelSelection?.messageId).toBe(
+        messageId,
+      );
+
+      // The run starts ahead of the shell. A stale shell still must not reset the draft.
+      store.syncThreadModelSelection(threadRef, old, {
+        shellSequence: 11,
+        shellLatestRun: { runId: RunId.make("previous-run"), status: "completed" },
+        projection: completed,
+        projectionSequence: 12,
+      });
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(chosen.instanceId);
+      store.syncThreadModelSelection(threadRef, migrated, {
+        shellSequence: 12,
+        shellLatestRun: { runId: acceptedRunId, status: "completed" },
+        projection: completed,
+        projectionSequence: 13,
+      });
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(migrated.instanceId);
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.acceptedModelSelection).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a newer unsent choice when an earlier accepted queue later migrates", () => {
+    const store = useComposerDraftStore.getState();
+    const submitted = createModelSelection(CODEX_SECONDARY_INSTANCE, "gpt-5.4");
+    const newer = createModelSelection(CODEX_SECONDARY_INSTANCE, "gpt-5.4", [
+      { id: "reasoningEffort", value: "high" },
+    ]);
+    const migrated = createModelSelection(CLAUDE_AGENT_INSTANCE, "claude-opus-4-6");
+    const messageId = MessageId.make("earlier-accepted-choice");
+    store.setModelSelection(threadRef, submitted, { explicit: true });
+    store.acknowledgeSubmittedModelSelection(threadRef, submitted, {
+      messageId,
+      sequence: 10,
+      selection: submitted,
+    });
+    store.setModelSelection(threadRef, newer, { explicit: true, replaceOptions: true });
+    store.syncThreadModelSelection(threadRef, migrated, {
+      shellSequence: 14,
+      projection: {
+        runs: [{ userMessageId: messageId, status: "completed" }],
+      } as unknown as import("@t3tools/contracts").OrchestrationV2ThreadProjection,
+      projectionSequence: 13,
+    });
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[newer.instanceId],
+    ).toEqual(newer);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBe(true);
+  });
+
+  it("keeps the effective sent provider when an obsolete explicit choice fell back", () => {
+    const store = useComposerDraftStore.getState();
+    const obsolete = createModelSelection(CODEX_SECONDARY_INSTANCE, "old-model");
+    const effective = createModelSelection(CODEX_INSTANCE, "gpt-5.4");
+    store.setModelSelection(threadRef, obsolete, { explicit: true });
+    store.acknowledgeSubmittedModelSelection(threadRef, obsolete, {
+      messageId: MessageId.make("fallback-send"),
+      sequence: 10,
+      selection: effective,
+    });
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(effective.instanceId);
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[effective.instanceId],
+    ).toEqual(effective);
+  });
+
+  it("keeps a newer unsent provider or option change after the earlier send succeeds", () => {
+    const store = useComposerDraftStore.getState();
+    const sent = createModelSelection(CODEX_SECONDARY_INSTANCE, "gpt-5.4", [
+      { id: "reasoningEffort", value: "xhigh" },
+    ]);
+    const migrated = createModelSelection(CODEX_INSTANCE, "gpt-5.4");
+    for (const newer of [
+      createModelSelection(CLAUDE_AGENT_INSTANCE, "claude-opus-4-6"),
+      createModelSelection(CODEX_SECONDARY_INSTANCE, "gpt-5.4", [
+        { id: "reasoningEffort", value: "high" },
+      ]),
+    ]) {
+      store.setModelSelection(threadRef, sent, { explicit: true, replaceOptions: true });
+      store.clearComposerContent(threadRef);
+      store.setModelSelection(threadRef, newer, { explicit: true, replaceOptions: true });
+
+      store.acknowledgeSubmittedModelSelection(threadRef, sent);
+      store.syncThreadModelSelection(threadRef, migrated);
+
+      const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+      expect(draft?.activeProvider).toBe(newer.instanceId);
+      expect(draft?.modelSelectionByProvider[newer.instanceId]).toEqual(newer);
+      expect(draft?.modelSelectionExplicit).toBe(true);
+    }
   });
 
   it("follows an agent provider switch after a sent selection without losing draft content", () => {
