@@ -5,17 +5,18 @@ import {
   CircleHelpIcon,
   ClockIcon,
   CloudIcon,
+  FolderIcon,
   PlusIcon,
   WebhookIcon,
   WorkflowIcon,
 } from "lucide-react";
-import { useLayoutEffect, useState, type ComponentProps } from "react";
+import { useLayoutEffect, useState, type ComponentProps, type ReactNode } from "react";
 import * as DateTime from "effect/DateTime";
 import { deriveSubagentElapsedMs } from "@t3tools/shared/orchestrationTiming";
 import { cloudChatVisitKey, isUnopenedAutomaticChat } from "../../lib/cloudChatVisits";
 import { cn } from "../../lib/utils";
 import { deriveProjectIdentity } from "../../projectIdentity";
-import { useThreadShells } from "../../state/entities";
+import { useProject, useThreadShells } from "../../state/entities";
 import { cloudChats } from "../../state/cloudChats";
 import { useEnvironmentMachines, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
@@ -101,6 +102,137 @@ function AutomaticRunDuration({ elapsed }: { elapsed: RunTiming | null }) {
   );
 }
 
+function automaticRowClassName(active: boolean, unopened: boolean, running: boolean) {
+  return cn(
+    "group/sidebar-row relative grid h-12 w-full cursor-pointer grid-cols-[1rem_minmax(0,1fr)_0.875rem_0.875rem_2.75rem_1.5rem] grid-rows-2 items-center gap-x-1 overflow-hidden rounded-md px-2 py-1 text-left text-sm outline-none select-none [content-visibility:auto] [contain-intrinsic-size:auto_48px] @min-[24rem]/automatic-row:h-9 @min-[24rem]/automatic-row:grid-cols-[minmax(0,5rem)_minmax(0,1fr)_0.875rem_0.875rem_3.5rem_2rem] @min-[24rem]/automatic-row:grid-rows-1 @min-[24rem]/automatic-row:gap-x-2.5 @min-[24rem]/automatic-row:px-2.5 @min-[24rem]/automatic-row:py-0 @min-[24rem]/automatic-row:[contain-intrinsic-size:auto_36px] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+    !active &&
+      !unopened &&
+      !running &&
+      "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
+    active
+      ? "bg-sidebar-row-active text-sidebar-foreground"
+      : unopened || running
+        ? "text-sidebar-foreground hover:bg-sidebar-row-hover"
+        : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+  );
+}
+
+function AutomaticRowContent({
+  title,
+  projectName,
+  projectDescription = projectName,
+  origin,
+  executionIcon,
+  location,
+  elapsed,
+  updatedAt,
+  status,
+  unopened,
+}: {
+  title: string;
+  projectName: string | null;
+  projectDescription?: string | null;
+  origin: ThreadShell["source"]["automationOrigin"];
+  executionIcon: ReactNode;
+  location: string;
+  elapsed: RunTiming | null;
+  updatedAt: string;
+  status: string;
+  unopened: boolean;
+}) {
+  const identity = projectName ? deriveProjectIdentity(projectName) : null;
+  const relativeTime = formatRelativeTimeLabel(updatedAt);
+  const timeLabel = relativeTime === "just now" ? "now" : relativeTime.replace(/ ago$/, "");
+  return (
+    <>
+      <span className="col-start-1 row-start-1 contents min-w-0 items-center gap-1.5 @min-[24rem]/automatic-row:flex">
+        <span className="col-start-1 row-start-1 flex shrink-0 items-center opacity-40 grayscale transition-opacity group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0">
+          {identity ? (
+            <ProjectMonogram text={identity.monogram} color={identity.color} />
+          ) : (
+            <FolderIcon aria-hidden className="size-4" />
+          )}
+        </span>
+        <span className="col-span-2 col-start-1 row-start-2 flex min-w-0 items-center gap-1 @min-[24rem]/automatic-row:contents">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  role="img"
+                  aria-label={status}
+                  className={cn(
+                    "size-1.5 shrink-0 rounded-full",
+                    status === "Running" ? "bg-primary" : "bg-current",
+                  )}
+                />
+              }
+            />
+            <TooltipPopup>{status}</TooltipPopup>
+          </Tooltip>
+          {projectName ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={<span className="min-w-0 truncate text-xs text-secondary-label" />}
+              >
+                {projectName}
+              </TooltipTrigger>
+              <TooltipPopup>{projectDescription}</TooltipPopup>
+            </Tooltip>
+          ) : null}
+        </span>
+      </span>
+      <span className="col-start-2 col-end-7 row-start-1 flex min-w-0 items-center gap-1 @min-[24rem]/automatic-row:col-end-3">
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
+            unopened && "font-medium",
+          )}
+        >
+          {title}
+        </span>
+        {unopened ? (
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
+        ) : null}
+      </span>
+      <span className="col-start-3 row-start-2 flex items-center @min-[24rem]/automatic-row:row-start-1">
+        <AutomaticOriginIcon origin={origin} />
+      </span>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              role="img"
+              aria-label={location}
+              className="col-start-4 row-start-2 inline-flex shrink-0 items-center text-secondary-label @min-[24rem]/automatic-row:row-start-1"
+            />
+          }
+        >
+          {executionIcon}
+        </TooltipTrigger>
+        <TooltipPopup>{location}</TooltipPopup>
+      </Tooltip>
+      <span className="col-start-5 row-start-2 flex min-w-0 justify-end tabular-nums @min-[24rem]/automatic-row:row-start-1">
+        <AutomaticRunDuration elapsed={elapsed} />
+      </span>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <time
+              dateTime={updatedAt}
+              className="col-start-6 row-start-2 text-right text-xs text-secondary-label tabular-nums @min-[24rem]/automatic-row:row-start-1"
+            />
+          }
+        >
+          {timeLabel}
+        </TooltipTrigger>
+        <TooltipPopup>
+          {status} · {new Date(updatedAt).toLocaleString()}
+        </TooltipPopup>
+      </Tooltip>
+    </>
+  );
+}
+
 function LocalAutomaticRow({
   thread,
   enabled,
@@ -120,6 +252,7 @@ function LocalAutomaticRow({
   machine: ComponentProps<typeof ThreadExecutionIcon>["machine"];
   onThreadOpen: (() => void) | undefined;
 }) {
+  const project = useProject({ environmentId: thread.environmentId, projectId: thread.projectId });
   const { setOpenMobile } = useSidebar();
   const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   const params = useParams({ strict: false });
@@ -183,7 +316,7 @@ function LocalAutomaticRow({
     ? "Codex Cloud"
     : executionLocationLabel(source.executionDestination);
   return (
-    <li className="list-none">
+    <li className="@container/automatic-row list-none">
       <Link
         to="/$environmentId/$threadId"
         params={{ environmentId: thread.environmentId, threadId: thread.id }}
@@ -199,14 +332,16 @@ function LocalAutomaticRow({
               new Date().toISOString(),
             );
         }}
-        className={cn(
-          "group/sidebar-row flex h-9 w-full items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          active
-            ? "bg-sidebar-row-active text-sidebar-foreground"
-            : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
-        )}
+        className={automaticRowClassName(active, unopened, status === "Running")}
       >
-        <AutomaticOriginIcon
+        <AutomaticRowContent
+          title={thread.title}
+          projectName={project?.title ?? cloudChat?.repository?.split("/").at(-1) ?? null}
+          projectDescription={project?.title ?? cloudChat?.repository ?? null}
+          status={status}
+          unopened={unopened}
+          updatedAt={thread.updatedAt}
+          elapsed={elapsed}
           origin={
             source.automationOrigin !== undefined
               ? source.automationOrigin
@@ -214,21 +349,9 @@ function LocalAutomaticRow({
                 ? "external"
                 : undefined
           }
-        />
-        <span className={cn("min-w-0 flex-1 truncate", unopened && "font-medium")}>
-          {thread.title}
-        </span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span
-                role="img"
-                aria-label={location}
-                className="inline-flex shrink-0 items-center text-secondary-label"
-              />
-            }
-          >
-            {importedCloud ? (
+          location={location}
+          executionIcon={
+            importedCloud ? (
               <CloudIcon aria-hidden className="size-3.5" />
             ) : (
               <ThreadExecutionIcon
@@ -237,15 +360,9 @@ function LocalAutomaticRow({
                 aria-hidden
                 className="size-3.5"
               />
-            )}
-          </TooltipTrigger>
-          <TooltipPopup>{location}</TooltipPopup>
-        </Tooltip>
-        <AutomaticRunDuration elapsed={elapsed} />
-        {unopened ? (
-          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
-        ) : null}
-        <span className="shrink-0 text-xs text-secondary-label">{status}</span>
+            )
+          }
+        />
       </Link>
     </li>
   );
@@ -279,12 +396,9 @@ function AutomaticChatRow({
   const running = chat.status === "active";
   const elapsed = cloudRunTiming(chat);
   const repositoryName = chat.repository?.split("/").at(-1);
-  const identity = repositoryName ? deriveProjectIdentity(repositoryName) : null;
   const updatedAt = new Date(chat.updatedAt * 1000).toISOString();
-  const relativeTime = formatRelativeTimeLabel(updatedAt);
-  const timeLabel = relativeTime === "just now" ? "now" : relativeTime.replace(/ ago$/, "");
   return (
-    <li className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_36px]">
+    <li className="@container/automatic-row list-none">
       <Link
         {...(normalThreadId
           ? {
@@ -308,73 +422,20 @@ function AutomaticChatRow({
         }}
         aria-current={active ? "page" : undefined}
         aria-label={`${chat.title}${chat.repository ? `, ${chat.repository}` : ""}${unopened ? ", new" : ""}${running ? ", running" : ""}`}
-        className={cn(
-          "group/sidebar-row relative flex h-9 w-full cursor-pointer items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-left text-sm outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-          !unopened && !running && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
-          active
-            ? "bg-sidebar-row-active text-sidebar-foreground"
-            : unopened
-              ? "text-sidebar-foreground hover:bg-sidebar-row-hover"
-              : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
-        )}
+        className={automaticRowClassName(active, unopened, running)}
       >
-        <span className="flex shrink-0 items-center opacity-40 grayscale transition-opacity group-focus-within/sidebar-row:opacity-100 group-focus-within/sidebar-row:grayscale-0 group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0">
-          {identity ? (
-            <ProjectMonogram text={identity.monogram} color={identity.color} />
-          ) : (
-            <CloudIcon aria-hidden className="size-4" />
-          )}
-        </span>
-        {repositoryName ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span className="inline-flex min-w-0 max-w-24 shrink items-center gap-1 text-xs text-secondary-label" />
-              }
-            >
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current" />
-              <span className="truncate">{repositoryName}</span>
-            </TooltipTrigger>
-            <TooltipPopup>{chat.repository}</TooltipPopup>
-          </Tooltip>
-        ) : null}
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
-            unopened && "font-medium",
-          )}
-        >
-          {chat.title}
-        </span>
-        <AutomaticOriginIcon origin="external" />
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span
-                role="img"
-                aria-label="Codex Cloud"
-                className="inline-flex shrink-0 items-center text-secondary-label"
-              />
-            }
-          >
-            <CloudIcon aria-hidden className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipPopup>Codex Cloud</TooltipPopup>
-        </Tooltip>
-        <AutomaticRunDuration elapsed={elapsed} />
-        {unopened ? (
-          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
-        ) : null}
-        <span className="ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end text-xs tabular-nums text-secondary-label">
-          {running ? (
-            "Running"
-          ) : (
-            <Tooltip>
-              <TooltipTrigger render={<time dateTime={updatedAt} />}>{timeLabel}</TooltipTrigger>
-              <TooltipPopup>{new Date(updatedAt).toLocaleString()}</TooltipPopup>
-            </Tooltip>
-          )}
-        </span>
+        <AutomaticRowContent
+          title={chat.title}
+          projectName={repositoryName ?? null}
+          projectDescription={chat.repository}
+          origin="external"
+          executionIcon={<CloudIcon aria-hidden className="size-3.5" />}
+          location="Codex Cloud"
+          elapsed={elapsed}
+          updatedAt={updatedAt}
+          status={running ? "Running" : chat.status === "unknown" ? "No status" : "Completed"}
+          unopened={unopened}
+        />
       </Link>
     </li>
   );

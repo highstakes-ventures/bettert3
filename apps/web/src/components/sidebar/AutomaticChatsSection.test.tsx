@@ -66,7 +66,10 @@ vi.mock("@tanstack/react-router", () => ({
     </a>
   ),
 }));
-vi.mock("../../state/entities", () => ({ useThreadShells: () => state.threads }));
+vi.mock("../../state/entities", () => ({
+  useThreadShells: () => state.threads,
+  useProject: () => null,
+}));
 vi.mock("../../state/cloudChats", () => ({ cloudChats: { list: () => "cloud" } }));
 vi.mock("../../state/environments", () => ({
   usePrimaryEnvironmentId: () => state.environmentId,

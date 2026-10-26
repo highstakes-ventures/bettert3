@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("../../state/entities", () => ({
   useThreadShells: () => state.threads,
+  useProject: () => null,
   waitForThreadShell: () => Promise.resolve(true),
 }));
 vi.mock("../../state/environments", () => ({
