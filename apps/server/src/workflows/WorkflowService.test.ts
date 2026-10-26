@@ -150,6 +150,7 @@ const harness = Effect.gen(function* () {
   const shells = new Map<ThreadId, OrchestrationV2ThreadShell>();
   const shellReads: ThreadId[] = [];
   const searches: Array<{ teamId: string; query: string }> = [];
+  const ticketReads: string[] = [];
   const switches = {
     failDecision: false,
     loseDecisionResponse: false,
@@ -254,11 +255,12 @@ const harness = Effect.gen(function* () {
           return { candidates: [], hasMore: false };
         }),
       read: (id) =>
-        Effect.suspend(() =>
-          tickets.has(id)
+        Effect.suspend(() => {
+          ticketReads.push(id);
+          return tickets.has(id)
             ? Effect.succeed(tickets.get(id)!)
-            : Effect.fail(new WorkflowError({ message: "Unknown ticket" })),
-        ),
+            : Effect.fail(new WorkflowError({ message: "Unknown ticket" }));
+        }),
       save: ({ id, draft: value }) =>
         Effect.gen(function* () {
           yield* switches.beforeSave;
@@ -352,6 +354,7 @@ const harness = Effect.gen(function* () {
     shells,
     shellReads,
     searches,
+    ticketReads,
     tickets,
     launches,
     decisions,
@@ -372,6 +375,28 @@ it.effect("persists one intake and one preparation task across retries and resta
     expect(h.launches).toHaveLength(1);
     expect((yield* restored.list(projectId)).runs).toHaveLength(1);
     expect(h.launches[0]?.initialMessage?.text).toContain("t3_workflow_read");
+  }).pipe(Effect.scoped),
+);
+
+it.effect("does not poll unopened refinement tickets, including after restart", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const first = yield* h.prepare("first");
+    const second = yield* h.prepare("second");
+    const ticket = h.tickets.get(first.issueId!)!;
+    h.tickets.set(ticket.id, { ...ticket, title: "Edited in Linear", updatedAt: "revision-2" });
+    h.ticketReads.length = 0;
+
+    yield* h.service.resume();
+    const restored = yield* h.restart();
+    yield* restored.resume();
+    yield* restored.list(projectId);
+    expect(h.ticketReads).toEqual([]);
+
+    const detail = yield* restored.read(first.id);
+    expect(detail.ticket?.title).toBe("Edited in Linear");
+    expect(h.ticketReads).toEqual([first.issueId]);
+    expect(h.ticketReads).not.toContain(second.issueId);
   }).pipe(Effect.scoped),
 );
 
@@ -494,6 +519,47 @@ it.effect("publishes a new panel revision for consecutive agent ticket updates",
       previous = published;
     }
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "explicit refresh reloads only the caller's ticket and publishes its new panel revision",
+  () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      const run = yield* h.prepare("refreshing");
+      yield* h.prepare("unopened");
+      const snapshots = yield* Queue.unbounded<typeof run>();
+      yield* h.service.subscribe(projectId).pipe(
+        Stream.runForEach((snapshot) =>
+          Queue.offer(
+            snapshots,
+            snapshot.runs.find((entry) => entry.id === run.id)!,
+          ),
+        ),
+        Effect.forkScoped,
+      );
+      const previous = yield* Queue.take(snapshots);
+      const ticket = h.tickets.get(run.issueId!)!;
+      h.tickets.set(ticket.id, {
+        ...ticket,
+        title: "Updated by chat",
+        updatedAt: "external-update",
+      });
+      h.ticketReads.length = 0;
+
+      const detail = yield* h.service.agentRefresh(run.threadId!);
+      const published = yield* Queue.take(snapshots);
+      expect(h.ticketReads).toEqual([ticket.id]);
+      expect(detail.ticket?.title).toBe("Updated by chat");
+      expect(published.title).toBe("Updated by chat");
+      expect(published.updatedAt).not.toBe(previous.updatedAt);
+      expect(detail.run.updatedAt).toBe(published.updatedAt);
+      expect(h.switches.saves).toBe(2);
+
+      h.ticketReads.length = 0;
+      yield* h.service.agentRefresh(ThreadId.make("unrelated-chat")).pipe(Effect.flip);
+      expect(h.ticketReads).toEqual([]);
+    }).pipe(Effect.scoped),
 );
 
 it.effect("requires a type on the live ticket before approval", () =>
@@ -914,6 +980,35 @@ it.effect("waits for code prerequisites to exist on the fetched implementation b
     h.switches.ancestry = true;
     yield* h.service.resume();
     expect(h.launches).toHaveLength(2);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("explicit refresh cannot overwrite the delivery project of a pending approval", () =>
+  Effect.gen(function* () {
+    const h = yield* harness;
+    const run = yield* h.prepare("pending-approval");
+    const ticket = h.tickets.get(run.issueId!)!;
+    h.tickets.set(ticket.id, { ...ticket, project: projects[0]! });
+    h.switches.failDecision = true;
+    yield* h.service
+      .decide({
+        runId: run.id,
+        decision: "approve",
+        expectedUpdatedAt: ticket.updatedAt,
+        targetProjectId: "target",
+      })
+      .pipe(Effect.flip);
+    expect((yield* h.service.list(projectId)).runs[0]?.phase).toBe("approving");
+    h.ticketReads.length = 0;
+
+    const error = yield* h.service.agentRefresh(run.threadId!).pipe(Effect.flip);
+    expect(error.message).toContain("pending ticket decision");
+    expect(h.ticketReads).toEqual([]);
+
+    h.switches.failDecision = false;
+    yield* (yield* h.restart()).resume();
+    expect((yield* h.service.list(projectId)).runs[0]?.phase).toBe("approved");
+    expect(h.tickets.get(ticket.id)?.project?.id).toBe("target");
   }).pipe(Effect.scoped),
 );
 

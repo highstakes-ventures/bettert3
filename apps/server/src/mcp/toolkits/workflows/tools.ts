@@ -32,6 +32,12 @@ export const WorkflowToolkit = Toolkit.make(
       "Read this task's workflow, live Linear ticket, configuration, available target projects and labels. A task can read only its own workflow.",
     success: WorkflowAgentContext,
   }).annotate(Tool.Readonly, true),
+  Tool.make("refresh_linear", {
+    ...common,
+    description:
+      "Refresh this chat's linked Linear ticket in the BetterT3 side pane after editing it through an external Linear tool. Reloads only this chat's ticket and notifies connected clients. Does not edit Linear or approve the ticket.",
+    success: WorkflowDetail,
+  }).annotate(Tool.Readonly, true),
   Tool.make("t3_workflow_search", {
     ...common,
     description:

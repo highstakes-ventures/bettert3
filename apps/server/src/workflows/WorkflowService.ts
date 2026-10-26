@@ -93,6 +93,7 @@ export class WorkflowService extends Context.Service<
     readonly agentRead: (
       threadId: ThreadId,
     ) => Effect.Effect<typeof WorkflowAgentContext.Type, WorkflowError>;
+    readonly agentRefresh: (threadId: ThreadId) => Effect.Effect<WorkflowDetail, WorkflowError>;
     readonly agentSearch: (
       threadId: ThreadId,
       query: string,
@@ -727,18 +728,6 @@ const make = Effect.gen(function* () {
         if (record.error !== error) yield* save({ ...record, error });
         return;
       }
-      if (record.phase === "review") {
-        const ticket = yield* linear.read(record.issueId!);
-        if (
-          ticket.updatedAt !== record.ticket?.updatedAt ||
-          ticket.blockedBy.some(
-            (issue, index) => issue.stateType !== record.ticket?.blockedBy[index]?.stateType,
-          ) ||
-          record.error !== null
-        )
-          yield* save({ ...ticketRecord(record, ticket), error: null });
-        return;
-      }
       if (record.phase === "queued") {
         const start = (goal: string) => launchTask(record, config, goal);
         if (record.kind === "tickets")
@@ -927,15 +916,9 @@ const make = Effect.gen(function* () {
       const records = yield* all();
       for (const record of records.filter(
         (value) =>
-          [
-            "queued",
-            "preparing",
-            "review",
-            "approving",
-            "rejecting",
-            "approved",
-            "implementing",
-          ].includes(value.phase) || value.pendingResult !== null,
+          ["queued", "preparing", "approving", "rejecting", "approved", "implementing"].includes(
+            value.phase,
+          ) || value.pendingResult !== null,
       ))
         yield* resumeRecord(record.id);
       // Chat activity can change without a workflow transition.
@@ -1100,6 +1083,29 @@ const make = Effect.gen(function* () {
           configuration: yield* requireConfiguration(record.projectId),
           connection: yield* linear.connection({ cached: true }),
         };
+      }),
+    agentRefresh: (threadId) =>
+      Effect.gen(function* () {
+        const initial = yield* callerRecord(threadId);
+        return yield* locks.withLock(
+          initial.projectId,
+          Effect.gen(function* () {
+            const record = yield* load(initial.id);
+            if (record.phase === "approving" || record.phase === "rejecting")
+              return yield* new WorkflowError({
+                message: "Finish the pending ticket decision before refreshing.",
+              });
+            const detail = yield* read(record.id);
+            if (detail.ticket === null) return detail;
+            const config = yield* requireConfiguration(record.projectId);
+            if (detail.ticket.teamId !== config.linearTeamId)
+              return yield* new WorkflowError({
+                message: "The ticket moved to another Linear team.",
+              });
+            const updated = yield* save(ticketRecord(record, detail.ticket));
+            return { ...detail, run: summary(updated) };
+          }),
+        );
       }),
     agentSearch: (threadId, query) =>
       callerRecord(threadId).pipe(

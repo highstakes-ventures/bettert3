@@ -1093,6 +1093,9 @@ export function createServerEnvironmentAtoms<R, E>(
     workflowDetail: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:workflows:detail",
       tag: WS_METHODS.workflowsRead,
+      // Only the visible ticket panel owns a reader. Stop polling as soon as it closes.
+      idleTtlMs: 0,
+      refreshIntervalMs: 30_000,
     }),
     workflowLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:workflows:live",
