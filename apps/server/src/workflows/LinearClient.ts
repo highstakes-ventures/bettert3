@@ -7,8 +7,10 @@ import {
   type WorkflowTicket,
   type WorkflowTicketDraft,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -23,6 +25,9 @@ const decodeEnvelope = Schema.decodeUnknownEffect(
     data: Schema.optional(Schema.Unknown),
     errors: Schema.optional(Schema.Array(Schema.Unknown)),
   }),
+);
+const isRateLimited = Schema.is(
+  Schema.Struct({ extensions: Schema.Struct({ code: Schema.Literal("RATELIMITED") }) }),
 );
 const Node = Schema.Struct({ id: Schema.String, name: Schema.String });
 const pageInfo = Schema.Struct({
@@ -107,7 +112,9 @@ export class LinearClient extends Context.Service<
     readonly connected: Effect.Effect<boolean, WorkflowError>;
     readonly connect: (key: string) => Effect.Effect<WorkflowConnection, WorkflowError>;
     readonly disconnect: Effect.Effect<void, WorkflowError>;
-    readonly connection: () => Effect.Effect<WorkflowConnection, WorkflowError>;
+    readonly connection: (options?: {
+      readonly cached?: boolean;
+    }) => Effect.Effect<WorkflowConnection, WorkflowError>;
     readonly read: (id: string) => Effect.Effect<WorkflowTicket, WorkflowError>;
     readonly search: (
       teamId: string,
@@ -138,6 +145,7 @@ const make = Effect.gen(function* () {
         (cause) => new WorkflowError({ message: "Could not read the Linear connection.", cause }),
       ),
     );
+  const cooldowns = new Map<string, number>();
   const request = Effect.fn("LinearClient.request")(function* <S extends Schema.Top>(
     query: string,
     variables: object,
@@ -152,58 +160,110 @@ const make = Effect.gen(function* () {
       });
     if (!credential)
       return yield* new WorkflowError({ message: "Connect Linear before starting a workflow." });
-    const response = yield* http
-      .execute(
-        HttpClientRequest.post("https://api.linear.app/graphql").pipe(
-          HttpClientRequest.setHeaders({
-            authorization: credential,
-            "content-type": "application/json",
-          }),
-          HttpClientRequest.bodyJsonUnsafe({ query, variables }),
-        ),
+    let waited = 0;
+    for (let attempt = 0; ; attempt++) {
+      // Share Linear's cooldown across panels and workflow jobs using this key.
+      while (true) {
+        const delay = (cooldowns.get(credential) ?? 0) - (yield* Clock.currentTimeMillis);
+        if (delay <= 0) {
+          cooldowns.delete(credential);
+          break;
+        }
+        if (waited + delay > 30_000)
+          return yield* new WorkflowError({
+            message: "Linear's request limit has not reset yet. Refresh again after it resets.",
+          });
+        yield* Effect.sleep(delay);
+        waited += delay;
+      }
+      const response = yield* http
+        .execute(
+          HttpClientRequest.post("https://api.linear.app/graphql").pipe(
+            HttpClientRequest.setHeaders({
+              authorization: credential,
+              "content-type": "application/json",
+            }),
+            HttpClientRequest.bodyJsonUnsafe({ query, variables }),
+          ),
+        )
+        .pipe(
+          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+          Effect.timeout("30 seconds"),
+          Effect.mapError(
+            (cause) => new WorkflowError({ message: "Could not reach Linear.", cause }),
+          ),
+        );
+
+      if (response.status === 401 || response.status === 403)
+        return yield* new WorkflowError({
+          message: "Linear refused this connection. Check its credentials and permissions.",
+        });
+      if (
+        response.status !== 429 &&
+        response.status !== 400 &&
+        (response.status < 200 || response.status >= 300)
       )
-      .pipe(
-        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
-        Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
-        Effect.timeout("30 seconds"),
+        return yield* new WorkflowError({ message: "Linear could not complete this request." });
+      const envelope =
+        response.status === 429
+          ? null
+          : yield* response.json.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new WorkflowError({ message: "Linear returned an unreadable response.", cause }),
+              ),
+              Effect.flatMap((body) =>
+                decodeEnvelope(body).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new WorkflowError({ message: "Linear returned an invalid response.", cause }),
+                  ),
+                ),
+              ),
+            );
+      if (response.status === 429 || envelope?.errors?.some(isRateLimited)) {
+        const now = yield* Clock.currentTimeMillis;
+        const retryAfter = response.headers["retry-after"];
+        const seconds = retryAfter?.trim() ? Number(retryAfter) : NaN;
+        const retryAt = retryAfter === undefined ? NaN : Date.parse(retryAfter);
+        const delays = [
+          Number.isFinite(seconds) ? seconds * 1_000 : retryAt - now,
+          ...["requests", "complexity"].map((limit) =>
+            response.headers[`x-ratelimit-${limit}-remaining`] === "0"
+              ? Number(response.headers[`x-ratelimit-${limit}-reset`]) - now
+              : NaN,
+          ),
+        ].filter((delay) => Number.isFinite(delay) && delay >= 0);
+        const until = now + Math.max(1_000, ...delays, delays.length ? 0 : 1_000 * 2 ** attempt);
+        for (const [key, deadline] of cooldowns) {
+          if (deadline <= now) cooldowns.delete(key);
+        }
+        cooldowns.set(credential, Math.max(until, cooldowns.get(credential) ?? 0));
+        if (attempt >= 2)
+          return yield* new WorkflowError({
+            message:
+              "Linear is still rate limiting requests. Refresh again after its limit resets.",
+          });
+        continue;
+      }
+      if (response.status === 400)
+        return yield* new WorkflowError({ message: "Linear could not complete this request." });
+      if (envelope?.errors?.length)
+        return yield* new WorkflowError({
+          message:
+            "Linear rejected the request. Check the connection's access and workflow configuration.",
+        });
+      return yield* Schema.decodeUnknownEffect(schema)(envelope?.data).pipe(
         Effect.mapError(
-          (cause) => new WorkflowError({ message: "Could not reach Linear.", cause }),
+          (cause) =>
+            new WorkflowError({
+              message: "Linear returned data that did not match the expected contract.",
+              cause,
+            }),
         ),
       );
-    if (response.status === 401 || response.status === 403)
-      return yield* new WorkflowError({
-        message: "Linear refused this connection. Check its credentials and permissions.",
-      });
-    if (response.status === 429)
-      return yield* new WorkflowError({
-        message: "Linear is rate limiting requests. The workflow will retry later.",
-      });
-    if (response.status < 200 || response.status >= 300)
-      return yield* new WorkflowError({ message: "Linear could not complete this request." });
-    const body = yield* response.json.pipe(
-      Effect.mapError(
-        (cause) => new WorkflowError({ message: "Linear returned an unreadable response.", cause }),
-      ),
-    );
-    const envelope = yield* decodeEnvelope(body).pipe(
-      Effect.mapError(
-        (cause) => new WorkflowError({ message: "Linear returned an invalid response.", cause }),
-      ),
-    );
-    if (envelope.errors?.length)
-      return yield* new WorkflowError({
-        message:
-          "Linear rejected the request. Check the connection's access and workflow configuration.",
-      });
-    return yield* Schema.decodeUnknownEffect(schema)(envelope.data).pipe(
-      Effect.mapError(
-        (cause) =>
-          new WorkflowError({
-            message: "Linear returned data that did not match the expected contract.",
-            cause,
-          }),
-      ),
-    );
+    }
   });
   const readRaw = (id: string) =>
     request(
@@ -364,6 +424,16 @@ const make = Effect.gen(function* () {
         .map(project),
     } satisfies WorkflowConnection;
   });
+  const connectionCache = Effect.cachedWithTTL(connection(), (exit) =>
+    Exit.isSuccess(exit) ? "1 minute" : 0,
+  );
+  let cachedConnection = yield* connectionCache;
+  // A completed old read must not refill the cache after credentials change.
+  const invalidateConnection = connectionCache.pipe(
+    Effect.map((fresh) => {
+      cachedConnection = fresh;
+    }),
+  );
   const changed = Schema.Struct({ success: Schema.Boolean });
   const mutate = (query: string, variables: object, name: string) =>
     request(query, variables, Schema.Record(Schema.String, changed)).pipe(
@@ -478,7 +548,8 @@ const make = Effect.gen(function* () {
   });
   return LinearClient.of({
     connected: key.pipe(Effect.map(Option.isSome)),
-    connection: () => connection(),
+    connection: (options) =>
+      options?.cached ? Effect.suspend(() => cachedConnection) : connection(),
     connect: (credential) =>
       connection(credential).pipe(
         Effect.tap(() =>
@@ -491,15 +562,14 @@ const make = Effect.gen(function* () {
               ),
             ),
         ),
+        Effect.tap(() => invalidateConnection),
       ),
-    disconnect: secrets
-      .remove(SECRET)
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new WorkflowError({ message: "Could not remove the Linear connection.", cause }),
-        ),
+    disconnect: secrets.remove(SECRET).pipe(
+      Effect.mapError(
+        (cause) => new WorkflowError({ message: "Could not remove the Linear connection.", cause }),
       ),
+      Effect.andThen(invalidateConnection),
+    ),
     read,
     save,
     search: (teamId, query) =>

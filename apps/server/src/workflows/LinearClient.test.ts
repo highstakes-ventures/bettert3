@@ -5,11 +5,14 @@ import {
   WORKFLOW_CANDIDATE_CONTEXT_CODE_POINTS,
   type WorkflowTicketDraft,
 } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/http";
+import { TestClock } from "effect/testing";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as Linear from "./LinearClient.ts";
 
@@ -51,42 +54,56 @@ const draft: WorkflowTicketDraft = {
   blockedBy: ["new-blocker"],
   dependencyEvidence: [],
 };
+type LinearResponse = {
+  data?: unknown;
+  errors?: unknown[];
+  status?: number;
+  headers?: Record<string, string>;
+};
 const fixture = (
   respond: (
     query: string,
     variables: Record<string, unknown>,
-  ) => { data?: unknown; errors?: unknown[]; status?: number },
+    credential: string,
+  ) => LinearResponse | Effect.Effect<LinearResponse>,
 ) => {
   const calls: Array<{ query: string; variables: Record<string, unknown> }> = [];
   const stored: Uint8Array[] = [];
+  let credential = Option.some(new TextEncoder().encode("secret-test-key"));
   const layer = Linear.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ServerSecretStore.ServerSecretStore)({
-          get: () => Effect.succeed(Option.some(new TextEncoder().encode("secret-test-key"))),
+          get: () => Effect.sync(() => credential),
+          remove: () =>
+            Effect.sync(() => {
+              credential = Option.none();
+            }),
           set: (_name, value) =>
             Effect.sync(() => {
               stored.push(value);
+              credential = Option.some(new Uint8Array(value));
             }),
         }),
         Layer.succeed(
           HttpClient.HttpClient,
           HttpClient.make((request) =>
-            Effect.sync(() => {
+            Effect.gen(function* () {
               expect(request.url).toBe("https://api.linear.app/graphql");
-              expect(request.headers.authorization).toBe("secret-test-key");
+              expect(request.headers.authorization).toMatch(/^secret-test-key(?:-other)?$/);
               expect(request.body._tag).toBe("Uint8Array");
               const body =
                 request.body._tag === "Uint8Array"
                   ? JSON.parse(new TextDecoder().decode(request.body.body))
                   : {};
               calls.push(body);
-              const response = respond(body.query, body.variables);
+              const reply = respond(body.query, body.variables, request.headers.authorization!);
+              const response = Effect.isEffect(reply) ? yield* reply : reply;
               return HttpClientResponse.fromWeb(
                 request,
                 Response.json(
                   { data: response.data, errors: response.errors },
-                  { status: response.status ?? 200 },
+                  { status: response.status ?? 200, headers: response.headers ?? {} },
                 ),
               );
             }),
@@ -557,5 +574,204 @@ it.effect("connects within Linear's query budget without dropping paginated meta
     expect(connection.projects.at(-1)?.initiatives).toEqual([]);
     expect(f.stored).toHaveLength(1);
     expect(f.calls.every((call) => !call.query.includes("mutation"))).toBe(true);
+  }).pipe(Effect.provide(f.layer));
+});
+
+it.effect(
+  "shares workspace metadata across concurrent panels and refreshes it after one minute",
+  () => {
+    let projectName = "Original";
+    const f = fixture((query) => ({
+      data: query.includes("teams(first:")
+        ? { teams: page([]) }
+        : {
+            projects: page([
+              {
+                id: "project",
+                name: projectName,
+                teams: { nodes: [] },
+                status: { type: "started" },
+              },
+            ]),
+          },
+    }));
+    return Effect.gen(function* () {
+      const client = yield* Linear.LinearClient;
+      const connections = yield* Effect.all(
+        Array.from({ length: 6 }, () => client.connection({ cached: true })),
+        { concurrency: "unbounded" },
+      );
+      expect(connections.every((connection) => connection.projects[0]?.name === "Original")).toBe(
+        true,
+      );
+      expect(f.calls).toHaveLength(2);
+      projectName = "Renamed";
+      expect((yield* client.connection({ cached: true })).projects[0]?.name).toBe("Original");
+      yield* TestClock.adjust("61 seconds");
+      expect((yield* client.connection({ cached: true })).projects[0]?.name).toBe("Renamed");
+      expect(f.calls).toHaveLength(4);
+      projectName = "Completed elsewhere";
+      expect((yield* client.connection()).projects[0]?.name).toBe("Completed elsewhere");
+      expect(f.calls).toHaveLength(6);
+    }).pipe(Effect.provide(f.layer));
+  },
+);
+
+it.effect(
+  "invalidates metadata when reconnecting or disconnecting and does not cache failures",
+  () => {
+    let refused = true;
+    const f = fixture((query) =>
+      refused
+        ? { status: 401 }
+        : { data: query.includes("teams(first:") ? { teams: page([]) } : { projects: page([]) } },
+    );
+    return Effect.gen(function* () {
+      const client = yield* Linear.LinearClient;
+      yield* client.connection({ cached: true }).pipe(Effect.flip);
+      refused = false;
+      expect((yield* client.connection({ cached: true })).connected).toBe(true);
+      expect(f.calls).toHaveLength(3);
+      yield* client.connect("secret-test-key");
+      yield* client.connection({ cached: true });
+      expect(f.calls).toHaveLength(7);
+      yield* client.disconnect;
+      expect((yield* client.connection({ cached: true })).connected).toBe(false);
+      expect(f.calls).toHaveLength(7);
+    }).pipe(Effect.provide(f.layer));
+  },
+);
+
+it.effect.each([
+  { status: 429, headers: { "retry-after": "2" } },
+  {
+    status: 400,
+    errors: [{ extensions: { code: "RATELIMITED" } }],
+    headers: { "retry-after": "2" },
+  },
+  {
+    status: 200,
+    errors: [{ extensions: { code: "RATELIMITED" } }],
+    headers: { "x-ratelimit-requests-remaining": "0", "x-ratelimit-requests-reset": "2000" },
+  },
+])("recovers a rate-limited read after its cooldown without another Refresh, %j", (limited) =>
+  Effect.gen(function* () {
+    const f = fixture(() =>
+      f.calls.length === 1 ? limited : { data: { issue: issue("ticket") } },
+    );
+    const client = yield* Linear.LinearClient.pipe(Effect.provide(f.layer));
+    const pending = yield* client.read("ticket").pipe(Effect.forkChild);
+    yield* TestClock.adjust("1 second");
+    expect(f.calls).toHaveLength(1);
+    yield* TestClock.adjust("1 second");
+    expect((yield* Fiber.join(pending)).id).toBe("ticket");
+    expect(f.calls).toHaveLength(2);
+  }),
+);
+
+it.effect("bounds retries and holds other reads until the shared cooldown ends", () => {
+  let limited = true;
+  const f = fixture(() => (limited ? { status: 429 } : { data: { issue: issue("other") } }));
+  return Effect.gen(function* () {
+    const client = yield* Linear.LinearClient;
+    const pending = yield* client.read("ticket").pipe(Effect.flip, Effect.forkChild);
+    yield* TestClock.adjust("3 seconds");
+    expect((yield* Fiber.join(pending)).message).toContain("Refresh again");
+    expect(f.calls).toHaveLength(3);
+    limited = false;
+    const other = yield* client.read("other").pipe(Effect.forkChild);
+    yield* TestClock.adjust("3 seconds");
+    expect(f.calls).toHaveLength(3);
+    yield* TestClock.adjust("1 second");
+    expect((yield* Fiber.join(other)).id).toBe("other");
+    expect(f.calls).toHaveLength(4);
+  }).pipe(Effect.provide(f.layer));
+});
+
+it.effect.each([429, 400])(
+  "does not retry before a long server cooldown or cache the failed connection, HTTP %i",
+  (status) => {
+    let limited = true;
+    const f = fixture((query) =>
+      limited
+        ? {
+            status,
+            errors: [{ extensions: { code: "RATELIMITED" } }],
+            headers: { "retry-after": "60" },
+          }
+        : { data: query.includes("teams(first:") ? { teams: page([]) } : { projects: page([]) } },
+    );
+    return Effect.gen(function* () {
+      const client = yield* Linear.LinearClient;
+      yield* client.connection({ cached: true }).pipe(Effect.flip);
+      yield* client.connection({ cached: true }).pipe(Effect.flip);
+      expect(f.calls).toHaveLength(1);
+      limited = false;
+      yield* TestClock.adjust("60 seconds");
+      expect((yield* client.connection({ cached: true })).connected).toBe(true);
+      expect(f.calls).toHaveLength(3);
+    }).pipe(Effect.provide(f.layer));
+  },
+);
+
+it.effect.each(["disconnect", "reconnect"] as const)(
+  "does not restore old metadata when an in-flight read finishes after %s",
+  (change) =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      let delayed = false;
+      const f = fixture((query, _variables, credential) => {
+        const response = {
+          data: query.includes("teams(first:")
+            ? { teams: page([]) }
+            : {
+                projects: page([
+                  {
+                    id: credential,
+                    name: credential,
+                    teams: { nodes: [] },
+                    status: { type: "started" },
+                  },
+                ]),
+              },
+        };
+        if (credential === "secret-test-key" && query.includes("projects(first:") && !delayed) {
+          delayed = true;
+          return Effect.gen(function* () {
+            yield* Deferred.succeed(started, undefined);
+            yield* Deferred.await(release);
+            return response;
+          });
+        }
+        return response;
+      });
+      return yield* Effect.gen(function* () {
+        const client = yield* Linear.LinearClient;
+        const pending = yield* client.connection({ cached: true }).pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+        if (change === "disconnect") yield* client.disconnect;
+        else yield* client.connect("secret-test-key-other");
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(pending);
+        const current = yield* client.connection({ cached: true });
+        expect(current.connected).toBe(change === "reconnect");
+        expect(current.projects.map((project) => project.name)).toEqual(
+          change === "reconnect" ? ["secret-test-key-other"] : [],
+        );
+      }).pipe(Effect.provide(f.layer));
+    }),
+);
+
+it.effect("keeps the original key's cooldown after a different key is rate limited", () => {
+  const f = fixture(() => ({ status: 429, headers: { "retry-after": "60" } }));
+  return Effect.gen(function* () {
+    const client = yield* Linear.LinearClient;
+    yield* client.read("ticket").pipe(Effect.flip);
+    yield* client.connect("secret-test-key-other").pipe(Effect.flip);
+    expect(f.calls).toHaveLength(2);
+    yield* client.read("ticket").pipe(Effect.flip);
+    expect(f.calls).toHaveLength(2);
+    expect(f.stored).toHaveLength(0);
   }).pipe(Effect.provide(f.layer));
 });

@@ -953,7 +953,7 @@ const make = Effect.gen(function* () {
   return WorkflowService.of({
     list,
     resume,
-    connection: linear.connection,
+    connection: () => linear.connection({ cached: true }),
     connect: (key) => linear.connect(key).pipe(Effect.tap(() => changed)),
     disconnect: linear.disconnect.pipe(Effect.andThen(changed)),
     subscribe: (projectId, includeDelayed, includeAllProjects) =>
@@ -1098,7 +1098,7 @@ const make = Effect.gen(function* () {
         return {
           detail: yield* read(record.id),
           configuration: yield* requireConfiguration(record.projectId),
-          connection: yield* linear.connection(),
+          connection: yield* linear.connection({ cached: true }),
         };
       }),
     agentSearch: (threadId, query) =>
