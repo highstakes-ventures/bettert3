@@ -1,6 +1,10 @@
 import type { DraftId } from "~/composerDraftStore";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
-import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  resolveEnvironmentMachineKind,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { FolderPlusIcon } from "lucide-react";
@@ -13,7 +17,11 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { useClientSettings } from "~/hooks/useSettings";
-import { hasExplicitComposerModelSelection } from "~/lib/chatThreadActions";
+import {
+  hasExplicitComposerModelSelection,
+  resolveNewDraftStartFromOrigin,
+} from "~/lib/chatThreadActions";
+import { readT3ProjectFile } from "~/lib/t3ProjectFileDefaults";
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
@@ -40,7 +48,7 @@ import {
 } from "../ui/combobox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveNewThreadEnvMode, resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 // Picker value for the "Add project" row; real entries are keyed by logical
 // project key.
@@ -213,26 +221,64 @@ export function DraftHeroHeadline({
   // draft instead opens the chosen project's own draft, like starting a new
   // thread there: moving it would replace that draft and strand whatever it
   // holds, such as the browser tabs of the no-project draft.
-  const selectProject = (project: (typeof projects)[number], logicalProjectKey: string) => {
+  const selectProject = async (project: (typeof projects)[number], logicalProjectKey: string) => {
     if (!draftId) {
       return;
     }
-    latestTargetRef.current = {
+    const requested = {
       draftId,
       activeProjectKey: logicalProjectKey,
       scratchTargetEnvironmentId: project.environmentId,
     };
+    latestTargetRef.current = requested;
     const currentDraft = getComposerDraft(draftId);
     if (!composerDraftHasUserContent(currentDraft)) {
       void openProjectDraft(scopeProjectRef(project.environmentId, project.id));
       return;
     }
+    const originalSession = useComposerDraftStore.getState().getDraftSession(draftId);
+    if (!originalSession || originalSession.promotedTo) return;
+    const preference =
+      useComposerDraftStore.getState().lastRunDestinationByProject[logicalProjectKey];
+    const config = environments.find(
+      (environment) => environment.environmentId === project.environmentId,
+    )?.serverConfig;
+    const settings = config?.settings ?? DEFAULT_SERVER_SETTINGS;
+    const resolved = resolveProjectSettings(settings, project.id, project);
+    const projectFile =
+      !preference?.workspace &&
+      !preference?.runDestination &&
+      resolved.settings.defaultThreadEnvMode === null
+        ? await readT3ProjectFile(project.environmentId, project.workspaceRoot)
+        : null;
+    // A later project choice or a send owns the draft once the file read yields.
+    if (
+      latestTargetRef.current !== requested ||
+      useComposerDraftStore.getState().getDraftSession(draftId) !== originalSession
+    )
+      return;
+    const envMode = resolveNewThreadEnvMode({
+      projectSettings: resolveProjectSettings(settings, project.id, project, projectFile),
+      workspaceRoot: project.workspaceRoot,
+      newProjectsRoot: config?.newProjectsRoot,
+      projectHasThreads: threads.some(
+        (thread) =>
+          thread.environmentId === project.environmentId && thread.projectId === project.id,
+      ),
+    });
     setLogicalProjectDraftThreadId(
       logicalProjectKey,
       scopeProjectRef(project.environmentId, project.id),
       draftId,
+      {
+        envMode,
+        startFromOrigin: resolveNewDraftStartFromOrigin({
+          envMode,
+          newWorktreesStartFromOrigin: resolved.settings.newWorktreesStartFromOrigin,
+        }),
+      },
     );
-    if (!hasExplicitComposerModelSelection(currentDraft)) {
+    if (!hasExplicitComposerModelSelection(getComposerDraft(draftId))) {
       applyStickyState(draftId);
       const environmentSettings = environments.find(
         (environment) => environment.environmentId === project.environmentId,
@@ -263,7 +309,10 @@ export function DraftHeroHeadline({
     ) {
       return false;
     }
-    selectProject(project, deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings));
+    await selectProject(
+      project,
+      deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
+    );
     return true;
   };
 
@@ -291,7 +340,7 @@ export function DraftHeroHeadline({
         if (!entry || item.value === activeProjectKey) {
           return;
         }
-        selectProject(entry.targetProject, entry.group.projectKey);
+        void selectProject(entry.targetProject, entry.group.projectKey);
       }}
     >
       <Tooltip>

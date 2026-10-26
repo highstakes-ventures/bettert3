@@ -2913,16 +2913,20 @@ export default function ChatView(props: ChatViewProps) {
         activeProject,
         projectGroupingSettings,
       );
+      const workspaceOptions = {
+        ...input,
+        environmentSelection: "manual" as const,
+        runDestination: null,
+      };
       const storedDraftSession = getDraftSessionByLogicalProjectKey(logicalProjectKey);
       if (storedDraftSession) {
-        setDraftThreadContext(storedDraftSession.draftId, input);
         setLogicalProjectDraftThreadId(
           logicalProjectKey,
           activeProjectRef,
           storedDraftSession.draftId,
           {
             threadId: storedDraftSession.threadId,
-            ...input,
+            ...workspaceOptions,
           },
         );
         if (routeKind !== "draft" || draftId !== storedDraftSession.draftId) {
@@ -2940,13 +2944,12 @@ export default function ChatView(props: ChatViewProps) {
         activeDraftSession?.logicalProjectKey === logicalProjectKey &&
         draftId
       ) {
-        setDraftThreadContext(draftId, input);
         setLogicalProjectDraftThreadId(logicalProjectKey, activeProjectRef, draftId, {
           threadId: activeDraftSession.threadId,
           createdAt: activeDraftSession.createdAt,
           runtimeMode: activeDraftSession.runtimeMode,
           interactionMode: activeDraftSession.interactionMode,
-          ...input,
+          ...workspaceOptions,
         });
         return activeDraftSession.threadId;
       }
@@ -2959,7 +2962,7 @@ export default function ChatView(props: ChatViewProps) {
         runtimeMode: resolveProjectSettings(settings, activeProject.id, activeProject).settings
           .defaultRuntimeMode,
         interactionMode: DEFAULT_INTERACTION_MODE,
-        ...input,
+        ...workspaceOptions,
       });
       await navigate({
         to: "/draft/$draftId",
@@ -2977,7 +2980,6 @@ export default function ChatView(props: ChatViewProps) {
       projectGroupingSettings,
       routeKind,
       settings,
-      setDraftThreadContext,
       setLogicalProjectDraftThreadId,
     ],
   );
@@ -4537,6 +4539,7 @@ export default function ChatView(props: ChatViewProps) {
     );
     setDraftThreadContext(draftId, {
       environmentSelection: "auto",
+      runDestination: null,
       loadBalancedEnvironmentId: null,
       branch: null,
       worktreePath: null,
@@ -11081,6 +11084,7 @@ export default function ChatView(props: ChatViewProps) {
       if (isLocalDraftThread) {
         setDraftThreadContext(composerDraftTarget, {
           envMode: mode,
+          rememberWorkspace: true,
           startFromOrigin: resolveNewDraftStartFromOrigin({
             envMode: mode,
             newWorktreesStartFromOrigin: activeProjectSettings.settings.newWorktreesStartFromOrigin,

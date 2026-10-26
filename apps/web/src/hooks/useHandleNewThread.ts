@@ -54,13 +54,16 @@ interface NewThreadWorkspaceOptions {
 // store: absent keys stay absent so they never overwrite existing draft
 // state. Every reuse path applies exactly this set.
 function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undefined) {
-  return {
+  const workspace = {
     ...(options?.sectionId !== undefined ? { sectionId: options.sectionId } : {}),
     ...(options?.branch !== undefined ? { branch: options.branch } : {}),
     ...(options?.worktreePath !== undefined ? { worktreePath: options.worktreePath } : {}),
     ...(options?.envMode !== undefined ? { envMode: options.envMode } : {}),
     ...(options?.startFromOrigin !== undefined ? { startFromOrigin: options.startFromOrigin } : {}),
   };
+  return Object.keys(workspace).length > 0
+    ? { ...workspace, environmentSelection: "manual" as const, runDestination: null }
+    : workspace;
 }
 
 export function useNewThreadHandler() {
@@ -105,8 +108,8 @@ export function useNewThreadHandler() {
       const currentRouteTarget = getCurrentRouteTarget();
       // A new thread carries the user's working mode from the thread being
       // viewed. The target project's configured model still wins; interaction
-      // mode carries independently. Permissions, branch, worktree, and env mode
-      // come from configured defaults unless the caller passes them explicitly.
+      // mode carries independently. Workspace preferences belong to the target
+      // project; configured defaults apply until the user chooses a workspace.
       const carrySourceShell =
         currentRouteTarget?.kind === "server"
           ? readThreadShell(currentRouteTarget.threadRef)
@@ -163,6 +166,7 @@ export function useNewThreadHandler() {
       // skipped entirely when a higher-priority source decides, and its
       // query atom caches per project after the first call.
       const resolveDefaultEnvMode = async (): Promise<DraftThreadEnvMode> => {
+        if (rememberedWorkspace) return rememberedWorkspace.envMode;
         const consultProjectFile =
           project !== undefined && projectSettings.settings.defaultThreadEnvMode === null;
         const projectFile = consultProjectFile
@@ -187,10 +191,21 @@ export function useNewThreadHandler() {
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef);
+      const preference =
+        useComposerDraftStore.getState().lastRunDestinationByProject[logicalProjectKey];
+      const rememberedWorkspace = preference?.runDestination
+        ? { envMode: "local" as const, startFromOrigin: false, branch: null, worktreePath: null }
+        : preference?.workspace;
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
       const hasStartFromOriginOption = options?.startFromOrigin !== undefined;
+      const hasExplicitWorkspaceOption =
+        options?.sectionId !== undefined ||
+        hasBranchOption ||
+        hasWorktreePathOption ||
+        hasEnvModeOption ||
+        hasStartFromOriginOption;
       const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
       const storedDraftThreadRef = storedDraftThread
         ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
@@ -226,17 +241,10 @@ export function useNewThreadHandler() {
           const isDraftAlreadyOpen =
             currentRouteTarget?.kind === "draft" &&
             currentRouteTarget.draftId === emptyStoredDraftThread.draftId;
-          const hasExplicitWorkspaceOption =
-            options?.sectionId !== undefined ||
-            hasBranchOption ||
-            hasWorktreePathOption ||
-            hasEnvModeOption ||
-            hasStartFromOriginOption;
           // Resurrecting an empty stored draft must not resurrect its stale
           // context: explicit workspace options win outright; otherwise the
-          // env context resets to the configured defaults so drafts seeded
-          // before a defaults change (or by the old carry-over behavior) stop
-          // landing on "current checkout" branches forever. When the draft is
+          // workspace restores this project's explicit choice, falling back
+          // to configured defaults. When the draft is
           // already open and no options were passed, leave its workspace
           // context alone entirely — the user may have just picked a branch
           // in the composer. Model selection has its own explicit-pick rule
@@ -281,6 +289,7 @@ export function useNewThreadHandler() {
                 envMode: defaultEnvMode,
                 newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
               }),
+              ...rememberedWorkspace,
             };
           }
           if (workspaceContext) {
@@ -440,6 +449,8 @@ export function useNewThreadHandler() {
             }),
           runtimeMode: defaultRuntimeMode,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+          ...(!hasExplicitWorkspaceOption ? rememberedWorkspace : {}),
+          ...pickExplicitWorkspaceOptions(options),
         });
         applyStickyState(draftId);
         const modelSelectionOverride = resolveModelSelectionOverride(draftId);

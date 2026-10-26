@@ -747,6 +747,7 @@ export const BranchToolbar = memo(function BranchToolbar({
       branch: previousWorktreeSeed.branch,
       worktreePath: previousWorktreeSeed.worktreePath,
       envMode: "worktree",
+      rememberWorkspace: true,
       projectRef: activeProjectRef,
     });
   }, [activeProjectRef, draftId, previousWorktreeSeed, setDraftThreadContext, threadRef]);

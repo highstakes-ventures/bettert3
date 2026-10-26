@@ -367,6 +367,15 @@ const RunDestinationPreferences = Schema.Record(
     environmentId: EnvironmentId,
     projectId: ProjectId,
     runDestination: Schema.NullOr(CodexCloudDestination),
+    environmentSelection: Schema.optionalKey(Schema.Literals(["auto", "manual"])),
+    workspace: Schema.optionalKey(
+      Schema.Struct({
+        envMode: DraftThreadEnvModeSchema,
+        startFromOrigin: Schema.Boolean,
+        branch: Schema.NullOr(Schema.String),
+        worktreePath: Schema.NullOr(Schema.String),
+      }),
+    ),
   }),
 );
 const PersistedComposerDraftStoreState = Schema.Struct({
@@ -617,6 +626,8 @@ interface ComposerDraftStoreState {
       environmentSelection?: "auto" | "manual";
       runDestination?: CodexCloudDestination | null;
       loadBalancedEnvironmentId?: EnvironmentId | null;
+      /** Remember a human workspace choice, rather than a default or launched worktree. */
+      rememberWorkspace?: boolean;
     },
   ) => void;
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
@@ -2827,13 +2838,26 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const existingThread = state.draftThreadsByThreadKey[draftId];
             const previousThreadKeyForLogicalProject =
               state.logicalProjectDraftThreadKeyByLogicalProjectKey[normalizedLogicalProjectKey];
+            const savedPreference = state.lastRunDestinationByProject[normalizedLogicalProjectKey];
+            const logicalProjectChanged =
+              existingThread !== undefined &&
+              existingThread.logicalProjectKey !== normalizedLogicalProjectKey;
             const preference =
-              !existingThread && options?.environmentSelection !== "manual"
-                ? state.lastRunDestinationByProject[normalizedLogicalProjectKey]
+              (!existingThread ||
+                existingThread.logicalProjectKey !== normalizedLogicalProjectKey) &&
+              options?.environmentSelection === undefined
+                ? savedPreference
                 : undefined;
-            const preferredProjectRef = preference
-              ? scopeProjectRef(preference.environmentId, preference.projectId)
-              : projectRef;
+            const keepDraftDestination =
+              existingThread?.logicalProjectKey === normalizedLogicalProjectKey &&
+              existingThread.environmentSelection === "manual" &&
+              options?.environmentSelection === undefined;
+            const preferredProjectRef =
+              preference && preference.environmentSelection !== "auto"
+                ? scopeProjectRef(preference.environmentId, preference.projectId)
+                : keepDraftDestination
+                  ? scopeProjectRef(existingThread.environmentId, existingThread.projectId)
+                  : projectRef;
             const nextDraftThread = createDraftThreadState(
               preferredProjectRef,
               options?.threadId ?? existingThread?.threadId ?? ThreadId.make(draftId),
@@ -2842,8 +2866,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               preference
                 ? {
                     ...options,
+                    ...preference.workspace,
                     runDestination: preference.runDestination,
-                    environmentSelection: "manual",
+                    environmentSelection: preference.environmentSelection ?? "manual",
                     ...(preference.runDestination
                       ? {
                           branch: null,
@@ -2853,7 +2878,19 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                         }
                       : {}),
                   }
-                : options,
+                : logicalProjectChanged
+                  ? {
+                      runDestination: null,
+                      environmentSelection: "auto",
+                      loadBalancedEnvironmentId: null,
+                      branch: null,
+                      worktreePath: null,
+                      envMode: "local",
+                      startFromOrigin: false,
+                      sectionId: null,
+                      ...options,
+                    }
+                  : options,
             );
             const hasSameLogicalMapping = previousThreadKeyForLogicalProject === draftId;
             const hasNoStaleMappingsForDraft = Object.entries(
@@ -2889,12 +2926,12 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             let nextDraftsByThreadKey = state.draftsByThreadKey;
             if (
               existingThread &&
-              existingThread.environmentId !== projectRef.environmentId &&
+              existingThread.environmentId !== nextDraftThread.environmentId &&
               existingDraft !== undefined
             ) {
               const nextDraft = clearStaleFileUploadMetadata(
                 existingDraft,
-                projectRef.environmentId,
+                nextDraftThread.environmentId,
               );
               if (nextDraft !== existingDraft) {
                 nextDraftsByThreadKey = {
@@ -2937,9 +2974,22 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   ? {
                       ...state.lastRunDestinationByProject,
                       [normalizedLogicalProjectKey]: {
+                        ...savedPreference,
                         environmentId: nextDraftThread.environmentId,
                         projectId: nextDraftThread.projectId,
                         runDestination: nextDraftThread.runDestination ?? null,
+                        environmentSelection: "manual",
+                        ...(savedPreference?.workspace &&
+                        (savedPreference.environmentId !== nextDraftThread.environmentId ||
+                          savedPreference.projectId !== nextDraftThread.projectId)
+                          ? {
+                              workspace: {
+                                ...savedPreference.workspace,
+                                branch: null,
+                                worktreePath: null,
+                              },
+                            }
+                          : {}),
                       },
                     }
                   : state.lastRunDestinationByProject,
@@ -2958,7 +3008,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             options,
           );
         },
-        setDraftThreadContext: (threadRef, options) => {
+        setDraftThreadContext: (threadRef, requestedOptions) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0) {
             return;
@@ -2968,6 +3018,21 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             if (!existing) {
               return state;
             }
+            const preference = state.lastRunDestinationByProject[existing.logicalProjectKey];
+            // Cloud has no local workspace controls. Returning to a machine
+            // restores the last workspace choice without saving Cloud's forced local mode.
+            const options =
+              requestedOptions.runDestination === null && existing.runDestination
+                ? {
+                    ...preference?.workspace,
+                    ...requestedOptions,
+                    ...(requestedOptions.projectRef &&
+                    (requestedOptions.projectRef.environmentId !== existing.environmentId ||
+                      requestedOptions.projectRef.projectId !== existing.projectId)
+                      ? { branch: null, worktreePath: null }
+                      : {}),
+                  }
+                : requestedOptions;
             const nextProjectRef = options.projectRef ?? {
               environmentId: existing.environmentId,
               projectId: existing.projectId,
@@ -3056,19 +3121,41 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.envMode === existing.envMode &&
               nextDraftThread.startFromOrigin === existing.startFromOrigin &&
               scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
-            if (isUnchanged) {
+            const rememberEnvironment = options.environmentSelection !== undefined;
+            const nextPreference =
+              rememberEnvironment || options.rememberWorkspace
+                ? {
+                    ...preference,
+                    environmentId: nextDraftThread.environmentId,
+                    projectId: nextDraftThread.projectId,
+                    runDestination: nextDraftThread.runDestination ?? null,
+                    environmentSelection: nextDraftThread.environmentSelection ?? "auto",
+                    ...(preference?.workspace &&
+                    (projectChanged || options.environmentSelection === "auto")
+                      ? { workspace: { ...preference.workspace, branch: null, worktreePath: null } }
+                      : {}),
+                    ...(options.rememberWorkspace && !nextDraftThread.runDestination
+                      ? {
+                          workspace: {
+                            envMode: nextDraftThread.envMode,
+                            startFromOrigin: nextDraftThread.startFromOrigin,
+                            branch: nextDraftThread.worktreePath ? nextDraftThread.branch : null,
+                            worktreePath: nextDraftThread.worktreePath,
+                          },
+                        }
+                      : {}),
+                  }
+                : preference;
+            const preferenceUnchanged = Equal.equals(preference, nextPreference);
+            if (isUnchanged && preferenceUnchanged) {
               return state;
             }
             return {
               lastRunDestinationByProject:
-                options.environmentSelection === "manual"
+                !preferenceUnchanged && nextPreference
                   ? {
                       ...state.lastRunDestinationByProject,
-                      [nextDraftThread.logicalProjectKey]: {
-                        environmentId: nextDraftThread.environmentId,
-                        projectId: nextDraftThread.projectId,
-                        runDestination: nextDraftThread.runDestination ?? null,
-                      },
+                      [nextDraftThread.logicalProjectKey]: nextPreference,
                     }
                   : state.lastRunDestinationByProject,
               draftThreadsByThreadKey: {

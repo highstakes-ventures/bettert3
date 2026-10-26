@@ -27,6 +27,17 @@ const testState = vi.hoisted(() => {
     }),
   };
   const draftStore = {
+    lastRunDestinationByProject: {} as Record<
+      string,
+      {
+        workspace?: {
+          envMode: "local" | "worktree";
+          startFromOrigin: boolean;
+          branch: string | null;
+          worktreePath: string | null;
+        };
+      }
+    >,
     getComposerDraft: vi.fn(() => ({})),
     getDraftSessionByLogicalProjectKey: vi.fn(() => storedDraft),
     getDraftSession: vi.fn(() => null),
@@ -60,6 +71,7 @@ const testState = vi.hoisted(() => {
       },
     ) {
       storedDraft = nextStoredDraft;
+      draftStore.lastRunDestinationByProject = {};
       projectRemoved = false;
       targetSettings = {
         defaultThreadEnvMode: workspaceDefaults.envMode,
@@ -209,6 +221,29 @@ describe.each([
     },
   ],
 ])("useNewThreadHandler with a %s draft", (_, draft) => {
+  it("restores the project's chosen workspace instead of resetting it to configured defaults", async () => {
+    testState.reset(draft, { envMode: "local", startFromOrigin: false });
+    const workspace = {
+      envMode: "worktree" as const,
+      startFromOrigin: true,
+      branch: "t3/existing",
+      worktreePath: "/existing",
+    };
+    testState.draftStore.lastRunDestinationByProject["remote-project"] = { workspace };
+    const pendingOpen = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    const opened = await pendingOpen;
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      expect.anything(),
+      opened!.draftId,
+      expect.objectContaining(workspace),
+    );
+  });
+
   it.each(["approval-required", "auto-accept-edits", "auto", "full-access"] as const)(
     "uses the target environment's %s permissions for new threads",
     async (runtimeMode) => {
