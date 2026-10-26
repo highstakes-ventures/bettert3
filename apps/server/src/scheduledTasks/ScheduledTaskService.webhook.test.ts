@@ -120,6 +120,7 @@ it.effect("dispatches exactly the rendered prompt and logs the delivery", () =>
       const result = yield* service.triggerWebhook(requestFor(task));
       assert.equal(result._tag, "accepted");
       const launched = yield* Queue.take(launches);
+      assert.equal(launched.automationOrigin, "external");
       assert.equal(
         launched.initialMessage?.text,
         "Review this PR: https://github.com/org/repo/pull/45",

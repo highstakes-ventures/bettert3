@@ -75,6 +75,7 @@ export interface ThreadLaunchInitialMessage {
 }
 
 export interface ThreadLaunchInput {
+  readonly automationOrigin?: import("@t3tools/contracts").OrchestrationV2AppThread["automationOrigin"];
   readonly runDestination?: CodexCloudDestination;
   readonly sectionId?: string | null;
   readonly commandId: CommandId;
@@ -901,6 +902,9 @@ const make = Effect.gen(function* () {
               })
             : threads.dispatch({
                 type: "thread.create",
+                ...(input.automationOrigin === undefined
+                  ? {}
+                  : { automationOrigin: input.automationOrigin }),
                 commandId: input.commandId,
                 threadId: candidateThreadId,
                 projectId: input.projectId,

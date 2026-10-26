@@ -20,7 +20,10 @@ vi.mock("../../state/entities", () => ({
   useThreadShells: () => state.threads,
   waitForThreadShell: () => Promise.resolve(true),
 }));
-vi.mock("../../state/environments", () => ({ usePrimaryEnvironmentId: () => "env" }));
+vi.mock("../../state/environments", () => ({
+  usePrimaryEnvironmentId: () => "env",
+  useEnvironmentMachines: () => new Map(),
+}));
 vi.mock("../../state/cloudChats", () => ({
   cloudChats: { list: () => null, open: { permissionAtom: () => null } },
 }));
@@ -31,6 +34,7 @@ vi.mock("../../state/query", () => ({
     error: null,
     data: {
       accountId: "account",
+      tasks: [],
       hasMore: false,
       chats: [
         { id: "native", title: "Nightly", origin: "automatic", status: "idle", updatedAt: 1 },

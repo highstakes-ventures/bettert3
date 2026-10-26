@@ -393,6 +393,11 @@ it.effect.each(
       const projection = yield* threads.getThreadProjection(thread!.id);
       // Encoding the persisted projection exercises both message and turn-item wire schemas.
       const wire = yield* encodeThreadProjection(projection);
+      assert.equal(wire.thread.automationOrigin, target === "new" ? "t3" : undefined);
+      assert.equal(
+        (yield* threads.getThreadShell(thread!.id))?.automationOrigin,
+        target === "new" ? "t3" : null,
+      );
       assert.equal(wire.messages[0]?.text, task.prompt);
       assert.equal(wire.messages[0]?.scheduledTaskId, task.id);
       assert.equal(wire.messages[0]?.createdBy, createdBy);
@@ -3640,3 +3645,51 @@ it.effect("restores Cloud monitoring after restart without an open client", () =
     }).pipe(Effect.provide(CloudThreads.layer), Effect.scoped);
   }).pipe(Effect.provide(harness.dependencies), Effect.scoped);
 });
+
+it.effect.each([
+  { automationOrigin: "t3" },
+  { automationOrigin: "external" },
+  { automationOrigin: null },
+] as const)(
+  "keeps recorded origin $automationOrigin after a manual reply",
+  ({ automationOrigin }) => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const launch = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const input = {
+        ...launchInput({ command: "origin-create", thread: "origin-thread" }),
+        automationOrigin,
+      };
+      const created = yield* launch.launch(input);
+      yield* threads.sendToThread({
+        projectId,
+        threadId: created.threadId,
+        commandId: CommandId.make("origin-manual-reply"),
+        messageId: MessageId.make("origin-reply"),
+        text: "Continue this conversation",
+        attachments: [],
+        mode: "queue",
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const projection = yield* threads.getThreadProjection(created.threadId);
+      assert.equal(
+        (yield* encodeThreadProjection(projection)).thread.automationOrigin,
+        automationOrigin,
+      );
+      assert.equal(
+        (yield* threads.getThreadShell(created.threadId))?.automationOrigin,
+        automationOrigin,
+      );
+      assert.equal(
+        (yield* threads.getShellSnapshot()).threads[0]?.automationOrigin,
+        automationOrigin,
+      );
+      assert.equal(
+        ProjectionStore.threadShellFromProjection(projection).automationOrigin,
+        automationOrigin,
+      );
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
