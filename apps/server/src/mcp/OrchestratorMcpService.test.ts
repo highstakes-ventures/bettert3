@@ -2095,12 +2095,57 @@ describe("OrchestratorMcpService provider resolution", () => {
             Layer.mock(SecretRequests.SecretRequests)({}),
             Layer.mock(ScheduledTaskService.ScheduledTaskService)({
               list: () => Effect.succeed({ tasks }),
-              upsert: () =>
-                Ref.update(upserted, (count) => count + 1).pipe(Effect.as({ task: tasks[0]! })),
+              upsert: (input) =>
+                Ref.update(upserted, (count) => count + 1).pipe(
+                  Effect.as({
+                    task: {
+                      ...tasks[0]!,
+                      modelSelection: input.modelSelection,
+                      enabled: input.enabled,
+                    },
+                  }),
+                ),
             }),
           ),
         ),
       );
+
+    it.effect("updates a disabled task's model and preserves it when omitted", () =>
+      Effect.gen(function* () {
+        const selection = {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-6.1-terra",
+        };
+        for (const requested of [selection, undefined]) {
+          const original = task({
+            enabled: false,
+            modelSelection:
+              requested === undefined
+                ? selection
+                : {
+                    instanceId: ProviderInstanceId.make("codex"),
+                    model: "gpt-5",
+                  },
+          });
+          const upserted = yield* Ref.make(0);
+          const mcp = yield* OrchestratorMcpService.OrchestratorMcpService.pipe(
+            Effect.provide(service([original], null, upserted)),
+          );
+          const updated = yield* mcp.updateScheduledTask(supervisedClient, {
+            scheduledTaskId: original.id,
+            ...(requested === undefined
+              ? { prompt: "Keep the saved model" }
+              : { modelSelection: requested }),
+          });
+          assert.deepEqual(updated.modelSelection, selection);
+          assert.isFalse(updated.enabled);
+          assert.isNull(updated.nextRunAt);
+          assert.isNull(updated.boundThreadId);
+          assert.equal(updated.lastRunStatus, "never");
+          assert.equal(yield* Ref.get(upserted), 1);
+        }
+      }),
+    );
 
     it.effect("hides a webhook URL from a caller below the task's modes", () =>
       Effect.gen(function* () {
