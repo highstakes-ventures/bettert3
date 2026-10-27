@@ -27,7 +27,7 @@ import { useUiStateStore } from "../../uiStateStore";
 import { ProjectMonogram } from "../ProjectMonogram";
 import { executionLocationLabel, ThreadExecutionIcon } from "../ThreadExecutionIcon";
 import { AgentElapsed } from "../chat/AgentElapsed";
-import { resolveSidebarThreadStatus } from "../Sidebar.logic";
+import { isAutomaticSidebarThread, resolveSidebarThreadStatus } from "../Sidebar.logic";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -470,12 +470,10 @@ export function AutomaticChatsSection({
       (thread) =>
         thread.environmentId === environmentId &&
         thread.archivedAt === null &&
-        thread.source.ticketWorkflowId === undefined &&
-        (thread.source.automationOrigin !== undefined ||
-          thread.source.backgroundWorkflowId !== undefined ||
-          thread.source.runDestination?.origin === "automatic" ||
-          thread.source.scheduledTaskId !== undefined ||
-          localTasks.some((task) => task.threadId === thread.id)),
+        isAutomaticSidebarThread(
+          thread,
+          localTasks.some((task) => task.threadId === thread.id),
+        ),
     )
     .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const data = query.data;

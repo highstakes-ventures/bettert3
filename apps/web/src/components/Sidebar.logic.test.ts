@@ -6,6 +6,7 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import {
   archiveSelectedThreadEntries,
+  filterSidebarV2VisibleThreads,
   deleteSelectedThreadEntries,
   getFallbackThreadIdAfterDelete,
   hasUnseenCompletion,
@@ -35,7 +36,14 @@ import {
   resolveSidebarDropVerb,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
-import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  RunId,
+  ScheduledTaskId,
+  ThreadId,
+} from "@t3tools/contracts";
 
 import {
   DEFAULT_INTERACTION_MODE,
@@ -47,6 +55,53 @@ import { makeThreadFixture, type ThreadFixtureOverrides } from "../test-fixtures
 import { completeSidebarRouteReveal, pendingSidebarRouteReveal } from "./sidebar/routeReveal";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("automatic sidebar membership", () => {
+  it("keeps scheduled and webhook workers out of the regular roster without hiding manual or ticket chats", () => {
+    const base = makeThreadFixture({ environmentId: localEnvironmentId });
+    const thread = (id: string, source = base.source, environmentId = localEnvironmentId) => ({
+      ...base,
+      id: ThreadId.make(id),
+      environmentId,
+      source,
+    });
+    const threads = [
+      thread("manual"),
+      thread("webhook", { ...base.source, scheduledTaskId: ScheduledTaskId.make("webhook") }),
+      thread("external", { ...base.source, automationOrigin: "external" }),
+      thread("scan", { ...base.source, backgroundWorkflowId: "scan" }),
+      thread("cloud", {
+        ...base.source,
+        runDestination: { origin: "automatic" },
+      } as typeof base.source),
+      thread("paused-bound"),
+      thread("webhook-bound"),
+      thread("ticket", { ...base.source, automationOrigin: "t3", ticketWorkflowId: "ticket" }),
+      thread(
+        "remote",
+        { ...base.source, scheduledTaskId: ScheduledTaskId.make("webhook") },
+        EnvironmentId.make("other"),
+      ),
+    ];
+    const visible = filterSidebarV2VisibleThreads(threads, null, {
+      environmentId: localEnvironmentId,
+      tasks: [
+        { threadId: ThreadId.make("paused-bound") },
+        { threadId: ThreadId.make("webhook-bound") },
+      ],
+    });
+    expect(visible.map((thread) => thread.id)).toEqual(["manual", "ticket", "remote"]);
+    expect(
+      filterSidebarV2VisibleThreads(threads, new Set([`${localEnvironmentId}:${base.projectId}`]), {
+        environmentId: localEnvironmentId,
+        tasks: [
+          { threadId: ThreadId.make("paused-bound") },
+          { threadId: ThreadId.make("webhook-bound") },
+        ],
+      }).map((thread) => thread.id),
+    ).toEqual(["manual", "ticket"]);
+  });
+});
 
 describe("deleteSelectedThreadEntries", () => {
   const entries = [{ threadKey: "one" }, { threadKey: "two" }, { threadKey: "three" }] as const;

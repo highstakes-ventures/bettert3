@@ -16,7 +16,7 @@ import {
   ThreadSectionHeading,
   ThreadSectionPicker,
 } from "./sidebar/ThreadSections";
-import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
+import { type EnvironmentId, type ScheduledTask, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import {
@@ -136,7 +136,8 @@ import {
   useQuietThreadShells,
 } from "../state/entities";
 import { environmentPresentations } from "../state/presentation";
-import { primaryServerKeybindingsAtom } from "../state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../state/server";
+import { useEnvironmentQuery } from "../state/query";
 import { environmentProjects } from "../state/projects";
 import { threadEnvironment } from "../state/threads";
 import { useThreadSearch } from "../state/queries";
@@ -309,6 +310,7 @@ type SidebarOptimisticDrop = {
 };
 
 interface SidebarThreadPartitionInput {
+  readonly scheduledTasks: readonly Pick<ScheduledTask, "threadId">[];
   readonly timerThreadKeys: ReadonlySet<string>;
   readonly sectionFilter: string | null;
   readonly projectByKey: ReadonlyMap<string, EnvironmentProject>;
@@ -376,6 +378,7 @@ function routeThreadOnly(
 // the component body, later hook calls made the compiler treat these maps as
 // possibly mutated and recompute them, and every dnd-kit input with them.
 function useSidebarThreads(input: {
+  readonly scheduledTasks: readonly Pick<ScheduledTask, "threadId">[];
   readonly timerThreadKeys: ReadonlySet<string>;
   readonly sectionFilter: string | null;
   readonly projectByKey: ReadonlyMap<string, EnvironmentProject>;
@@ -431,6 +434,7 @@ function useSidebarThreads(input: {
     settledTail.scopeKey === projectScopeKey ? settledTail.count : SETTLED_TAIL_INITIAL_COUNT;
 
   const partition = partitionSidebarThreads({
+    scheduledTasks: input.scheduledTasks,
     timerThreadKeys: input.timerThreadKeys,
     sectionFilter: input.sectionFilter,
     projectByKey: input.projectByKey,
@@ -546,12 +550,10 @@ function useSidebarThreads(input: {
 function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const { threads, scopedProjectKeys, serverConfigs, optimisticDrop, workingShelfEnabled } = input;
   const preciseNow = new Date().toISOString();
-  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys).filter((thread) => {
-    if (
-      thread.source.runDestination?.origin === "automatic" &&
-      thread.environmentId === input.primaryEnvironmentId
-    )
-      return false;
+  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, {
+    environmentId: input.primaryEnvironmentId,
+    tasks: input.scheduledTasks,
+  }).filter((thread) => {
     if (input.sectionFilter === null) return true;
     const project = input.projectByKey.get(`${thread.environmentId}:${thread.projectId}`);
     return (
@@ -902,6 +904,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   const newThreadContext = useHandleNewThread();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const scheduledTasks = useEnvironmentQuery(
+    primaryEnvironmentId
+      ? serverEnvironment.scheduledTasksLive({ environmentId: primaryEnvironmentId, input: {} })
+      : null,
+  );
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
@@ -1155,6 +1162,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     activeKeysById,
     routeRowThreadKey,
   } = useSidebarThreads({
+    scheduledTasks: scheduledTasks.data?.tasks ?? [],
     timerThreadKeys,
     sectionFilter,
     projectByKey,

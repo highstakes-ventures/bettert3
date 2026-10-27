@@ -540,17 +540,48 @@ export function resolveSidebarRowThreadId(
   return thread?.id ?? threadId;
 }
 
+export function isAutomaticSidebarThread(
+  thread: { readonly source?: SidebarThreadSummary["source"] },
+  boundToScheduledTask: boolean,
+): boolean {
+  const source = thread.source;
+  return (
+    source?.ticketWorkflowId === undefined &&
+    (source?.automationOrigin !== undefined ||
+      source?.backgroundWorkflowId !== undefined ||
+      source?.runDestination?.origin === "automatic" ||
+      source?.scheduledTaskId !== undefined ||
+      boundToScheduledTask)
+  );
+}
+
 export function filterSidebarV2VisibleThreads<
   T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage"> & {
     environmentId: string;
     projectId: string;
+    id?: string;
     source?: SidebarThreadSummary["source"];
   },
->(threads: readonly T[], scopedProjectKeys: ReadonlySet<string> | null): T[] {
+>(
+  threads: readonly T[],
+  scopedProjectKeys: ReadonlySet<string> | null,
+  automatic?: {
+    readonly environmentId: string | null;
+    readonly tasks: readonly Pick<ScheduledTask, "threadId">[];
+  },
+): T[] {
   return threads.filter(
     (thread) =>
       thread.archivedAt === null &&
       thread.source?.backgroundWorkflowId === undefined &&
+      !(
+        automatic !== undefined &&
+        thread.environmentId === automatic.environmentId &&
+        isAutomaticSidebarThread(
+          thread,
+          automatic.tasks.some((task) => task.threadId === thread.id),
+        )
+      ) &&
       !isSidebarSubagentThread(thread) &&
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
