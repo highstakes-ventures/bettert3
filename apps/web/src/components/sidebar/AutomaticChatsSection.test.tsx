@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { CloudChatSummary } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, type CloudChatSummary } from "@t3tools/contracts";
 import { act, type ReactNode } from "react";
 import * as DateTime from "effect/DateTime";
 import { createRoot, type Root } from "react-dom/client";
@@ -20,6 +20,8 @@ const state = vi.hoisted(() => ({
     title?: string;
     archivedAt?: string | null;
     updatedAt?: string;
+    lastVisitedAt?: string | null | undefined;
+    latestRun?: { completedAt: string | null } | null;
     hasPendingApprovals?: boolean;
     hasPendingUserInput?: boolean;
     pendingSubagentRequest?: null;
@@ -40,6 +42,8 @@ const state = vi.hoisted(() => ({
     };
   }[],
   chats: [] as CloudChatSummary[],
+  supportsVisits: false,
+  visit: vi.fn(),
   hasMore: false,
   cloudError: null as string | null,
   tasks: [] as { threadId: string; enabled: boolean }[],
@@ -69,7 +73,10 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("../../state/entities", () => ({
   useThreadShells: () => state.threads,
   useProject: () => null,
+  readEnvironmentSupportsVisitedTracking: () => state.supportsVisits,
 }));
+vi.mock("../../state/threads", () => ({ threadEnvironment: { visit: {} } }));
+vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.visit }));
 vi.mock("../../state/cloudChats", () => ({ cloudChats: { list: () => "cloud" } }));
 vi.mock("../../state/environments", () => ({
   usePrimaryEnvironmentId: () => state.environmentId,
@@ -87,6 +94,7 @@ vi.mock("../../state/query", () => ({
 }));
 vi.mock("../ui/sidebar", () => ({ useSidebar: () => ({ setOpenMobile: () => {} }) }));
 
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { cloudChatVisitKey, isUnopenedAutomaticChat } from "../../lib/cloudChatVisits";
 import { useUiStateStore } from "../../uiStateStore";
 import { AutomaticChatsSection } from "./AutomaticChatsSection";
@@ -130,6 +138,14 @@ beforeEach(() => {
   state.hasMore = false;
   state.cloudError = null;
   state.tasks = [];
+  state.supportsVisits = false;
+  state.visit.mockReset().mockImplementation(async ({ environmentId, input }) => {
+    const thread = state.threads.find(
+      (thread) => thread.environmentId === environmentId && thread.id === input.threadId,
+    );
+    if (thread) thread.lastVisitedAt = input.visitedAt;
+    return { _tag: "Success", value: undefined };
+  });
   state.chats = [chat("one"), chat("two"), chat("user", "user")];
   onToggle.mockClear();
   useUiStateStore.setState({ threadLastVisitedAtById: {} });
@@ -377,17 +393,238 @@ it.each([
   expect(row.querySelector('[aria-label$="run duration"]')).toBeNull();
 });
 
+const localVisitKey = (environmentId: string, threadId: string) =>
+  scopedThreadKey(scopeThreadRef(EnvironmentId.make(environmentId), ThreadId.make(threadId)));
+
 const localThread = (id: string, environmentId = "env") => ({
   id,
   environmentId,
   title: `Local ${id}`,
   archivedAt: null,
   updatedAt: "2026-10-26T12:00:00Z",
+  lastVisitedAt: "2026-10-26T12:00:00Z",
   source: {},
   runtime: null,
   hasPendingApprovals: false,
   hasPendingUserInput: false,
   pendingSubagentRequest: null,
+});
+
+it("counts unopened local tasks and completions since the authoritative visit", async () => {
+  state.chats = [];
+  state.threads = [
+    { ...localThread("fresh"), lastVisitedAt: null, source: { scheduledTaskId: "hook" } },
+    {
+      ...localThread("completed"),
+      source: { automationOrigin: "t3" },
+      latestRun: { completedAt: "2026-10-26T12:01:00Z" },
+    },
+    { ...localThread("read"), source: { automationOrigin: "t3" } },
+    {
+      ...localThread("running"),
+      source: { automationOrigin: "t3" },
+      runtime: { status: "running" },
+    },
+    {
+      ...localThread("other", "other-env"),
+      lastVisitedAt: null,
+      source: { automationOrigin: "t3" },
+    },
+    {
+      ...localThread("archived"),
+      lastVisitedAt: null,
+      archivedAt: "2026-10-26T13:00:00Z",
+      source: { automationOrigin: "t3" },
+    },
+    {
+      ...localThread("ticket"),
+      lastVisitedAt: null,
+      source: { automationOrigin: "t3", ticketWorkflowId: "ticket" },
+    },
+    { ...localThread("manual"), lastVisitedAt: null },
+  ];
+  // A newer browser watermark must not hide a server-owned unread completion.
+  useUiStateStore.setState({
+    threadLastVisitedAtById: {
+      [localVisitKey("env", "completed")]: "2026-10-26T14:00:00Z",
+    },
+  });
+  await render(true);
+  expect(container.textContent).toContain("2 new");
+  expect(container.querySelector('a[href="/env/fresh"]')?.getAttribute("aria-label")).toContain(
+    ", new",
+  );
+  expect(container.querySelector('a[href="/env/completed"]')?.getAttribute("aria-label")).toContain(
+    ", new",
+  );
+  expect(
+    container.querySelector('a[href="/env/running"]')?.getAttribute("aria-label"),
+  ).not.toContain(", new");
+  expect(container.textContent).toContain("1 running");
+
+  // Opening the conversations updates the existing server visit projection.
+  state.threads[0]!.lastVisitedAt = "2026-10-26T12:02:00Z";
+  state.threads[1]!.lastVisitedAt = "2026-10-26T12:02:00Z";
+  await render(true);
+  expect(container.textContent).toContain("0 new");
+  state.threads[1]!.latestRun = { completedAt: "2026-10-26T12:03:00Z" };
+  await render(true);
+  expect(container.textContent).toContain("1 new");
+});
+
+it("marks every local page read through server visits even when Cloud cannot refresh", async () => {
+  state.chats = [];
+  state.cloudError = "Cloud unavailable";
+  state.supportsVisits = true;
+  state.threads = Array.from({ length: 12 }, (_, index) => ({
+    ...localThread(`workflow-${index}`),
+    lastVisitedAt: null,
+    source: { automationOrigin: "t3" as const },
+  }));
+  state.threads.push({
+    ...localThread("other", "other-env"),
+    lastVisitedAt: null,
+    source: { automationOrigin: "t3" },
+  });
+  await render(true);
+  expect(container.querySelectorAll("a")).toHaveLength(10);
+  expect(container.textContent).toContain("12 new");
+  await act(() =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Mark all automatic chats as read"]')!
+      .click(),
+  );
+  await render(true);
+  expect(container.textContent).toContain("0 new");
+  expect(state.threads[11]!.lastVisitedAt).not.toBeNull();
+  expect(state.threads[12]!.lastVisitedAt).toBeNull();
+  expect(state.visit).toHaveBeenCalledTimes(12);
+  expect(useUiStateStore.getState().threadLastVisitedAtById).toEqual({});
+});
+
+it("keeps a server-owned imported task unread if marking its visit fails", async () => {
+  state.supportsVisits = true;
+  state.visit.mockResolvedValue({ _tag: "Failure" });
+  state.chats = [chat("native")];
+  state.threads = [
+    {
+      ...localThread("imported"),
+      lastVisitedAt: null,
+      source: {
+        automationOrigin: "t3",
+        runDestination: { accountId: "account", existingThreadId: "native", origin: "automatic" },
+      },
+    },
+  ];
+  await render(true);
+  expect(container.textContent).toContain("1 new");
+  await act(() =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Mark all automatic chats as read"]')!
+      .click(),
+  );
+  await render(true);
+  expect(container.textContent).toContain("1 new");
+  expect(state.threads[0]!.lastVisitedAt).toBeNull();
+});
+
+it.each([true, false])(
+  "uses observed task time when marking read with server tracking %s",
+  async (supportsVisits) => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-26T14:00:00Z"));
+      state.supportsVisits = supportsVisits;
+      state.chats = [];
+      const priorVisit = "2026-10-26T11:00:00Z";
+      state.threads = [
+        {
+          ...localThread("skewed"),
+          lastVisitedAt: supportsVisits ? priorVisit : undefined,
+          latestRun: { completedAt: "2026-10-26T11:59:00Z" },
+          source: { automationOrigin: "t3" },
+        },
+      ];
+      useUiStateStore.setState({
+        threadLastVisitedAtById: { [localVisitKey("env", "skewed")]: priorVisit },
+      });
+      await render(true);
+      expect(container.textContent).toContain("1 new");
+      await act(() =>
+        container
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label="Mark all automatic chats as read"]',
+          )!
+          .click(),
+      );
+      await render(true);
+      expect(container.textContent).toContain("0 new");
+      const visitedAt = supportsVisits
+        ? state.threads[0]!.lastVisitedAt
+        : useUiStateStore.getState().threadLastVisitedAtById[localVisitKey("env", "skewed")];
+      expect(visitedAt).toBe("2026-10-26T12:00:00Z");
+      state.threads[0]!.latestRun = { completedAt: "2026-10-26T12:05:00Z" };
+      state.threads[0]!.updatedAt = "2026-10-26T12:05:00Z";
+      await render(true);
+      expect(container.textContent).toContain("1 new");
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+it("keeps legacy imported Cloud visits read through a failed refresh and recovery", async () => {
+  state.chats = [{ ...chat("native"), status: "idle" }];
+  state.threads = [
+    {
+      ...localThread("imported"),
+      lastVisitedAt: undefined,
+      source: {
+        automationOrigin: "t3",
+        runDestination: { accountId: "account", existingThreadId: "native", origin: "automatic" },
+      },
+    },
+  ];
+  useUiStateStore.setState({
+    threadLastVisitedAtById: {
+      [cloudChatVisitKey("env", "account", "native")]: "2026-10-26T12:00:00Z",
+    },
+  });
+  await render(true);
+  expect(container.textContent).toContain("0 new");
+  state.cloudError = "Cloud unavailable";
+  await render(true);
+  expect(container.textContent).toContain("0 new");
+  expect(
+    container.querySelector('a[href="/env/imported"]')?.getAttribute("aria-label"),
+  ).not.toContain(", new");
+  state.cloudError = null;
+  await render(true);
+  expect(container.textContent).toContain("0 new");
+  state.accountId = "other-account";
+  await render(true);
+  expect(container.textContent).toContain("1 new");
+});
+
+it("uses scoped browser visits for local tasks on older servers", async () => {
+  state.chats = [];
+  state.threads = [
+    { ...localThread("legacy"), lastVisitedAt: undefined, source: { scheduledTaskId: "hook" } },
+  ];
+  const otherKey = localVisitKey("other-env", "legacy");
+  useUiStateStore.setState({ threadLastVisitedAtById: { [otherKey]: "2026-10-15T08:00:00Z" } });
+  await render(true);
+  expect(container.textContent).toContain("1 new");
+  await act(() =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Mark all automatic chats as read"]')!
+      .click(),
+  );
+  expect(container.textContent).toContain("0 new");
+  expect(state.visit).not.toHaveBeenCalled();
+  const visits = useUiStateStore.getState().threadLastVisitedAtById;
+  expect(visits[localVisitKey("env", "legacy")]).toBeDefined();
+  expect(visits[otherKey]).toBe("2026-10-15T08:00:00Z");
 });
 
 it("keeps paused and running local workflows visible when Cloud fails and isolates environments", async () => {
@@ -492,6 +729,7 @@ it("uses native provenance once for a matching automatic Cloud chat and isolates
   state.threads = [
     {
       ...localThread("imported"),
+      lastVisitedAt: undefined,
       source: {
         automationOrigin: "t3",
         runDestination: { accountId: "account", existingThreadId: "native", origin: "automatic" },
@@ -500,11 +738,14 @@ it("uses native provenance once for a matching automatic Cloud chat and isolates
   ];
   await render(true);
   expect(container.querySelectorAll("a")).toHaveLength(1);
+  expect(container.textContent).toContain("1 new");
+  expect(container.textContent).toContain("1 running");
   const row = container.querySelector("a")!;
   expect(row.getAttribute("href")).toBe("/env/imported");
   expect(row.querySelector('[aria-label="Started by T3"]')).not.toBeNull();
   expect(row.querySelector('[aria-label="Codex Cloud"]')).not.toBeNull();
   await act(() => row.click());
+  expect(container.textContent).toContain("0 new");
   expect(useUiStateStore.getState().threadLastVisitedAtById).toHaveProperty(
     cloudChatVisitKey("env", "account", "native"),
   );
