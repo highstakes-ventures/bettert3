@@ -1,4 +1,5 @@
 import { Link, useParams } from "@tanstack/react-router";
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { CloudChatSummary } from "@t3tools/contracts";
 import {
   CheckCheckIcon,
@@ -16,18 +17,29 @@ import { deriveSubagentElapsedMs } from "@t3tools/shared/orchestrationTiming";
 import { cloudChatVisitKey, isUnopenedAutomaticChat } from "../../lib/cloudChatVisits";
 import { cn } from "../../lib/utils";
 import { deriveProjectIdentity } from "../../projectIdentity";
-import { useProject, useThreadShells } from "../../state/entities";
+import {
+  readEnvironmentSupportsVisitedTracking,
+  useProject,
+  useThreadShells,
+} from "../../state/entities";
 import { cloudChats } from "../../state/cloudChats";
 import { useEnvironmentMachines, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
 import type { ThreadShell } from "../../types";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useUiStateStore } from "../../uiStateStore";
 import { ProjectMonogram } from "../ProjectMonogram";
 import { executionLocationLabel, ThreadExecutionIcon } from "../ThreadExecutionIcon";
 import { AgentElapsed } from "../chat/AgentElapsed";
-import { isAutomaticSidebarThread, resolveSidebarThreadStatus } from "../Sidebar.logic";
+import {
+  hasUnseenCompletion,
+  isAutomaticSidebarThread,
+  resolveSidebarThreadStatus,
+  resolveThreadLastVisitedAt,
+} from "../Sidebar.logic";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -233,6 +245,37 @@ function AutomaticRowContent({
   );
 }
 
+function localAutomaticState(
+  thread: ThreadShell,
+  enabled: boolean,
+  bound: boolean,
+  cloudChat: CloudChatSummary | undefined,
+) {
+  const source = thread.source;
+  const threadStatus = resolveSidebarThreadStatus(thread, [{ threadId: thread.id, enabled }]);
+  const hasNativeRun =
+    source.latestRunId != null ||
+    source.latestRunStartedAt != null ||
+    source.activityRunStartedAt != null;
+  const status =
+    !hasNativeRun && cloudChat
+      ? cloudChat.status === "active"
+        ? "Running"
+        : cloudChat.status === "unknown"
+          ? "No status"
+          : "Completed"
+      : {
+          approval: "Approval needed",
+          input: "Input needed",
+          working: "Running",
+          failed: "Failed",
+          limited: "Usage limit",
+          waiting: "Waiting",
+          ready: bound ? "Paused" : "Completed",
+        }[threadStatus];
+  return { hasNativeRun, status };
+}
+
 function LocalAutomaticRow({
   thread,
   enabled,
@@ -264,27 +307,7 @@ function LocalAutomaticRow({
       params.cloudThreadId === cloudChat?.id &&
       params.cloudEnvironmentId === thread.environmentId);
   const source = thread.source;
-  const threadStatus = resolveSidebarThreadStatus(thread, [{ threadId: thread.id, enabled }]);
-  const hasNativeRun =
-    source.latestRunId != null ||
-    source.latestRunStartedAt != null ||
-    source.activityRunStartedAt != null;
-  const status =
-    !hasNativeRun && cloudChat
-      ? cloudChat.status === "active"
-        ? "Running"
-        : cloudChat.status === "unknown"
-          ? "No status"
-          : "Completed"
-      : {
-          approval: "Approval needed",
-          input: "Input needed",
-          working: "Running",
-          failed: "Failed",
-          limited: "Usage limit",
-          waiting: "Waiting",
-          ready: bound ? "Paused" : "Completed",
-        }[threadStatus];
+  const { hasNativeRun, status } = localAutomaticState(thread, enabled, bound, cloudChat);
   const running = ["preparing", "starting", "running", "waiting"].includes(
     source.activityRunStatus ?? source.status ?? thread.runtime?.status ?? "",
   );
@@ -464,6 +487,7 @@ export function AutomaticChatsSection({
   const localQuery = useEnvironmentQuery(
     environmentId ? serverEnvironment.scheduledTasksLive({ environmentId, input: {} }) : null,
   );
+  const visitThread = useAtomCommand(threadEnvironment.visit);
   const localTasks = localQuery.data?.tasks ?? [];
   const localRows = threads
     .filter(
@@ -492,6 +516,11 @@ export function AutomaticChatsSection({
     }),
   );
   const cloudOnlyRows = rows.filter((chat) => !localCloudIds.has(chat.id));
+  const localCloudChat = (thread: ThreadShell) =>
+    thread.source.runDestination?.accountId === data?.accountId
+      ? rows.find((chat) => chat.id === thread.source.runDestination?.existingThreadId)
+      : undefined;
+
   const [visibleCount, setVisibleCount] = useState(AUTOMATIC_INITIAL_COUNT);
   const resetKey = `${environmentId}:${query.data?.accountId ?? ""}`;
   const [previousResetKey, setPreviousResetKey] = useState(resetKey);
@@ -525,8 +554,24 @@ export function AutomaticChatsSection({
   );
   const hiddenCount =
     cloudOnlyRows.length - visibleRows.length + localRows.length - visibleLocalRows.length;
-  const running = rows.filter((chat) => chat.status === "active").length;
-  const activityIncomplete = data?.hasMore || rows.some((chat) => chat.status === "unknown");
+  const localStatuses = localRows.map(
+    (thread) =>
+      localAutomaticState(
+        thread,
+        localTasks.some((task) => task.threadId === thread.id && task.enabled),
+        localTasks.some((task) => task.threadId === thread.id),
+        localCloudChat(thread),
+      ).status,
+  );
+  const running =
+    cloudOnlyRows.filter((chat) => chat.status === "active").length +
+    localStatuses.filter((status) => status === "Running").length;
+  const activityIncomplete =
+    !data ||
+    query.error ||
+    data.hasMore ||
+    cloudOnlyRows.some((chat) => chat.status === "unknown") ||
+    localStatuses.includes("No status");
   const runningLabel = activityIncomplete
     ? running > 0
       ? `${running}+ running`
@@ -541,12 +586,49 @@ export function AutomaticChatsSection({
     !!environmentId &&
     !!data &&
     isUnopenedAutomaticChat(chat, environmentId, data.accountId, visits);
-  const unopened = rows.filter(isUnopened).length;
+  const isLocalUnopened = (thread: ThreadShell) => {
+    const lastVisitedAt = resolveThreadLastVisitedAt(
+      thread.lastVisitedAt,
+      visits[scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))],
+    );
+    const destination = thread.source.runDestination;
+    const cloudVisitedAt = destination?.existingThreadId
+      ? visits[
+          cloudChatVisitKey(
+            thread.environmentId,
+            destination.accountId,
+            destination.existingThreadId,
+          )
+        ]
+      : undefined;
+    return (
+      (lastVisitedAt === undefined &&
+        (thread.lastVisitedAt !== undefined || cloudVisitedAt === undefined)) ||
+      hasUnseenCompletion({ ...thread, lastVisitedAt })
+    );
+  };
+  const unopenedLocalRows = localRows.filter(isLocalUnopened);
+  const unopened = unopenedLocalRows.length + cloudOnlyRows.filter(isUnopened).length;
   const markAllRead = () => {
-    if (!expanded || !environmentId || !data || query.error) return;
+    if (!expanded || !environmentId) return;
     const visitedAt = new Date().toISOString();
-    for (const chat of rows.filter(isUnopened)) {
-      markThreadVisited(cloudChatVisitKey(environmentId, data.accountId, chat.id), visitedAt);
+    for (const thread of unopenedLocalRows) {
+      if (readEnvironmentSupportsVisitedTracking(thread.environmentId)) {
+        void visitThread({
+          environmentId: thread.environmentId,
+          input: { threadId: thread.id, visitedAt: thread.updatedAt },
+        });
+      } else {
+        markThreadVisited(
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          thread.updatedAt,
+        );
+      }
+    }
+    if (data) {
+      for (const chat of rows.filter(isUnopened)) {
+        markThreadVisited(cloudChatVisitKey(environmentId, data.accountId, chat.id), visitedAt);
+      }
     }
   };
   const layoutKey = expanded
@@ -562,66 +644,64 @@ export function AutomaticChatsSection({
       <li className="mx-0.5 h-8 list-none" data-testid="sidebar-automatic-header">
         <CollapsibleSectionHeader
           expanded={expanded}
-          tone={unopened > 0 && !query.error ? "accent" : "muted"}
+          tone={unopened > 0 ? "accent" : "muted"}
           onClick={onToggle}
           accessory={
             <span
               className="inline-flex items-center gap-1 text-xs tabular-nums"
               aria-live="polite"
             >
-              {query.error ? (
-                "Couldn't refresh"
-              ) : data ? (
-                <>
-                  <span>Cloud ·</span>
-                  {data.hasMore ? <span>Recent ·</span> : null}
-                  {unopened > 0 && expanded ? (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <button
-                            type="button"
-                            onClick={markAllRead}
-                            aria-label="Mark all automatic chats as read"
-                            className="group/mark-read pointer-events-auto -mx-1 grid cursor-pointer rounded-sm px-1 hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-                          />
-                        }
-                      >
-                        <span className="col-start-1 row-start-1 group-hover/mark-read:invisible group-focus-visible/mark-read:invisible">
-                          {unopened} new
-                        </span>
-                        <CheckCheckIcon
-                          aria-hidden
-                          className="invisible col-start-1 row-start-1 size-4 self-center justify-self-center group-hover/mark-read:visible group-focus-visible/mark-read:visible"
-                        />
-                      </TooltipTrigger>
-                      <TooltipPopup>Mark all as read</TooltipPopup>
-                    </Tooltip>
-                  ) : (
-                    <span>{unopened} new</span>
-                  )}
+              <>
+                {query.error ? (
+                  <span>Couldn't refresh ·</span>
+                ) : !data ? (
+                  <span>Loading… ·</span>
+                ) : null}
+                {data?.hasMore ? <span>Recent ·</span> : null}
+                {unopened > 0 && expanded ? (
                   <Tooltip>
                     <TooltipTrigger
                       render={
-                        <span
-                          tabIndex={0}
-                          aria-label={
-                            activityIncomplete && running === 0
-                              ? "Activity unavailable"
-                              : runningDescription
-                          }
-                          className="pointer-events-auto rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+                        <button
+                          type="button"
+                          onClick={markAllRead}
+                          aria-label="Mark all automatic chats as read"
+                          className="group/mark-read pointer-events-auto -mx-1 grid cursor-pointer rounded-sm px-1 hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
                         />
                       }
                     >
-                      · {runningLabel}
+                      <span className="col-start-1 row-start-1 group-hover/mark-read:invisible group-focus-visible/mark-read:invisible">
+                        {unopened} new
+                      </span>
+                      <CheckCheckIcon
+                        aria-hidden
+                        className="invisible col-start-1 row-start-1 size-4 self-center justify-self-center group-hover/mark-read:visible group-focus-visible/mark-read:visible"
+                      />
                     </TooltipTrigger>
-                    <TooltipPopup>{runningDescription}</TooltipPopup>
+                    <TooltipPopup>Mark all as read</TooltipPopup>
                   </Tooltip>
-                </>
-              ) : (
-                "Loading…"
-              )}
+                ) : (
+                  <span>{unopened} new</span>
+                )}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        tabIndex={0}
+                        aria-label={
+                          activityIncomplete && running === 0
+                            ? "Activity unavailable"
+                            : runningDescription
+                        }
+                        className="pointer-events-auto rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+                      />
+                    }
+                  >
+                    · {runningLabel}
+                  </TooltipTrigger>
+                  <TooltipPopup>{runningDescription}</TooltipPopup>
+                </Tooltip>
+              </>
             </span>
           }
         >
@@ -636,19 +716,9 @@ export function AutomaticChatsSection({
               thread={thread}
               enabled={localTasks.some((task) => task.threadId === thread.id && task.enabled)}
               bound={localTasks.some((task) => task.threadId === thread.id)}
-              cloudChat={
-                thread.source.runDestination?.accountId === data?.accountId
-                  ? rows.find((chat) => chat.id === thread.source.runDestination?.existingThreadId)
-                  : undefined
-              }
+              cloudChat={localCloudChat(thread)}
               accountId={data?.accountId}
-              unopened={
-                thread.source.runDestination?.accountId === data?.accountId &&
-                rows.some(
-                  (chat) =>
-                    chat.id === thread.source.runDestination?.existingThreadId && isUnopened(chat),
-                )
-              }
+              unopened={isLocalUnopened(thread)}
               machine={machines.get(thread.environmentId) ?? "server"}
               onThreadOpen={onThreadOpen}
             />
