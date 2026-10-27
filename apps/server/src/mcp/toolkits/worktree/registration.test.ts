@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as MationExecution from "../../../mation/AutomationExecutionService.ts";
 import * as WorkflowService from "../../../workflows/WorkflowService.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
@@ -39,6 +40,7 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(MationExecution.AutomationExecutionService)({}),
   Layer.mock(WorkflowService.WorkflowService)({}),
   Layer.mock(Orchestrator.OrchestratorV2)({}),
   Layer.mock(ProjectionStore.ProjectionStoreV2)({}),

@@ -450,6 +450,10 @@
     "./model-traits": {
       "types": "./src/modelTraits.ts",
       "default": "./src/modelTraits.ts"
+    },
+    "./state/mation": {
+      "types": "./src/state/mation.ts",
+      "default": "./src/state/mation.ts"
     }
   },
   "scripts": {

@@ -1,4 +1,8 @@
 import { EventId } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as MationExecution from "../mation/AutomationExecutionService.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { FetchHttpClient } from "effect/http";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderRuntimeRecovery from "./ProviderRuntimeRecoveryService.ts";
 import * as EventSink from "./EventSink.ts";
@@ -20,6 +24,7 @@ import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
 import { assert, it, vi } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
+  EnvironmentId,
   ChatAttachmentId,
   ComposerContextId,
   type ChatAttachment,
@@ -2930,5 +2935,102 @@ it.effect.each([
         automationOrigin,
       );
     }).pipe(Effect.provide(harness.layer));
+  },
+);
+
+it.effect(
+  "Mation replays the exact persisted run after a lost response, including an existing-thread queue",
+  () => {
+    const harness = makeHarness({ adapters: [adapter, claudeAdapter] });
+    const layerMation = MationExecution.layer.pipe(
+      Layer.provide(Layer.succeed(HostProcess.Environment, {})),
+      Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(harness.layer))),
+      Layer.provide(harness.layer),
+      Layer.provide(FetchHttpClient.layer),
+      Layer.provide(NodeServices.layer),
+      Layer.provide(
+        Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+          getEnvironmentId: Effect.succeed(EnvironmentId.make("mation-test")),
+        }),
+      ),
+    );
+    return Effect.gen(function* () {
+      const mation = yield* MationExecution.AutomationExecutionService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const input = {
+        title: "Mation test",
+        prompt: "Review the inbox",
+        target: {
+          projectId,
+          threadId: null,
+          modelSelection,
+          runtimeMode: "auto" as const,
+          interactionMode: "default" as const,
+          workspaceStrategy: { type: "root" as const },
+        },
+      };
+      const first = yield* mation.start("28a58566-9311-44b7-bd60-93a5374d05e8", input);
+      const retry = yield* mation.start("28a58566-9311-44b7-bd60-93a5374d05e8", input);
+      assert.deepEqual(retry.ref, first.ref);
+      const projection = yield* threads.getThreadProjection(first.ref.threadId);
+      assert.equal(projection.messages.length, 1);
+      assert.equal(projection.runs.length, 1);
+      assert.equal(first.ref.runId, projection.runs[0]?.id);
+      assert.deepEqual(projection.runs[0]?.modelSelection, modelSelection);
+      yield* threads.dispatch({
+        type: "thread.model-selection.set",
+        commandId: CommandId.make("mation-switch-model"),
+        threadId: first.ref.threadId,
+        modelSelection: claudeModelSelection,
+      });
+      const boundInput = {
+        ...input,
+        prompt: "A second review",
+        target: { ...input.target, threadId: first.ref.threadId },
+      };
+      const bound = yield* mation.start("c49f43ba-c472-4875-ad0a-c518683b49ce", boundInput);
+      const boundReplay = yield* mation.start("c49f43ba-c472-4875-ad0a-c518683b49ce", boundInput);
+      assert.deepEqual(boundReplay.ref, bound.ref);
+      assert.equal(bound.ref.threadId, first.ref.threadId);
+      assert.notEqual(bound.ref.runId, first.ref.runId);
+      const loaded = yield* mation.get("28a58566-9311-44b7-bd60-93a5374d05e8", { projectId });
+      assert.equal(loaded.ref.runId, first.ref.runId);
+      const afterBound = yield* threads.getThreadProjection(first.ref.threadId);
+      assert.equal(afterBound.runs.length, 2);
+      assert.deepEqual(
+        afterBound.runs.find((run) => run.id === bound.ref.runId)?.modelSelection,
+        claudeModelSelection,
+      );
+      assert.deepEqual(afterBound.thread.modelSelection, claudeModelSelection);
+      const conflict = yield* mation
+        .start("28a58566-9311-44b7-bd60-93a5374d05e8", {
+          ...input,
+          prompt: "Changed after submission",
+        })
+        .pipe(Effect.flip);
+      assert.equal(conflict._tag, "MationConflictError");
+      const publish = yield* mation
+        .publishEmails(
+          { requestId: "28a58566-9311-44b7-bd60-93a5374d05e8", items: [] },
+          { threadId: first.ref.threadId, runId: bound.ref.runId },
+        )
+        .pipe(Effect.flip);
+      assert.equal(publish._tag, "MationConflictError");
+      for (const path of [
+        "runs/another-run/emails",
+        "t3/tasks/upsert",
+        "automations/..\\runs\\00000000-0000-4000-8000-000000000001\\emails#/runs",
+        "automations/%2e%2e/runs/00000000-0000-4000-8000-000000000001/emails?x=/runs",
+        "automations/%2e%2e%5cruns%5c00000000-0000-4000-8000-000000000001%5cemails#/runs",
+        "automations/%2e%2e/overview",
+        "automations/../overview",
+        "automations/id%2fruns/runs",
+      ]) {
+        const forbidden = yield* mation
+          .frontendRequest({ path, method: "POST", body: "{}" })
+          .pipe(Effect.flip);
+        assert.equal(forbidden._tag, "MationConflictError", path);
+      }
+    }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerMation)));
   },
 );

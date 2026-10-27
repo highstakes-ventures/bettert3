@@ -58,6 +58,16 @@ import {
 } from "./orchestrationV2.ts";
 import { Project, ProjectMutation, ProjectSnapshot } from "./project.ts";
 import {
+  MationFrontendPage,
+  MationFrontendRequest,
+  MationFrontendResponse,
+  MationExecution,
+  MationExecutionInput,
+  MationExecutionQuery,
+  MationProjects,
+  MationRequestId,
+} from "./mation.ts";
+import {
   PullRequestDiffInput,
   PullRequestDiffResult,
   PullRequestOperationError,
@@ -842,6 +852,48 @@ class EnvironmentWebhooksHttpApi extends HttpApiGroup.make("webhooks")
   .add(HttpApiEndpoint.patch("webhookPatch", WEBHOOK_PATH, webhookEndpoint))
   .add(HttpApiEndpoint.get("webhookGet", WEBHOOK_PATH, webhookEndpoint)) {}
 
+class EnvironmentMationHttpApi extends HttpApiGroup.make("mation")
+  .add(
+    HttpApiEndpoint.get("page", "/api/mation/page", {
+      headers: OptionalBearerHeaders,
+      success: MationFrontendPage,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("frontendRequest", "/api/mation/request", {
+      headers: OptionalBearerHeaders,
+      payload: MationFrontendRequest,
+      success: MationFrontendResponse,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("projects", "/api/mation/projects", {
+      headers: OptionalBearerHeaders,
+      success: MationProjects,
+      error: EnvironmentOrchestrationThreadSnapshotErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("execution", "/api/mation/executions/:requestId", {
+      headers: OptionalBearerHeaders,
+      params: Schema.Struct({ requestId: MationRequestId }),
+      query: MationExecutionQuery,
+      success: MationExecution,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.put("startExecution", "/api/mation/executions/:requestId", {
+      headers: OptionalBearerHeaders,
+      params: Schema.Struct({ requestId: MationRequestId }),
+      payload: MationExecutionInput,
+      success: MationExecution,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
@@ -850,4 +902,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
   .add(EnvironmentConnectHttpApi)
-  .add(EnvironmentWebhooksHttpApi) {}
+  .add(EnvironmentWebhooksHttpApi)
+  .add(EnvironmentMationHttpApi) {}

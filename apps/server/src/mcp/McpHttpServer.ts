@@ -1,3 +1,5 @@
+import { MationToolkit } from "./toolkits/mation/tools.ts";
+import * as MationHandlers from "./toolkits/mation/handlers.ts";
 import { WorkflowToolkit } from "./toolkits/workflows/tools.ts";
 import * as WorkflowHandlers from "./toolkits/workflows/handlers.ts";
 import * as Cause from "effect/Cause";
@@ -1071,6 +1073,7 @@ export const layer = Layer.mergeAll(
   layerPreviewToolkit,
   layerOrchestratorToolkit,
   layerThreadToolkit,
+  toolkitRegistration(MationToolkit, MationHandlers.layer),
   toolkitRegistration(WorkflowToolkit, WorkflowHandlers.layer),
   layerAttachmentToolkit,
   layerProjectRegistration,

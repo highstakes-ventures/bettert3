@@ -32,6 +32,7 @@ import * as PullRequestDiffLoader from "./pullRequestDiffHttp.ts";
 import { fetchEnvironmentSessionState } from "./session.ts";
 import { fetchEnvironmentShellSnapshot } from "./shellSnapshotHttp.ts";
 import * as ThreadSnapshotLoader from "./threadSnapshotHttp.ts";
+import { fetchEnvironmentMation } from "./mation.ts";
 import { fetchEnvironmentThreadTranscript } from "./threadTranscriptHttp.ts";
 import { fetchEnvironmentBoundedThreadSnapshot } from "./boundedThreadSnapshotHttp.ts";
 import * as BoundedThreadSnapshotHttp from "./boundedThreadSnapshotHttp.ts";
@@ -185,6 +186,26 @@ const LOADERS: ReadonlyArray<{
     HttpClient.HttpClient
   >;
 }> = [
+  {
+    name: "Mation page",
+    method: "GET",
+    path: "/api/mation/page",
+    response: { html: "<main>Mation</main>" },
+    expected: { html: "<main>Mation</main>" },
+    load: (input) => fetchEnvironmentMation({ ...input, request: { type: "page" } }),
+  },
+  {
+    name: "Mation frontend request",
+    method: "POST",
+    path: "/api/mation/request",
+    response: { status: 200, body: "{}" },
+    expected: { status: 200, body: "{}" },
+    load: (input) =>
+      fetchEnvironmentMation({
+        ...input,
+        request: { type: "request", request: { path: "overview", method: "GET" } },
+      }),
+  },
   {
     name: "PR diff",
     method: "POST",

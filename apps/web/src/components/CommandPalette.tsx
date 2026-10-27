@@ -326,11 +326,11 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         });
         return;
       }
-      if (command === "usage.open") {
+      if (command === "usage.open" || command === "mation.open") {
         event.preventDefault();
         event.stopPropagation();
         setOpen(false);
-        void navigate({ to: "/usage" });
+        void navigate({ to: command === "mation.open" ? "/mation" : "/usage" });
         return;
       }
       const mode = overlayModeForCommand(command);
@@ -1541,6 +1541,18 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:mation",
+    searchTerms: ["mation", "automations", "schedule", "email", "runs"],
+    title: "Open Mation",
+    icon: <ChartNoAxesColumnIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "mation.open",
+    run: async () => {
+      await navigate({ to: "/mation" });
+    },
+  });
 
   actionItems.push({
     kind: "action",

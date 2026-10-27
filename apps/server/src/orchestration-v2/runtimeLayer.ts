@@ -1,3 +1,6 @@
+import * as Effect from "effect/Effect";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as MationScheduledTasks from "../mation/ScheduledTasks.ts";
 import * as WorkflowService from "../workflows/WorkflowService.ts";
 import * as LinearClient from "../workflows/LinearClient.ts";
 import * as CodexCloudChats from "../provider/CodexCloudChats.ts";
@@ -53,6 +56,7 @@ import * as RuntimePolicy from "./RuntimePolicy.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ThreadLaunchService from "./ThreadLaunchService.ts";
+import * as AutomationExecutionService from "../mation/AutomationExecutionService.ts";
 import * as ThreadLifecycleService from "./ThreadLifecycleService.ts";
 import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
@@ -284,16 +288,45 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
 const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
+const layerMationProvided = AutomationExecutionService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      layerProjectService,
+      layerThreadLaunchProvided,
+      layerThreadManagementProvided,
+      layerCommandReceiptStoreProvided,
+    ),
+  ),
+);
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
-const layerScheduledTaskProvided = ScheduledTaskService.layer.pipe(
+// A connection can precede migration. Only explicit cutover stops legacy timers.
+export const layerScheduledTaskOwner = Layer.unwrap(
+  HostProcess.Environment.pipe(
+    Effect.map(
+      (
+        variables,
+      ): Layer.Layer<
+        ScheduledTaskService.ScheduledTaskService,
+        never,
+        | Layer.Services<typeof ScheduledTaskService.layer>
+        | Layer.Services<typeof MationScheduledTasks.layer>
+      > =>
+        variables.MATION_OWNS_SCHEDULES === "1"
+          ? MationScheduledTasks.layer
+          : ScheduledTaskService.layer,
+    ),
+  ),
+);
+const layerScheduledTaskProvided = layerScheduledTaskOwner.pipe(
   Layer.provide(
     Layer.mergeAll(
       layerThreadLaunchProvided,
       layerThreadManagementProvided,
       layerManagedProjectFoldersProvided,
       layerSecretRequestsProvided,
+      layerMationProvided,
     ),
   ),
 );
@@ -381,6 +414,7 @@ export const layerProduction = Layer.mergeAll(
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
   layerThreadLifecycleProvided,
+  layerMationProvided,
   layerScheduledTaskProvided,
   layerWorkflowsProvided,
   layerSecretRequestsProvided,
