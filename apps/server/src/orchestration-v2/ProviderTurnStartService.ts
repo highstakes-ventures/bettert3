@@ -1,3 +1,4 @@
+import { isAutomaticThread } from "@t3tools/shared/threadAttention";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import {
@@ -1111,6 +1112,18 @@ export const layer: Layer.Layer<
             text: message.text,
             records: message.context?.records ?? [],
           });
+      const automaticSource = {
+        ...projection.thread,
+        ...(message.scheduledTaskId === undefined
+          ? {}
+          : { scheduledTaskId: message.scheduledTaskId }),
+      };
+      const attentionShell = isAutomaticThread(automaticSource)
+        ? yield* projectionStore.getThreadShell(input.threadId)
+        : null;
+      const automaticNote = isAutomaticThread({ ...automaticSource, ...attentionShell })
+        ? `<t3_automatic_chat>This is an unattended Automatic chat. Joseph does not read this chat. Continue authorized work autonomously. Do not ask open-ended discovery or approach questions here. If a concrete user decision blocks you, prepare the evidence and a recommended approach, then use t3_thread_launch for one normal inbox discussion with the exact decision and a link back to t3-thread://v1/${projection.thread.id}. Reuse a discussion of the same unresolved decision. The discussion must present the prepared recommendation and wait for Joseph, without restarting broad discovery or implementing an unapproved approach. Do not settle, archive, or stop this automation merely to quiet it.</t3_automatic_chat>`
+        : "";
       // Delivered once: this run's provider turn marks the work as told. A
       // restart continuation is prompted by its own text or resumes natively.
       const noteContinuation = isRestartNoteContinuation(
@@ -1316,7 +1329,7 @@ export const layer: Layer.Layer<
           });
           if (!(yield* isCurrentAttemptInStatus("running"))) return;
           const start = compact ? session.compactThread! : session.startTurn;
-          const context = [delivery.context, restartNote]
+          const context = [compact ? "" : automaticNote, delivery.context, restartNote]
             .filter((part) => part !== "")
             .join("\n\n");
           const { restartContinuationOfRunId: _resumedRunId, ...promptedInput } = turnInput;
@@ -1368,6 +1381,7 @@ export const layer: Layer.Layer<
         effectiveHandoffs.length === 0 &&
         missedItems.length === 0 &&
         restartNote === "" &&
+        automaticNote === "" &&
         !noteContinuation
           ? session
           : makeDeliverySession(session, startWithHandoffs);

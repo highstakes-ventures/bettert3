@@ -94,11 +94,21 @@ describe("v2 thread shell lists", () => {
       lineage: { ...child.lineage, relationshipToParent: "fork" as const },
     };
     const workflow = { ...root, id: ThreadId.make("scan"), backgroundWorkflowId: "daily-scan" };
-    const snapshot = { ...v2ShellSnapshot, threads: [root, child, fork, workflow] };
+    const emailReview = { ...workflow, id: ThreadId.make("email-review"), hasEmailReview: true };
+    const automatic = { ...root, id: ThreadId.make("automatic"), automationOrigin: "t3" as const };
+    const external = {
+      ...root,
+      id: ThreadId.make("external"),
+      automationOrigin: "external" as const,
+    };
+    const snapshot = {
+      ...v2ShellSnapshot,
+      threads: [root, child, fork, workflow, automatic, external, emailReview],
+    };
     registry.set(snapshotAtom(environmentId), snapshot);
     const dispose = registry.mount(threads.navigationThreadShellsAtom);
     const before = registry.get(threads.navigationThreadShellsAtom);
-    expect(before.map((thread) => thread.id)).toEqual([root.id, fork.id]);
+    expect(before.map((thread) => thread.id)).toEqual([root.id, fork.id, emailReview.id]);
     registry.set(snapshotAtom(environmentId), {
       ...snapshot,
       threads: [
@@ -106,10 +116,13 @@ describe("v2 thread shell lists", () => {
         { ...child, title: "Child streaming" },
         fork,
         { ...workflow, title: "Scan streaming" },
+        automatic,
+        external,
+        emailReview,
       ],
     });
     expect(registry.get(threads.navigationThreadShellsAtom)).toBe(before);
-    expect(registry.get(threads.threadShellsAtom)).toHaveLength(4);
+    expect(registry.get(threads.threadShellsAtom)).toHaveLength(snapshot.threads.length);
     expect(
       registry.get(threads.threadShellAtom({ environmentId, threadId: workflow.id }))?.title,
     ).toBe("Scan streaming");

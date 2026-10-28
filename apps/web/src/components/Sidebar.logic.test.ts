@@ -90,7 +90,7 @@ describe("automatic sidebar membership", () => {
         { threadId: ThreadId.make("webhook-bound") },
       ],
     });
-    expect(visible.map((thread) => thread.id)).toEqual(["manual", "ticket", "remote"]);
+    expect(visible.map((thread) => thread.id)).toEqual(["manual", "ticket"]);
     expect(
       filterSidebarV2VisibleThreads(threads, new Set([`${localEnvironmentId}:${base.projectId}`]), {
         environmentId: localEnvironmentId,

@@ -1115,7 +1115,17 @@ it("excludes subagents from navigation, search and ordering while retaining user
     id: ThreadId.make("scan"),
     source: { ...root.source, backgroundWorkflowId: "daily-scan" },
   };
-  const threads = [root, child, fork, workflow];
+  const automatic = {
+    ...root,
+    id: ThreadId.make("automatic"),
+    source: { ...root.source, automationOrigin: "t3" as const },
+  };
+  const external = {
+    ...root,
+    id: ThreadId.make("external"),
+    source: { ...root.source, automationOrigin: "external" as const },
+  };
+  const threads = [root, child, fork, workflow, automatic, external];
   expect(
     buildThreadListV2Items({ threads, environmentId: null, searchQuery: "", now: NOW }).items.map(
       (item) => item.thread.id,

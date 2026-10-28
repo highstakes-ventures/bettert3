@@ -8,6 +8,12 @@ export const PaiEmailItem = Schema.Struct({
   sender: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
   subject: Schema.String.check(Schema.isMaxLength(1000)),
   summary: TrimmedNonEmptyString.check(Schema.isMaxLength(3000)),
+  proposedAction: Schema.optional(
+    Schema.Struct({
+      text: TrimmedNonEmptyString.check(Schema.isMaxLength(20000)),
+      mode: Schema.Literals(["pai", "personal", "execute"]),
+    }),
+  ),
   receivedAt: TrimmedNonEmptyString,
   sourceUrl: TrimmedNonEmptyString.check(
     Schema.isPattern(/^https:\/\/(mail\.google\.com|outlook\.office\.com|outlook\.live\.com)\//),

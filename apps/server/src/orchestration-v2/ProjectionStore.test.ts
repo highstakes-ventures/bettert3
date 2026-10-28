@@ -32,6 +32,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -1156,6 +1157,117 @@ it.effect.each([
         yield* store.getThreadProjection(threadId),
       );
       assert.equal(projected.scheduledTaskId, "scheduled-task:webhook");
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect.each([
+  { name: "memory", layer: ProjectionStore.layerMemory },
+  { name: "SQL", layer: layerTest },
+] as const)(
+  "$name shells expose a confirmed email pane after its run finishes, excluding failed and unrelated tools",
+  ({ name, layer }) =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = yield* addRolledBackRecoveryCandidate(`email-review-${name}`);
+      const now = yield* DateTime.now;
+      if (name === "SQL") {
+        const client = yield* Effect.serviceOption(SqlClient.SqlClient);
+        assert.isTrue(Option.isSome(client));
+        if (Option.isNone(client)) return;
+        const sql = client.value;
+        const plan = yield* sql<{
+          detail: string;
+        }>`EXPLAIN QUERY PLAN SELECT thread_id FROM orchestration_v2_projection_turn_items WHERE type = 'dynamic_tool' AND status = 'completed' AND payload_json GLOB '*paiWidget*'`;
+        assert.isTrue(plan.some((row) => row.detail.includes("email_review_idx")));
+      }
+      const originalRun = (yield* store.getThreadProjection(threadId)).runs[0]!;
+      yield* store.apply({
+        id: EventId.make(`email-${name}-completed`),
+        type: "run.updated",
+        threadId,
+        occurredAt: now,
+        payload: { ...originalRun, status: "completed", completedAt: now },
+      });
+      const reportId = "a".repeat(64);
+      const check = Effect.gen(function* () {
+        const direct = yield* store.getThreadShell(threadId);
+        const snapshot = (yield* store.getShellSnapshot()).threads.find(
+          (thread) => thread.id === threadId,
+        );
+        const projected = ProjectionStore.threadShellFromProjection(
+          yield* store.getThreadProjection(threadId),
+        );
+        assert.equal(direct?.hasEmailReview, snapshot?.hasEmailReview);
+        assert.equal(direct?.hasEmailReview, projected.hasEmailReview);
+        return direct;
+      });
+      assert.isNotTrue((yield* check)?.hasEmailReview);
+      for (const [ordinal, toolName, status, output] of [
+        [1, "other_server.some_tool", "completed", { paiWidget: { reportId } }],
+        [2, "t3-code.pai_publish_email_items", "failed", { paiWidget: { reportId } }],
+        [
+          3,
+          "t3-code.pai_publish_email_items",
+          "completed",
+          { isError: true, paiWidget: { reportId } },
+        ],
+        [
+          4,
+          "t3-code.mation_publish_email_items",
+          "completed",
+          { published: 1, paiWidget: { reportId } },
+        ],
+        [
+          5,
+          "t3-code.pai_publish_email_items",
+          "completed",
+          [{ type: "text", text: JSON.stringify({ published: 1, paiWidget: { reportId } }) }],
+        ],
+        [
+          6,
+          "t3-code.pai_publish_email_items",
+          "completed",
+          JSON.stringify({ published: 1, paiWidget: { reportId } }),
+        ],
+      ] as const) {
+        yield* store.apply({
+          id: EventId.make(`email-${name}-${ordinal}`),
+          type: "turn-item.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            id: TurnItemId.make(`email-${name}-publication`),
+            threadId,
+            runId: originalRun.id,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal,
+            status,
+            title: null,
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+            type: "dynamic_tool",
+            toolName,
+            input: {},
+            output,
+          },
+        });
+        const shell = yield* check;
+        assert.equal(shell?.hasEmailReview === true, ordinal >= 4);
+        assert.equal(shell?.automationOrigin, undefined);
+      }
+      yield* store.apply({
+        id: EventId.make(`email-${name}-rolled-back`),
+        type: "run.updated",
+        threadId,
+        occurredAt: now,
+        payload: { ...originalRun, status: "rolled_back", completedAt: now },
+      });
+      assert.isNotTrue((yield* check)?.hasEmailReview);
     }).pipe(Effect.provide(layer)),
 );
 

@@ -16,6 +16,7 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
+  RuntimeRequestId,
   ProjectId,
   type OrchestrationV2ThreadProjection,
   OrchestrationV2DomainEvent,
@@ -261,6 +262,9 @@ it.each([
 
 function makeLocalCommandHarness(input: {
   readonly text: string;
+  readonly automatic?: boolean;
+  readonly attention?: "email" | "input" | "approval" | undefined;
+  readonly startProvider?: boolean;
   readonly worktreePath?: string;
   readonly worktreesDir?: string;
   readonly fileSystem?: FileSystem.FileSystem;
@@ -355,6 +359,7 @@ function makeLocalCommandHarness(input: {
   let projection: OrchestrationV2ThreadProjection = {
     thread: {
       id: threadId,
+      ...(input.automatic ? { automationOrigin: "t3" as const } : {}),
       activeProviderThreadId: providerThreadId,
       projectId: ProjectId.make("project-native-account-command"),
       branch: input.worktreePath === undefined ? null : "feature/restore",
@@ -582,6 +587,9 @@ function makeLocalCommandHarness(input: {
       ),
     ensureThread: () => Effect.succeed(providerThread),
   };
+  const nativeStartTurn = vi.fn<ProviderAdapter.ProviderAdapterV2SessionRuntime["startTurn"]>(
+    () => Effect.void,
+  );
   const open = vi.fn(() =>
     input.interruptOpen === true
       ? Effect.interrupt
@@ -603,7 +611,9 @@ function makeLocalCommandHarness(input: {
                   ),
                 ),
               )
-            : input.failReadsAfterRunning === true || input.previousTurn !== undefined
+            : input.failReadsAfterRunning === true ||
+                input.previousTurn !== undefined ||
+                input.startProvider === true
               ? Effect.succeed({
                   driver: providerThread.driver,
                   providerSession: {
@@ -618,6 +628,7 @@ function makeLocalCommandHarness(input: {
                     updatedAt: now,
                     lastError: null,
                   },
+                  startTurn: nativeStartTurn,
                   ensureThread: () => Effect.succeed(providerThread),
                   resumeThread: (
                     request: Parameters<
@@ -641,7 +652,9 @@ function makeLocalCommandHarness(input: {
   const startRootRun = vi.fn<
     (input: RunExecutionService.RunExecutionServiceV2StartRootRunInput) => Effect.Effect<void>
   >(() =>
-    input.failReadsAfterRunning === true || input.previousTurn !== undefined
+    input.failReadsAfterRunning === true ||
+    input.previousTurn !== undefined ||
+    input.startProvider === true
       ? Effect.suspend(() =>
           providerBusy ? Effect.die("The previous provider turn is still running.") : Effect.void,
         )
@@ -730,6 +743,23 @@ function makeLocalCommandHarness(input: {
         }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadRecords,
+          getThreadShell: () =>
+            Effect.succeed({
+              ...ProjectionStore.threadShellFromProjection(projection),
+              ...(input.attention === "email" ? { hasEmailReview: true } : {}),
+              ...(input.attention === "input" || input.attention === "approval"
+                ? {
+                    pendingRuntimeRequest: {
+                      id: RuntimeRequestId.make("attention"),
+                      kind:
+                        input.attention === "input"
+                          ? ("user_input" as const)
+                          : ("command" as const),
+                      createdAt: now,
+                    },
+                  }
+                : {}),
+            }),
           getTurnStartContext,
           getRuntimeRecoveryProjection: () =>
             Effect.as(failReadIfRunning, {
@@ -780,6 +810,7 @@ function makeLocalCommandHarness(input: {
     open,
     writeIfRunCurrent,
     startRootRun,
+    nativeStartTurn,
     interruptTurn,
     tryHandlePromptCommand,
     events,
@@ -1423,5 +1454,48 @@ effectIt.effect.each([
       expect(delivered.text).toBe("Apply the requested change");
       expect(delivered.attachments).toEqual([attachment]);
     }
+  }),
+);
+
+effectIt.effect.each([
+  { automatic: false },
+  { automatic: true },
+  { automatic: true, attention: "email" as const },
+  { automatic: true, attention: "input" as const },
+  { automatic: true, attention: "approval" as const },
+])("delivers unattended context only for independent turns: %o", ({ automatic, attention }) =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue authorized repair",
+      automatic,
+      attention,
+      startProvider: true,
+    });
+    yield* harness.start;
+    const input = harness.startRootRun.mock.calls[0]![0];
+    yield* input.session.startTurn({
+      appThread: input.appThread,
+      threadId: input.run.threadId,
+      runId: input.run.id,
+      runOrdinal: input.run.ordinal,
+      providerTurnOrdinal: input.providerTurnOrdinal,
+      attemptId: input.attemptId,
+      rootNodeId: input.rootNode.id,
+      providerThread: input.providerThread,
+      message: input.message,
+      modelSelection: input.modelSelection,
+      runtimePolicy: input.runtimePolicy,
+    });
+    const sent = harness.nativeStartTurn.mock.calls[0]![0].message.text;
+    if (automatic && !attention) {
+      expect(sent).toContain("<t3_automatic_chat>");
+      expect(sent).toContain(`t3-thread://v1/${input.run.threadId}`);
+      expect(sent).toContain("Continue authorized repair");
+    } else {
+      expect(sent).toBe("Continue authorized repair");
+    }
+    expect(harness.projection().messages.at(-1)!.text).toBe("Continue authorized repair");
+    expect(harness.projection().runs.at(-1)!.status).toBe("running");
+    expect(harness.events.some((event) => event.type === "thread.settled")).toBe(false);
   }),
 );

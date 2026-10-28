@@ -1,3 +1,5 @@
+import EmailReviewLookup from "./Migrations/071_EmailReviewLookup.ts";
+import type { SqlError } from "effect/sql/SqlError";
 import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -148,6 +150,7 @@ export const migrationEntries = [
   [68, "CodexUsageNativeTurnIndex", UpstreamMigration0065],
   [69, "RepairClientSettlementTimestamps", UpstreamMigration0066],
   [70, "WebhookDedupe", UpstreamMigration0067],
+  [71, "EmailReviewLookup", EmailReviewLookup],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -207,9 +210,13 @@ export interface RunMigrationsOptions {
   readonly toMigrationInclusive?: number | undefined;
 }
 
-export const runMigrations = Effect.fn("runMigrations")(function* ({
-  toMigrationInclusive,
-}: RunMigrationsOptions = {}) {
+export const runMigrations: (
+  options?: RunMigrationsOptions,
+) => Effect.Effect<
+  ReadonlyArray<readonly [number, string]>,
+  Migrator.MigrationError | SqlError,
+  SqlClient.SqlClient
+> = Effect.fn("runMigrations")(function* ({ toMigrationInclusive }: RunMigrationsOptions = {}) {
   const includesV2 =
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
   const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];

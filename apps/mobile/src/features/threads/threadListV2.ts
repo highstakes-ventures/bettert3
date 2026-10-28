@@ -1,3 +1,4 @@
+import { isAutomaticThread, threadNeedsUserAttention } from "@t3tools/shared/threadAttention";
 import { groupThreadsBySection } from "@t3tools/client-runtime/state/thread-sections";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
 import type { ProjectSection } from "@t3tools/contracts";
@@ -234,7 +235,9 @@ export function getThreadListV2OrderedSection(input: {
     if (
       thread.archivedAt !== null ||
       thread.lineage.relationshipToParent === "subagent" ||
-      thread.source.backgroundWorkflowId !== undefined
+      (thread.source.backgroundWorkflowId !== undefined &&
+        !threadNeedsUserAttention(thread.source)) ||
+      isAutomaticThread(thread.source)
     )
       return false;
     if (
@@ -734,7 +737,9 @@ export function buildThreadListV2Items(input: {
     if (
       thread.archivedAt !== null ||
       thread.lineage.relationshipToParent === "subagent" ||
-      thread.source.backgroundWorkflowId !== undefined
+      (thread.source.backgroundWorkflowId !== undefined &&
+        !threadNeedsUserAttention(thread.source)) ||
+      isAutomaticThread(thread.source)
     )
       continue;
     if (input.environmentId !== null && thread.environmentId !== input.environmentId) continue;

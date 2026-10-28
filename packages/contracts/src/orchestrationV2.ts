@@ -1818,6 +1818,7 @@ export type OrchestrationV2LatestVisibleMessageSummary =
   typeof OrchestrationV2LatestVisibleMessageSummary.Type;
 
 export const OrchestrationV2ThreadShell = Schema.Struct({
+  hasEmailReview: Schema.optional(Schema.Boolean),
   automationOrigin: OrchestrationV2AppThread.fields.automationOrigin,
   /** Derived from persisted scheduled user messages, including fresh webhook threads. */
   scheduledTaskId: Schema.optional(ScheduledTaskId),

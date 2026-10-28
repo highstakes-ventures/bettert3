@@ -1,3 +1,4 @@
+import { isAutomaticThread, threadNeedsUserAttention } from "@t3tools/shared/threadAttention";
 import type {
   EnvironmentId,
   OrchestrationV2ShellSnapshot,
@@ -411,7 +412,8 @@ export function createEnvironmentThreadShellAtoms(input: {
         if (
           thread.archivedAt !== null ||
           thread.lineage.relationshipToParent === "subagent" ||
-          thread.backgroundWorkflowId !== undefined
+          (thread.backgroundWorkflowId !== undefined && !threadNeedsUserAttention(thread)) ||
+          isAutomaticThread(thread)
         )
           continue;
         next.push(scopedThread(environmentId, thread, subagentRequests));
