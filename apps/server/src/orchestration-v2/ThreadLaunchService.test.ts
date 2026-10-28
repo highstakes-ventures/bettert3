@@ -3010,10 +3010,10 @@ it.effect(
         .pipe(Effect.flip);
       assert.equal(conflict._tag, "MationConflictError");
       const publish = yield* mation
-        .publishEmails(
-          { requestId: "28a58566-9311-44b7-bd60-93a5374d05e8", items: [] },
-          { threadId: first.ref.threadId, runId: bound.ref.runId },
-        )
+        .assertCaller("28a58566-9311-44b7-bd60-93a5374d05e8", {
+          threadId: first.ref.threadId,
+          runId: bound.ref.runId,
+        })
         .pipe(Effect.flip);
       assert.equal(publish._tag, "MationConflictError");
       for (const path of [

@@ -40,6 +40,7 @@ interface CompactToolOutput {
   scheduledTaskId?: string;
   status?: "rolled_back";
   htmlRender?: HtmlRenderReference;
+  paiWidget?: { reportId: string };
   [MCP_APP_OUTPUT_KEY]?: McpAppReference;
   thread?: { threadId: string };
   threads?: Array<{ threadId?: string; status?: "rolled_back" }>;
@@ -123,6 +124,12 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
       if (id !== undefined) output[key] = id;
     }
     if (data.status === "rolled_back") output.status = "rolled_back";
+    if (
+      Predicate.isObject(data.paiWidget) &&
+      typeof data.paiWidget.reportId === "string" &&
+      /^[a-f0-9]{64}$/.test(data.paiWidget.reportId)
+    )
+      output.paiWidget = { reportId: data.paiWidget.reportId };
     const htmlRender = readHtmlRenderReference(data.htmlRender);
     if (htmlRender !== undefined) output.htmlRender = htmlRender;
     const mcpApp = readMcpAppReference(data[MCP_APP_OUTPUT_KEY]);
@@ -199,6 +206,17 @@ export function mcpAppFromToolItem(item: {
 }): McpAppReference | undefined {
   const app = compactDynamicToolOutput(item.output)?.[MCP_APP_OUTPUT_KEY];
   return app !== undefined && item.toolName === `${app.server}.${app.tool}` ? app : undefined;
+}
+
+/** A confirmed publication is the widget's identity. Unrelated runs never create an email row. */
+export function paiWidgetFromToolItem(item: {
+  readonly toolName: string | null | undefined;
+  readonly output?: unknown;
+}): { reportId: string } | undefined {
+  const tool = resolveT3McpToolId(item.toolName);
+  if (tool !== "pai_publish_email_items" && tool !== "mation_publish_email_items") return undefined;
+  const output = compactDynamicToolOutput(item.output);
+  return output?.isError ? undefined : output?.paiWidget;
 }
 
 /** Some providers report completion even when command output describes a failure. */

@@ -1,3 +1,4 @@
+import { PaiService } from "../../../pai/PaiService.ts";
 import * as Context from "effect/Context";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as MationExecution from "../../../mation/AutomationExecutionService.ts";
@@ -40,6 +41,7 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(PaiService)({}),
   Layer.mock(MationExecution.AutomationExecutionService)({}),
   Layer.mock(WorkflowService.WorkflowService)({}),
   Layer.mock(Orchestrator.OrchestratorV2)({}),

@@ -454,6 +454,10 @@
     "./state/mation": {
       "types": "./src/state/mation.ts",
       "default": "./src/state/mation.ts"
+    },
+    "./state/pai": {
+      "types": "./src/state/pai.ts",
+      "default": "./src/state/pai.ts"
     }
   },
   "scripts": {

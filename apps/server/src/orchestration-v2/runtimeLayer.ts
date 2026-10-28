@@ -1,3 +1,4 @@
+import * as PaiService from "../pai/PaiService.ts";
 import * as Effect from "effect/Effect";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as MationScheduledTasks from "../mation/ScheduledTasks.ts";
@@ -415,6 +416,7 @@ export const layerProduction = Layer.mergeAll(
   layerThreadLaunchProvided,
   layerThreadLifecycleProvided,
   layerMationProvided,
+  PaiService.layer.pipe(Layer.provide(layerMationProvided)),
   layerScheduledTaskProvided,
   layerWorkflowsProvided,
   layerSecretRequestsProvided,

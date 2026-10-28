@@ -27,7 +27,11 @@ import {
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import { turnItemDetailRevision } from "@t3tools/client-runtime/work-log/item-detail";
 import type { McpAppReference } from "@t3tools/shared/mcpApp";
-import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
+import {
+  htmlRenderFromToolItem,
+  mcpAppFromToolItem,
+  paiWidgetFromToolItem,
+} from "@t3tools/shared/toolOutput";
 import {
   contextCompactionLabel,
   workEntryIndicatesToolFailure,
@@ -144,6 +148,13 @@ export type TimelineEntry = (
       readonly createdAt: string;
       readonly runId: RunId | null;
       readonly htmlRender: HtmlRenderReference;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "pai-widget";
+      readonly createdAt: string;
+      readonly runId: RunId | null;
+      readonly paiWidget: { reportId: string };
     }
   | {
       readonly id: string;
@@ -638,6 +649,7 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
 ): TimelineEntry[] {
   const committedMessageIds = new Set<string>();
   const entries: TimelineEntry[] = [];
+  const seenPaiReports = new Set<string>();
   const attemptByRootNodeId = new Map(
     (input.attempts ?? []).map((attempt) => [attempt.rootNodeId, attempt] as const),
   );
@@ -754,6 +766,25 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         proposedPlan,
         ...attemptMetadata,
       });
+      continue;
+    }
+
+    const paiWidget =
+      item.type === "dynamic_tool" && item.status === "completed"
+        ? paiWidgetFromToolItem(item)
+        : undefined;
+    if (paiWidget !== undefined) {
+      if (!seenPaiReports.has(paiWidget.reportId)) {
+        seenPaiReports.add(paiWidget.reportId);
+        entries.push({
+          id: `pai-widget:${paiWidget.reportId}`,
+          kind: "pai-widget",
+          createdAt,
+          runId: item.runId,
+          paiWidget,
+          ...attemptMetadata,
+        });
+      }
       continue;
     }
 

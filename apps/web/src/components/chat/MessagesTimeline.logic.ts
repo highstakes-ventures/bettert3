@@ -77,7 +77,8 @@ function timelineEntryRunId(entry: TimelineEntry): RunId | null {
   if (entry.kind === "proposed-plan") {
     return entry.proposedPlan.runId;
   }
-  if (entry.kind === "html-render" || entry.kind === "mcp-app") return entry.runId;
+  if (entry.kind === "pai-widget" || entry.kind === "html-render" || entry.kind === "mcp-app")
+    return entry.runId;
   return entry.kind === "work" ? (entry.entry.runId ?? null) : null;
 }
 
@@ -625,6 +626,12 @@ type MessagesTimelineRowContent =
       proposedPlan: ProposedPlan;
     }
   | {
+      kind: "pai-widget";
+      id: string;
+      createdAt: string;
+      paiWidget: { reportId: string };
+    }
+  | {
       kind: "html-render";
       id: string;
       createdAt: string;
@@ -803,6 +810,7 @@ function deriveSupersededAttemptFolds(
       completeAttemptIds.has(entry.attempt.id) ||
       unfoldedRunIds.has(entry.attempt.runId) ||
       (entry.kind === "message" && entry.message.role === "user") ||
+      entry.kind === "pai-widget" ||
       entry.kind === "html-render" ||
       entry.kind === "mcp-app" ||
       timelineEntryIsPersistentResourceCard(entry) ||
@@ -1831,6 +1839,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "pai-widget") {
+      nextRows.push({
+        kind: "pai-widget",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        paiWidget: timelineEntry.paiWidget,
+      });
+      continue;
+    }
+
     if (timelineEntry.kind === "html-render") {
       nextRows.push({
         kind: "html-render",
@@ -2272,6 +2290,12 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;
+
+    case "pai-widget":
+      return (
+        a.createdAt === (b as typeof a).createdAt &&
+        a.paiWidget.reportId === (b as typeof a).paiWidget.reportId
+      );
 
     case "html-render": {
       // Entries rebuild on any tool update; an equal page must keep its mounted frame.

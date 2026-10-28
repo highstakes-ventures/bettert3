@@ -1,3 +1,4 @@
+import { PaiWidgetPage, PaiWidgetRequest, PaiWidgetResponse } from "./pai.ts";
 import * as Context from "effect/Context";
 import type * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
@@ -894,6 +895,23 @@ class EnvironmentMationHttpApi extends HttpApiGroup.make("mation")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+class EnvironmentPaiHttpApi extends HttpApiGroup.make("pai")
+  .add(
+    HttpApiEndpoint.get("page", "/api/pai/page", {
+      headers: OptionalBearerHeaders,
+      success: PaiWidgetPage,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("request", "/api/pai/request", {
+      headers: OptionalBearerHeaders,
+      payload: PaiWidgetRequest,
+      success: PaiWidgetResponse,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
@@ -903,4 +921,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentProjectsHttpApi)
   .add(EnvironmentConnectHttpApi)
   .add(EnvironmentWebhooksHttpApi)
-  .add(EnvironmentMationHttpApi) {}
+  .add(EnvironmentMationHttpApi)
+  .add(EnvironmentPaiHttpApi) {}

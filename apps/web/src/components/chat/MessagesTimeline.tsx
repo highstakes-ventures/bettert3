@@ -106,6 +106,7 @@ import {
   AssistantTimelineRow,
   AssistantMetaTimelineRow,
   ProposedPlanTimelineRow,
+  PaiWidgetTimelineRow,
   HtmlRenderTimelineRow,
   McpAppTimelineRow,
 } from "./TimelineAssistantRows";
@@ -1215,6 +1216,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                 row.kind === "worktree-setup" ||
                 row.kind === "event" ||
                 row.kind === "attempt-fold" ||
+                row.kind === "pai-widget" ||
                 row.kind === "html-render" ||
                 row.kind === "mcp-app"
               ? "pb-2"
@@ -1264,6 +1266,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "assistant-meta" ? <AssistantMetaTimelineRow row={row} /> : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
+      {row.kind === "pai-widget" ? <PaiWidgetTimelineRow row={row} /> : null}
       {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "mcp-app" ? <McpAppTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}

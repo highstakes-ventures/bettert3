@@ -1,6 +1,6 @@
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Execution from "../../../mation/AutomationExecutionService.ts";
+import * as Pai from "../../../pai/PaiService.ts";
 import { readCaller } from "../../threadAccess.ts";
 import * as Access from "../../McpToolAccess.ts";
 import { MationToolkit } from "./tools.ts";
@@ -14,16 +14,18 @@ export const layer = Access.toLayer(MationToolkit, {
           code: "invalid_request",
           message: "The reporting run is no longer active.",
         });
-      const execution = yield* Execution.AutomationExecutionService;
-      yield* execution
-        .publishEmails(input, { threadId: caller.id, runId: caller.activeRunId })
+      return yield* (yield* Pai.PaiService)
+        .publish({ items: input.items }, caller, input.requestId)
         .pipe(
           Effect.mapError(
-            (error) =>
-              new OrchestratorMcpFailure({ code: "invalid_request", message: error.message }),
+            () =>
+              new OrchestratorMcpFailure({
+                code: "invalid_request",
+                message:
+                  "The report could not be published to Mation. Verify its source run and service connection before retrying.",
+              }),
           ),
         );
-      return { published: input.items.length };
     }),
   ),
 });

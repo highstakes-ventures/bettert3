@@ -1,3 +1,5 @@
+import { PaiToolkit } from "./toolkits/pai/tools.ts";
+import * as PaiHandlers from "./toolkits/pai/handlers.ts";
 import { MationToolkit } from "./toolkits/mation/tools.ts";
 import * as MationHandlers from "./toolkits/mation/handlers.ts";
 import { WorkflowToolkit } from "./toolkits/workflows/tools.ts";
@@ -1074,6 +1076,7 @@ export const layer = Layer.mergeAll(
   layerOrchestratorToolkit,
   layerThreadToolkit,
   toolkitRegistration(MationToolkit, MationHandlers.layer),
+  toolkitRegistration(PaiToolkit, PaiHandlers.layer),
   toolkitRegistration(WorkflowToolkit, WorkflowHandlers.layer),
   layerAttachmentToolkit,
   layerProjectRegistration,

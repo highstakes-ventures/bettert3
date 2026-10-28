@@ -9,9 +9,6 @@ import {
   type MationExecutionInput,
   type MationExecutionQuery,
   type MationProjects,
-  MationRunRef,
-  MationEmailItem,
-  type MationPublishEmailInput,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
@@ -70,8 +67,8 @@ export class AutomationExecutionService extends Context.Service<
       requestId: string,
       input: MationExecutionInput,
     ) => Effect.Effect<MationExecution, Failure>;
-    readonly publishEmails: (
-      input: MationPublishEmailInput,
+    readonly assertCaller: (
+      requestId: string,
       caller: { threadId: ThreadId; runId: RunId },
     ) => Effect.Effect<void, Failure>;
     readonly proxy: (
@@ -85,10 +82,6 @@ export class AutomationExecutionService extends Context.Service<
     >;
   }
 >()("t3/mation/AutomationExecutionService") {}
-
-const encodeEmailReport = Schema.encodeEffect(
-  Schema.fromJsonString(Schema.Struct({ ref: MationRunRef, items: Schema.Array(MationEmailItem) })),
-);
 
 const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
@@ -261,37 +254,19 @@ const make = Effect.gen(function* () {
       contentType: response.headers["content-type"] ?? "application/octet-stream",
     };
   });
-  const publishEmails = Effect.fn("mation.publishEmails")(function* (
-    input: MationPublishEmailInput,
+  const assertCaller = Effect.fn("mation.assertExecutionCaller")(function* (
+    requestId: string,
     caller: { threadId: ThreadId; runId: RunId },
   ) {
-    const projection = yield* threads
-      .getThreadRecords(caller.threadId, ["messages", "runs"])
-      .pipe(Effect.mapError((cause) => new MationOperationError({ operation: "publish", cause })));
-    const message = projection.messages.find(
-      (message) => message.id === `mation-message:${input.requestId}`,
-    );
-    if (!message || message.runId !== caller.runId)
-      return yield* new MationConflictError({ requestId: input.requestId });
-    const ref = {
-      environmentId: yield* environment.getEnvironmentId,
-      threadId: caller.threadId,
-      runId: caller.runId,
-    };
-    const encoded = yield* encodeEmailReport({ ref, items: input.items }).pipe(
-      Effect.mapError((cause) => new MationOperationError({ operation: "publish", cause })),
-    );
-    const result = yield* proxy(
-      `/api/runs/${encodeURIComponent(input.requestId)}/emails`,
-      "POST",
-      new TextEncoder().encode(encoded),
-      "application/json",
-    );
-    if (result.status !== 200)
-      return yield* new MationOperationError({
-        operation: "publish",
-        cause: new Error(`Mation returned HTTP ${result.status}.`),
-      });
+    const records = yield* threads
+      .getThreadRecords(caller.threadId, ["messages"])
+      .pipe(Effect.mapError((cause) => new MationOperationError({ operation: "read", cause })));
+    if (
+      !records.messages.some(
+        (message) => message.id === `mation-message:${requestId}` && message.runId === caller.runId,
+      )
+    )
+      return yield* new MationConflictError({ requestId });
   });
   const frontend = proxy("/embed.html", "GET").pipe(
     Effect.flatMap((result) =>
@@ -325,12 +300,15 @@ const make = Effect.gen(function* () {
     const pathname = url.pathname;
     const allowed =
       input.method === "GET"
-        ? ["/api/overview", "/api/runs"].includes(pathname ?? "")
+        ? ["/api/overview", "/api/runs", "/api/profiles/pai"].includes(pathname ?? "") ||
+          /^\/api\/email\/reports\/[a-f0-9]{64}$/.test(pathname)
         : input.method === "POST"
           ? pathname === "/api/automations" ||
             /^\/api\/automations\/[^/]+\/runs$/.test(pathname ?? "") ||
-            /^\/api\/emails\/[^/]+\/instructions$/.test(pathname ?? "")
-          : /^\/api\/automations\/[^/]+$/.test(pathname ?? "");
+            /^\/api\/email\/reports\/[a-f0-9]{64}\/actions$/.test(pathname)
+          : pathname === "/api/profiles/pai" || /^\/api\/automations\/[^/]+$/.test(pathname ?? "");
+    if (pathname.startsWith("/api/email/reports/"))
+      url.searchParams.set("environmentId", yield* environment.getEnvironmentId);
     if (!allowed) return yield* new MationConflictError({ requestId: "frontend" });
     const result = yield* proxy(
       url,
@@ -342,11 +320,11 @@ const make = Effect.gen(function* () {
   });
   return AutomationExecutionService.of({
     frontend,
+    assertCaller,
     frontendRequest,
     get,
     start,
     proxy,
-    publishEmails,
     projects: Effect.gen(function* () {
       const inventory = yield* projects.snapshot;
       const catalog = yield* providers.getProviders;

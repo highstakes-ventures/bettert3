@@ -1,3 +1,4 @@
+import { PaiEmailItem } from "./pai.ts";
 import * as Schema from "effect/Schema";
 import {
   EnvironmentId,
@@ -69,18 +70,8 @@ export const MationProjects = Schema.Struct({
   ),
 });
 export type MationProjects = typeof MationProjects.Type;
-export const MationEmailItem = Schema.Struct({
-  mailbox: TrimmedNonEmptyString.check(Schema.isMaxLength(320)),
-  messageId: TrimmedNonEmptyString.check(Schema.isMaxLength(1000)),
-  mailThreadId: TrimmedNonEmptyString.check(Schema.isMaxLength(1000)),
-  sender: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
-  subject: Schema.String.check(Schema.isMaxLength(1000)),
-  summary: TrimmedNonEmptyString.check(Schema.isMaxLength(3000)),
-  receivedAt: IsoDateTime,
-  sourceUrl: TrimmedNonEmptyString.check(
-    Schema.isPattern(/^https:\/\/(mail\.google\.com|outlook\.office\.com|outlook\.live\.com)\//),
-  ),
-});
+// Existing scheduled prompts retain this transport name during PAI cutover.
+export const MationEmailItem = PaiEmailItem;
 export const MationPublishEmailInput = Schema.Struct({
   requestId: MationRequestId,
   items: Schema.Array(MationEmailItem).check(Schema.isMaxLength(200)),

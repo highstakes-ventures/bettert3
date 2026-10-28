@@ -64,7 +64,8 @@ export type T3McpToolSummaryAction =
   | "browser"
   | "device"
   | "html-preview"
-  | "html-render";
+  | "html-render"
+  | "email-review";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -330,6 +331,19 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   ),
   t3_thread_send_attachments: tool(["Send", "Sending", "Sent", "attachments"], "attachment-send"),
   html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
+  pai_email_workflow: tool(["Read", "Reading", "Read", "PAI's email workflow"], "email-review"),
+  pai_publish_email_items: tool(
+    ["Publish", "Publishing", "Published", "an email overview"],
+    "email-review",
+  ),
+  pai_complete_email_action: tool(
+    ["Record", "Recording", "Recorded", "an email result"],
+    "email-review",
+  ),
+  mation_publish_email_items: tool(
+    ["Publish", "Publishing", "Published", "an email overview"],
+    "email-review",
+  ),
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
 };
 

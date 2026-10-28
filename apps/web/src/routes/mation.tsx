@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useEffect, useRef, useState } from "react";
 import { MationFrontendRequest } from "@t3tools/contracts";
@@ -18,6 +18,7 @@ export const Route = createFileRoute("/mation")({
 });
 const decodeRequest = Schema.decodeUnknownOption(MationFrontendRequest);
 function MationPage() {
+  const navigate = useNavigate();
   const environmentId = usePrimaryEnvironmentId();
   const request = useAtomCommand(mationEnvironment.request);
   const frame = useRef<HTMLIFrameElement>(null);
@@ -39,6 +40,29 @@ function MationPage() {
   useEffect(() => {
     if (!environmentId) return;
     const receive = (event: MessageEvent) => {
+      if (
+        event.source === frame.current?.contentWindow &&
+        event.data?.type === "mation:open-draft" &&
+        typeof event.data.prompt === "string" &&
+        event.data.prompt.length > 0 &&
+        event.data.prompt.length <= 8000
+      ) {
+        void navigate({ to: "/new", search: { prompt: event.data.prompt } });
+        return;
+      }
+      if (
+        event.source === frame.current?.contentWindow &&
+        event.data?.type === "mation:open-thread" &&
+        typeof event.data.threadId === "string" &&
+        event.data.threadId.length > 0 &&
+        event.data.threadId.length <= 512
+      ) {
+        void navigate({
+          to: "/$environmentId/$threadId",
+          params: { environmentId, threadId: event.data.threadId },
+        });
+        return;
+      }
       if (
         event.source !== frame.current?.contentWindow ||
         event.data?.type !== "mation:request" ||
@@ -63,7 +87,7 @@ function MationPage() {
     };
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
-  }, [environmentId, request]);
+  }, [environmentId, request, navigate]);
   if (!environmentId || !page || page.environmentId !== environmentId)
     return (
       <div className="p-6 text-muted-foreground" role="status">

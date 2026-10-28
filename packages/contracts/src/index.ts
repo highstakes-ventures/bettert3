@@ -70,3 +70,5 @@ export * from "./secretRequest.ts";
 export * from "./clientRpcPermissions.ts";
 
 export * from "./workflow.ts";
+
+export * from "./pai.ts";

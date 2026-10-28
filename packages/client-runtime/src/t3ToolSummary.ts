@@ -434,6 +434,9 @@ export function summarizeT3ToolCalls(
     case "html-preview":
       label = phrase("Previewed", "preview", quantity(selected.length, "HTML page"));
       break;
+    case "email-review":
+      label = phrase("Updated", "update", `email review ${times}`);
+      break;
     case "html-render":
       label = phrase("Rendered", "render", quantity(selected.length, "HTML page"));
       break;

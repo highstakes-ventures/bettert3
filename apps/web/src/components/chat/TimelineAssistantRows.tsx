@@ -1,3 +1,4 @@
+import { PaiWidgetFrame } from "./PaiWidgetFrame";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { type RunId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
@@ -230,6 +231,23 @@ export function ProposedPlanTimelineRow({
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
         findActive={ctx.findActive}
+      />
+    </div>
+  );
+}
+
+export function PaiWidgetTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "pai-widget" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  return (
+    <div className="min-w-0 px-1">
+      <PaiWidgetFrame
+        key={row.paiWidget.reportId}
+        environmentId={ctx.activeThreadEnvironmentId}
+        widget={row.paiWidget}
       />
     </div>
   );
