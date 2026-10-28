@@ -1851,6 +1851,10 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   latestRunStartedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   latestRunCompletedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   latestRunStopRequested: Schema.optional(Schema.Boolean),
+  /** Sum of settled execution. Null when imported history requires Cloud timing. */
+  completedRunDurationMs: Schema.optional(Schema.NullOr(NonNegativeInt)),
+  /** Provider start of the activity run, without a wake's inherited work start. */
+  activityRunExecutionStartedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   activeRunId: Schema.NullOr(RunId),
   activityRunStartedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   activityRunStatus: Schema.optional(
@@ -2387,6 +2391,7 @@ export const OrchestrationV2ThreadShellJson = OrchestrationV2ThreadShell.mapFiel
   latestRunRequestedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   latestRunStartedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   latestRunCompletedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
+  activityRunExecutionStartedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   activityRunStartedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   pendingRuntimeRequest: Schema.NullOr(OrchestrationV2PendingRuntimeRequestSummaryJson),
   latestVisibleMessage: Schema.NullOr(OrchestrationV2LatestVisibleMessageSummaryJson),
@@ -3591,6 +3596,20 @@ export class OrchestrationV2SearchThreadError extends Schema.TaggedError<Orchest
   }
 }
 
+// Bound RPC codec requirements without expanding every shell field into the handler layer.
+const ShellSnapshotOutput: Schema.Codec<
+  OrchestrationV2ArchivedShellSnapshot,
+  Schema.Codec.Encoded<typeof OrchestrationV2ArchivedShellSnapshot>
+> = OrchestrationV2ArchivedShellSnapshot;
+const ShellStreamOutput: Schema.Codec<
+  OrchestrationV2ShellStreamItem,
+  Schema.Codec.Encoded<typeof OrchestrationV2ShellStreamItem>
+> = OrchestrationV2ShellStreamItem;
+const ArchivedShellStreamOutput: Schema.Codec<
+  OrchestrationV2ArchivedShellStreamItem,
+  Schema.Codec.Encoded<typeof OrchestrationV2ArchivedShellStreamItem>
+> = OrchestrationV2ArchivedShellStreamItem;
+
 export const OrchestrationV2RpcSchemas = {
   searchThread: {
     input: OrchestrationV2SearchThreadInput,
@@ -3610,7 +3629,7 @@ export const OrchestrationV2RpcSchemas = {
   },
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),
-    output: OrchestrationV2ArchivedShellSnapshot,
+    output: ShellSnapshotOutput,
   },
   getThreadProjection: {
     input: OrchestrationV2GetThreadProjectionInput,
@@ -3634,11 +3653,11 @@ export const OrchestrationV2RpcSchemas = {
   },
   subscribeArchivedShell: {
     input: Schema.Struct({}),
-    output: OrchestrationV2ArchivedShellStreamItem,
+    output: ArchivedShellStreamOutput,
   },
   subscribeShell: {
     input: OrchestrationV2SubscribeShellInput,
-    output: OrchestrationV2ShellStreamItem,
+    output: ShellStreamOutput,
   },
   subscribeThread: {
     input: OrchestrationV2SubscribeThreadInput,

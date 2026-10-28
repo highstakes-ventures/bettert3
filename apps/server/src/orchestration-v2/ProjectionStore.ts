@@ -1068,6 +1068,8 @@ type ShellThreadRow = {
   readonly latest_run_started_at: string | null;
   readonly latest_run_completed_at: string | null;
   readonly latest_run_stop_requested: number;
+  readonly completed_run_duration_ms: number | null;
+  readonly activity_run_execution_started_at: string | null;
   readonly active_run_id: string | null;
   readonly active_run_status: string | null;
   readonly activity_run_status: string | null;
@@ -1648,6 +1650,24 @@ export function threadShellFromProjection(
       projection.turnItems.some(
         (item) => item.runId === latestRun.id && item.type === "run_interrupt_request",
       ),
+    // Imported run dates can be ordering fallbacks. Cloud retains timing authority
+    // even after a native run becomes the latest run.
+    completedRunDurationMs: projection.runs.some((run) =>
+      run.id.startsWith(`cloud-run:${projection.thread.id}:`),
+    )
+      ? null
+      : projection.runs.reduce(
+          (total, run) =>
+            run.startedAt !== null && run.completedAt !== null && !isActivityRunForShell(run)
+              ? total +
+                Math.max(
+                  0,
+                  DateTime.toEpochMillis(run.completedAt) - DateTime.toEpochMillis(run.startedAt),
+                )
+              : total,
+          0,
+        ),
+    activityRunExecutionStartedAt: activityRun?.startedAt ?? null,
     activeRunId: activeRun?.id ?? null,
     blockedOnThreadWait: deriveBlockedOnThreadWait({ activeRun, turnItems: projection.turnItems }),
     activityRunStatus: activityRun?.status ?? null,
@@ -1752,6 +1772,8 @@ type ShellThreadState = {
   readonly latestRunStartedAt: DateTime.Utc | null;
   readonly latestRunCompletedAt: DateTime.Utc | null;
   readonly latestRunStopRequested: boolean;
+  readonly completedRunDurationMs: number | null;
+  readonly activityRunExecutionStartedAt: DateTime.Utc | null;
   readonly activeRunId: RunId | null;
   readonly blockedOnThreadWait: boolean;
   readonly activityRunStatus: ShellActivityRunStatus | null;
@@ -1930,6 +1952,8 @@ function shellFromState(input: {
     latestRunStartedAt: input.state.latestRunStartedAt,
     latestRunCompletedAt: input.state.latestRunCompletedAt,
     latestRunStopRequested: input.state.latestRunStopRequested,
+    completedRunDurationMs: input.state.completedRunDurationMs,
+    activityRunExecutionStartedAt: input.state.activityRunExecutionStartedAt,
     activeRunId: input.state.activeRunId,
     blockedOnThreadWait: input.state.blockedOnThreadWait,
     activityRunStatus: input.state.activityRunStatus,
@@ -5756,6 +5780,26 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               active.run_id AS active_run_id,
               active.status AS active_run_status,
               (
+                SELECT CASE
+                  WHEN MAX(instr(r.run_id, 'cloud-run:' || t.thread_id || ':') = 1) = 1 THEN NULL
+                  ELSE COALESCE(SUM(CASE
+                    WHEN r.status NOT IN ('preparing', 'starting', 'running', 'waiting')
+                    THEN MAX(0, CAST(ROUND(
+                      (julianday(r.completed_at) - julianday(json_extract(r.payload_json, '$.startedAt'))) * 86400000
+                    ) AS INTEGER)) ELSE 0 END), 0)
+                END
+                FROM orchestration_v2_projection_runs r
+                WHERE r.thread_id = t.thread_id
+              ) AS completed_run_duration_ms,
+              (
+                SELECT json_extract(r.payload_json, '$.startedAt')
+                FROM orchestration_v2_projection_runs r
+                WHERE r.thread_id = t.thread_id
+                  AND r.status IN ('preparing', 'starting', 'running', 'waiting')
+                ORDER BY r.ordinal DESC, r.run_id DESC
+                LIMIT 1
+              ) AS activity_run_execution_started_at,
+              (
                 SELECT r.status
                 FROM orchestration_v2_projection_runs r
                 WHERE r.thread_id = t.thread_id
@@ -6374,6 +6418,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           latestRunStartedAt,
           latestRunCompletedAt,
           latestRunStopRequested,
+          completedRunDurationMs: row.completed_run_duration_ms,
+          activityRunExecutionStartedAt:
+            row.activity_run_execution_started_at === null
+              ? null
+              : DateTime.makeUnsafe(row.activity_run_execution_started_at),
           activeRunId: row.active_run_id === null ? null : RunId.make(row.active_run_id),
           blockedOnThreadWait: deriveBlockedOnThreadWait({
             activeRun:

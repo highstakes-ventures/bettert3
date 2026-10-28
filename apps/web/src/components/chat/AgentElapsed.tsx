@@ -16,7 +16,7 @@ function formatElapsedSeconds(totalSeconds: number): string {
   return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
-function formatCompactElapsedSeconds(totalSeconds: number): string {
+export function formatCompactElapsedSeconds(totalSeconds: number): string {
   const seconds = Math.max(0, Math.floor(totalSeconds));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -28,9 +28,11 @@ function formatCompactElapsedSeconds(totalSeconds: number): string {
 export function AgentElapsed({
   agent,
   compact = false,
+  elapsedOffsetMs = 0,
 }: {
   agent: Pick<RuntimeSubagent, "status" | "startedAt" | "completedAt">;
   compact?: boolean;
+  elapsedOffsetMs?: number;
 }) {
   const format = compact ? formatCompactElapsedSeconds : formatElapsedSeconds;
   const textRef = useRef<HTMLSpanElement>(null);
@@ -48,7 +50,7 @@ export function AgentElapsed({
           { status: agent.status, startedAt, completedAt },
           Date.now(),
         );
-        const text = elapsedMs === null ? "" : format(elapsedMs / 1000);
+        const text = elapsedMs === null ? "" : format((elapsedMs + elapsedOffsetMs) / 1000);
         if (textRef.current.textContent !== text) textRef.current.textContent = text;
       }
     };
@@ -56,7 +58,7 @@ export function AgentElapsed({
     if (!live) return;
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [live, startedAt, completedAt, agent.status, format]);
+  }, [live, startedAt, completedAt, agent.status, format, elapsedOffsetMs]);
 
   const elapsedMs = deriveSubagentElapsedMs(agent, 0);
   if (elapsedMs === null) {
@@ -64,7 +66,7 @@ export function AgentElapsed({
   }
   return (
     <span ref={textRef} className="tabular-nums">
-      {format(elapsedMs / 1000)}
+      {format((elapsedMs + elapsedOffsetMs) / 1000)}
     </span>
   );
 }

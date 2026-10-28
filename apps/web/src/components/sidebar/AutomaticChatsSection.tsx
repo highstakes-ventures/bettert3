@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useLayoutEffect, useState, type ComponentProps, type ReactNode } from "react";
 import * as DateTime from "effect/DateTime";
-import { deriveSubagentElapsedMs } from "@t3tools/shared/orchestrationTiming";
+import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { cloudChatVisitKey, isUnopenedAutomaticChat } from "../../lib/cloudChatVisits";
 import { cn } from "../../lib/utils";
 import { deriveProjectIdentity } from "../../projectIdentity";
@@ -33,7 +33,7 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useUiStateStore } from "../../uiStateStore";
 import { ProjectMonogram } from "../ProjectMonogram";
 import { executionLocationLabel, ThreadExecutionIcon } from "../ThreadExecutionIcon";
-import { AgentElapsed } from "../chat/AgentElapsed";
+import { AgentElapsed, formatCompactElapsedSeconds } from "../chat/AgentElapsed";
 import {
   hasUnseenCompletion,
   isAutomaticSidebarThread,
@@ -47,7 +47,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 const AUTOMATIC_INITIAL_COUNT = 10;
 const AUTOMATIC_PAGE_COUNT = 25;
 
-type RunTiming = ComponentProps<typeof AgentElapsed>["agent"];
+type RunTiming = { completedMs: number; activeStartedAt: string | null };
 
 function AutomaticOriginIcon({ origin }: { origin: ThreadShell["source"]["automationOrigin"] }) {
   const label =
@@ -77,38 +77,44 @@ function AutomaticOriginIcon({ origin }: { origin: ThreadShell["source"]["automa
 }
 
 function cloudRunTiming(chat: CloudChatSummary): RunTiming | null {
-  const turn = chat.latestTurn;
+  if (chat.completedRunDurationMs == null) return null;
   const running = chat.status === "active";
-  return turn?.startedAt != null && (running || turn.completedAt != null)
-    ? {
-        status: running ? "running" : "completed",
-        startedAt: new Date(turn.startedAt * 1000).toISOString(),
-        completedAt:
-          turn.completedAt != null ? new Date(turn.completedAt * 1000).toISOString() : null,
-      }
-    : null;
+  const start = chat.latestTurn?.startedAt;
+  if (running && start == null) return null;
+  return {
+    completedMs: chat.completedRunDurationMs,
+    activeStartedAt: running && start != null ? new Date(start * 1000).toISOString() : null,
+  };
 }
 
 function AutomaticRunDuration({ elapsed }: { elapsed: RunTiming | null }) {
-  if (!elapsed || elapsed.startedAt === null || deriveSubagentElapsedMs(elapsed, 0) === null)
-    return null;
-  const durationLabel = elapsed.status === "running" ? "Current run duration" : "Last run duration";
+  if (!elapsed) return null;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <span
-            aria-label={durationLabel}
+            aria-label="Total task duration"
             className="inline-flex shrink-0 items-center gap-1 text-xs text-secondary-label"
           />
         }
       >
         <ClockIcon aria-hidden className="size-3" />
-        <AgentElapsed agent={elapsed} compact />
+        {elapsed.activeStartedAt ? (
+          <AgentElapsed
+            agent={{ status: "running", startedAt: elapsed.activeStartedAt, completedAt: null }}
+            elapsedOffsetMs={elapsed.completedMs}
+            compact
+          />
+        ) : (
+          formatCompactElapsedSeconds(elapsed.completedMs / 1000)
+        )}
       </TooltipTrigger>
       <TooltipPopup>
-        {durationLabel} · Started {new Date(elapsed.startedAt).toLocaleString()}
-        {elapsed.completedAt ? ` · Finished ${new Date(elapsed.completedAt).toLocaleString()}` : ""}
+        Total task duration · {formatDuration(elapsed.completedMs)} completed
+        {elapsed.activeStartedAt
+          ? ` · Running since ${new Date(elapsed.activeStartedAt).toLocaleString()}`
+          : ""}
       </TooltipPopup>
     </Tooltip>
   );
@@ -308,29 +314,21 @@ function LocalAutomaticRow({
       params.cloudEnvironmentId === thread.environmentId);
   const source = thread.source;
   const { hasNativeRun, status } = localAutomaticState(thread, enabled, bound, cloudChat);
-  const running = ["preparing", "starting", "running", "waiting"].includes(
-    source.activityRunStatus ?? source.status ?? thread.runtime?.status ?? "",
-  );
-  const startedAt = running
-    ? (source.activityRunStartedAt ?? source.latestRunStartedAt)
-    : source.latestRunStartedAt;
-  // Imported run timestamps may contain ordering fallbacks. The Cloud summary
-  // preserves the actual timing, including unknown values. T3-created runs own theirs.
+  // Imported timestamps may be ordering fallbacks; Cloud owns their measured timing.
   const importedRun = source.latestRunId?.startsWith(`cloud-run:${thread.id}:`) === true;
   const elapsed: RunTiming | null =
-    !hasNativeRun || importedRun
+    !hasNativeRun || importedRun || source.completedRunDurationMs === null
       ? cloudChat
         ? cloudRunTiming(cloudChat)
         : null
-      : startedAt == null
+      : source.completedRunDurationMs == null
         ? null
         : {
-            status: running ? "running" : "completed",
-            startedAt: DateTime.formatIso(startedAt),
-            completedAt:
-              !running && source.latestRunCompletedAt != null
-                ? DateTime.formatIso(source.latestRunCompletedAt)
-                : null,
+            completedMs: source.completedRunDurationMs,
+            activeStartedAt:
+              source.activityRunExecutionStartedAt == null
+                ? null
+                : DateTime.formatIso(source.activityRunExecutionStartedAt),
           };
   // Cloud history proves execution there when an import has no attached native runtime yet.
   const importedCloud =

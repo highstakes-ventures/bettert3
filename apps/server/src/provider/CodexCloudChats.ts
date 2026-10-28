@@ -464,10 +464,12 @@ const make = Effect.gen(function* () {
       ),
     );
   let cachedAccount: string | null = null;
-  const summaries = new Map<
-    string,
-    { title: string; provenance: ReturnType<typeof cloudChatOrigin> }
-  >();
+  type Summary = {
+    title: string;
+    provenance: ReturnType<typeof cloudChatOrigin>;
+    timing?: { totalMs: number; turn: TurnsPage["data"][number] };
+  };
+  const summaries = new Map<string, Summary>();
   return CodexCloudChats.of({
     destinations: (instanceId) => authenticate(null, instanceId).pipe(Effect.flatMap(catalog)),
     openClient: (destination, instanceId, onTermination) =>
@@ -595,7 +597,7 @@ const make = Effect.gen(function* () {
             visible,
             (thread) =>
               Effect.gen(function* () {
-                let summary =
+                let summary: Summary | undefined =
                   thread.threadSource === "user" && thread.name?.trim()
                     ? {
                         title: thread.name.trim(),
@@ -628,9 +630,10 @@ const make = Effect.gen(function* () {
                 }
                 let status = thread.status.type;
                 let latestTurn: CloudChatSummary["latestTurn"];
+                let completedRunDurationMs: number | null = null;
                 if (summary.provenance.origin === "automatic") {
-                  // Cloud's list can say idle while a turn is running. Read only the
-                  // newest turn's metadata, without downloading its tool output.
+                  // Always refresh current activity. Settled turn metadata is reused
+                  // from this account's summary, without downloading tool output.
                   const latest = yield* turns(
                     request,
                     thread.id,
@@ -643,6 +646,70 @@ const make = Effect.gen(function* () {
                   latestTurn = turn
                     ? { startedAt: turn.startedAt ?? null, completedAt: turn.completedAt ?? null }
                     : null;
+                  if (latest._tag === "Success") {
+                    let metadata: TurnsPage | null = latest.success;
+                    let total = 0;
+                    let known = metadata.data.length > 0;
+                    const seen = new Set<string>();
+                    const cursors = new Set<string>();
+                    history: while (metadata !== null) {
+                      for (const item of metadata.data) {
+                        const cached = summary.timing;
+                        if (
+                          cached &&
+                          item.id === cached.turn.id &&
+                          item.status === cached.turn.status &&
+                          item.startedAt === cached.turn.startedAt &&
+                          item.completedAt === cached.turn.completedAt
+                        ) {
+                          total += cached.totalMs;
+                          break history;
+                        }
+                        if (seen.has(item.id)) continue;
+                        seen.add(item.id);
+                        if (item.startedAt == null) {
+                          known = false;
+                          continue;
+                        }
+                        if (item.status === "inProgress") continue;
+                        if (item.completedAt == null) {
+                          known = false;
+                          continue;
+                        }
+                        total += Math.max(
+                          0,
+                          Math.round((item.completedAt - item.startedAt) * 1000),
+                        );
+                      }
+                      const cursor: string | null = metadata.nextCursor;
+                      if (cursor === null) break;
+                      if (cursors.has(cursor)) {
+                        known = false;
+                        break;
+                      }
+                      cursors.add(cursor);
+                      const older: TurnsPage | null = yield* turns(
+                        request,
+                        thread.id,
+                        100,
+                        cursor,
+                        "desc",
+                        "notLoaded",
+                      ).pipe(Effect.orElseSucceed(() => null));
+                      metadata = older;
+                      if (metadata === null) known = false;
+                    }
+                    completedRunDurationMs = known ? total : null;
+                    if (
+                      known &&
+                      turn &&
+                      turn.status !== "inProgress" &&
+                      cachedAccount === accountSummaries
+                    ) {
+                      summary.timing = { totalMs: total, turn };
+                      summaries.set(thread.id, summary);
+                    }
+                  }
                   const turnStatus = turn?.status;
                   status =
                     turnStatus === "inProgress"
@@ -663,7 +730,7 @@ const make = Effect.gen(function* () {
                   origin: summary.provenance.origin,
                   repository: summary.provenance.repository,
                   githubRunUrl: summary.provenance.githubRunUrl,
-                  ...(latestTurn !== undefined ? { latestTurn } : {}),
+                  ...(latestTurn !== undefined ? { latestTurn, completedRunDurationMs } : {}),
                 };
               }),
             { concurrency: 4 },

@@ -30,6 +30,8 @@ export const CloudChatSummary = Schema.Struct({
   origin: Schema.Literals(["user", "automatic", "unknown"]),
   repository: Schema.NullOr(Schema.String),
   githubRunUrl: Schema.NullOr(Schema.String),
+  /** Total duration of settled turns, absent when complete timing is unavailable. */
+  completedRunDurationMs: Schema.optional(Schema.NullOr(Schema.Number)),
   latestTurn: Schema.optional(
     Schema.NullOr(
       Schema.Struct({

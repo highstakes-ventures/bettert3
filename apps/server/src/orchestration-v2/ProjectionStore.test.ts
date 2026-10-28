@@ -1159,6 +1159,94 @@ it.effect.each([
     }).pipe(Effect.provide(layer)),
 );
 
+it.effect.each([
+  { name: "memory", layer: ProjectionStore.layerMemory },
+  { name: "SQL", layer: layerTest },
+] as const)(
+  "$name shells total all executed runs without idle gaps or wake overlap",
+  ({ name, layer }) =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = yield* addRolledBackRecoveryCandidate(`total-time-${name}`);
+      const original = (yield* store.getThreadProjection(threadId)).runs[0]!;
+      const start = DateTime.makeUnsafe("2026-10-27T20:00:00.000Z");
+      let total = 0;
+      for (const [index, duration] of [85_000, 127_000, 21_000, 24_561].entries()) {
+        const startedAt = DateTime.add(start, { milliseconds: index * 600_000 });
+        const run = {
+          ...original,
+          id: index === 0 ? original.id : RunId.make(`run:total-${name}:${index}`),
+          ordinal: index + 1,
+          requestedAt: startedAt,
+          startedAt,
+          workStartedAt: start,
+        };
+        for (const status of ["running", "completed"] as const) {
+          const completedAt =
+            status === "completed" ? DateTime.add(startedAt, { milliseconds: duration }) : null;
+          yield* store.apply({
+            id: EventId.make(`event:total-${name}:${index}:${status}`),
+            type: "run.updated",
+            threadId,
+            occurredAt: completedAt ?? startedAt,
+            payload: { ...run, status, completedAt },
+          });
+          if (completedAt) total += duration;
+          for (const shell of [
+            yield* store.getThreadShell(threadId),
+            (yield* store.getShellSnapshot()).threads.find((thread) => thread.id === threadId),
+          ]) {
+            assert.equal(shell?.completedRunDurationMs, total);
+            assert.equal(
+              shell?.activityRunExecutionStartedAt == null
+                ? null
+                : DateTime.toEpochMillis(shell.activityRunExecutionStartedAt),
+              status === "running" ? DateTime.toEpochMillis(startedAt) : null,
+            );
+          }
+        }
+      }
+      assert.equal(total, 257_561);
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect.each([
+  { name: "memory", layer: ProjectionStore.layerMemory },
+  { name: "SQL", layer: layerTest },
+] as const)("$name leaves imported totals unknown after a native follow-up", ({ name, layer }) =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = yield* addRolledBackRecoveryCandidate(`imported-timing-${name}`);
+    const original = (yield* store.getThreadProjection(threadId)).runs[0]!;
+    const start = DateTime.makeUnsafe("2026-10-27T20:00:00Z");
+    for (const imported of [true, false]) {
+      const run = {
+        ...original,
+        id: RunId.make(imported ? `cloud-run:${threadId}:unknown-time` : `run:native:${name}`),
+        ordinal: imported ? 2 : 3,
+        status: "completed" as const,
+        requestedAt: start,
+        // Cloud import uses thread creation as an ordering fallback when execution time is absent.
+        startedAt: start,
+        completedAt: DateTime.add(start, { seconds: imported ? 600 : 25 }),
+      };
+      yield* store.apply({
+        id: EventId.make(`event:imported-timing-${name}:${imported}`),
+        type: "run.updated",
+        threadId,
+        occurredAt: run.completedAt,
+        payload: run,
+      });
+      for (const shell of [
+        yield* store.getThreadShell(threadId),
+        (yield* store.getShellSnapshot()).threads.find((row) => row.id === threadId),
+      ]) {
+        assert.isNull(shell?.completedRunDurationMs);
+      }
+    }
+  }).pipe(Effect.provide(layer)),
+);
+
 const assertExecutionDestinationShell = Effect.gen(function* () {
   const store = yield* ProjectionStore.ProjectionStoreV2;
   const threadId = yield* addRolledBackRecoveryCandidate("execution-destination");

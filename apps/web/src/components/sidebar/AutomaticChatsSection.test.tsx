@@ -35,6 +35,8 @@ const state = vi.hoisted(() => ({
       status?: string;
       activityRunStatus?: string | null;
       activityRunStartedAt?: DateTime.Utc | null;
+      activityRunExecutionStartedAt?: DateTime.Utc | null;
+      completedRunDurationMs?: number | null;
       latestRunStartedAt?: DateTime.Utc | null;
       latestRunCompletedAt?: DateTime.Utc | null;
       scheduledTaskId?: string;
@@ -345,7 +347,7 @@ it("keeps an imported automatic chat visible on its normal thread route within t
   expect(container.textContent).not.toContain("automatic-39");
 });
 
-it("uses the latest run's timestamps for elapsed time and freezes completed runs", async () => {
+it("adds Cloud execution to completed work and freezes the total when settled", async () => {
   vi.useFakeTimers();
   try {
     vi.setSystemTime(new Date("2026-10-26T12:02:00Z"));
@@ -354,27 +356,29 @@ it("uses the latest run's timestamps for elapsed time and freezes completed runs
       {
         ...chat("timed"),
         createdAt: startedAt - 86400,
+        completedRunDurationMs: 0,
         latestTurn: { startedAt, completedAt: null },
       },
     ];
     await render(true);
     const row = container.querySelector("a")!;
     expect(row.querySelector('[aria-label="Codex Cloud"]')).not.toBeNull();
-    expect(row.querySelector('[aria-label="Current run duration"]')?.textContent).toBe("2m");
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("2m");
     await act(() => vi.advanceTimersByTime(60_000));
-    expect(row.querySelector('[aria-label="Current run duration"]')?.textContent).toBe("3m");
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("3m");
 
     state.chats = [
       {
         ...state.chats[0]!,
         status: "idle",
         latestTurn: { startedAt, completedAt: startedAt + 150 },
+        completedRunDurationMs: 150_000,
       },
     ];
     await render(true);
-    expect(row.querySelector('[aria-label="Last run duration"]')?.textContent).toBe("2m");
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("2m");
     await act(() => vi.advanceTimersByTime(60_000));
-    expect(row.querySelector('[aria-label="Last run duration"]')?.textContent).toBe("2m");
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("2m");
   } finally {
     vi.useRealTimers();
   }
@@ -390,7 +394,7 @@ it.each([
   await render(true);
   const row = container.querySelector("a")!;
   expect(row.querySelector('[aria-label="Codex Cloud"]')).not.toBeNull();
-  expect(row.querySelector('[aria-label$="run duration"]')).toBeNull();
+  expect(row.querySelector('[aria-label="Total task duration"]')).toBeNull();
 });
 
 const localVisitKey = (environmentId: string, threadId: string) =>
@@ -721,7 +725,7 @@ it("includes recorded scans and automatic origins without exposing ticket prepar
   const legacy = container.querySelector('a[href="/env/legacy"]')!;
   expect(legacy.querySelector('[aria-label="Origin unknown"]')).not.toBeNull();
   expect(legacy.querySelector('[aria-label="Execution location unknown"]')).not.toBeNull();
-  expect(legacy.querySelector('[aria-label$="run duration"]')).toBeNull();
+  expect(legacy.querySelector('[aria-label="Total task duration"]')).toBeNull();
 });
 
 it("uses native provenance once for a matching automatic Cloud chat and isolates account and environment", async () => {
@@ -792,14 +796,16 @@ it("times native runs from recorded execution and freezes completed scans instea
           executionDestination: null,
           activityRunStatus: "running",
           activityRunStartedAt: startedAt,
+          activityRunExecutionStartedAt: startedAt,
+          completedRunDurationMs: 0,
         },
       },
     ];
     await render(true);
     const row = container.querySelector("a")!;
-    expect(row.querySelector('[aria-label="Current run duration"]')?.textContent).toBe("2m");
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("2m");
     await act(() => vi.advanceTimersByTime(60_000));
-    expect(row.querySelector('[aria-label="Current run duration"]')?.textContent).toBe("3m");
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("3m");
     state.threads[0] = {
       ...state.threads[0]!,
       runtime: { status: "completed" },
@@ -809,12 +815,13 @@ it("times native runs from recorded execution and freezes completed scans instea
         status: "completed",
         latestRunStartedAt: startedAt,
         latestRunCompletedAt: DateTime.makeUnsafe("2026-10-26T12:02:30Z"),
+        completedRunDurationMs: 150_000,
       },
     };
     await render(true);
-    expect(row.querySelector('[aria-label="Last run duration"]')?.textContent).toBe("2m");
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("2m");
     await act(() => vi.advanceTimersByTime(60_000));
-    expect(row.querySelector('[aria-label="Last run duration"]')?.textContent).toBe("2m");
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("2m");
   } finally {
     vi.useRealTimers();
   }
@@ -859,7 +866,7 @@ it.each([
   async ({ status, latestTurn, runStatus }) => {
     state.chats = [{ ...chat("untimed-import"), status, latestTurn }];
     await render(true);
-    expect(container.querySelector('[aria-label$="run duration"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Total task duration"]')).toBeNull();
     // CloudThreadService uses these fallback timestamps to order imported records.
     // Their presence must not turn an unknown runtime into a measurement.
     const fallbackStart = DateTime.makeUnsafe(100_000);
@@ -884,20 +891,72 @@ it.each([
     await render(true);
     expect(container.querySelectorAll("a")).toHaveLength(1);
     expect(container.querySelector("a")?.getAttribute("href")).toBe("/env/imported-untimed");
-    expect(container.querySelector('[aria-label$="run duration"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Total task duration"]')).toBeNull();
     state.cloudError = "Cloud unavailable";
     await render(true);
     expect(container.querySelectorAll("a")).toHaveLength(1);
-    expect(container.querySelector('[aria-label$="run duration"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Total task duration"]')).toBeNull();
     state.cloudError = null;
+    state.threads[0]!.source = {
+      ...state.threads[0]!.source,
+      latestRunId: "run:native-follow-up",
+      status: "completed",
+      completedRunDurationMs: null,
+      activityRunStartedAt: null,
+      latestRunStartedAt: DateTime.makeUnsafe(600_000),
+      latestRunCompletedAt: DateTime.makeUnsafe(625_000),
+    };
+    await render(true);
+    expect(container.querySelector('[aria-label="Total task duration"]')).toBeNull();
     state.chats = [
       {
         ...chat("untimed-import"),
         status: "idle",
         latestTurn: { startedAt: 100, completedAt: 220 },
+        completedRunDurationMs: 120_000,
       },
     ];
     await render(true);
-    expect(container.querySelector('[aria-label="Last run duration"]')?.textContent).toBe("2m");
+    expect(container.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("2m");
   },
 );
+
+it("keeps completed work in the task clock while another reply runs and after it finishes", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-10-26T12:00:24.561Z"));
+    state.chats = [];
+    const startedAt = DateTime.makeUnsafe("2026-10-26T12:00:00Z");
+    state.threads = [
+      {
+        ...localThread("total-task"),
+        source: {
+          automationOrigin: "t3",
+          status: "running",
+          activityRunStatus: "running",
+          activityRunStartedAt: DateTime.makeUnsafe("2026-10-26T11:00:00Z"),
+          activityRunExecutionStartedAt: startedAt,
+          latestRunStartedAt: startedAt,
+          completedRunDurationMs: 233_000,
+        },
+      },
+    ];
+    await render(true);
+    const row = container.querySelector("a")!;
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("4m");
+    await act(() => vi.advanceTimersByTime(60_000));
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("5m");
+    state.threads[0]!.source = {
+      automationOrigin: "t3",
+      status: "completed",
+      latestRunStartedAt: startedAt,
+      latestRunCompletedAt: DateTime.makeUnsafe("2026-10-26T12:01:24.561Z"),
+      completedRunDurationMs: 317_561,
+    };
+    await render(true);
+    await act(() => vi.advanceTimersByTime(3_600_000));
+    expect(row.querySelector('[aria-label="Total task duration"]')?.textContent).toBe("5m");
+  } finally {
+    vi.useRealTimers();
+  }
+});
