@@ -417,7 +417,11 @@ const localThread = (id: string, environmentId = "env") => ({
 it("counts unopened local tasks and completions since the authoritative visit", async () => {
   state.chats = [];
   state.threads = [
-    { ...localThread("fresh"), lastVisitedAt: null, source: { scheduledTaskId: "hook" } },
+    {
+      ...localThread("fresh"),
+      lastVisitedAt: null,
+      source: { automationOrigin: null, scheduledTaskId: "hook" },
+    },
     {
       ...localThread("completed"),
       source: { automationOrigin: "t3" },
@@ -613,7 +617,11 @@ it("keeps legacy imported Cloud visits read through a failed refresh and recover
 it("uses scoped browser visits for local tasks on older servers", async () => {
   state.chats = [];
   state.threads = [
-    { ...localThread("legacy"), lastVisitedAt: undefined, source: { scheduledTaskId: "hook" } },
+    {
+      ...localThread("legacy"),
+      lastVisitedAt: undefined,
+      source: { automationOrigin: null, scheduledTaskId: "hook" },
+    },
   ];
   const otherKey = localVisitKey("other-env", "legacy");
   useUiStateStore.setState({ threadLastVisitedAtById: { [otherKey]: "2026-10-15T08:00:00Z" } });
@@ -631,11 +639,31 @@ it("uses scoped browser visits for local tasks on older servers", async () => {
   expect(visits[otherKey]).toBe("2026-10-15T08:00:00Z");
 });
 
+it("keeps manual chats out of Automatic before and after their timer fires", async () => {
+  state.chats = [];
+  state.threads = [
+    localThread("before-wake"),
+    { ...localThread("after-wake"), source: { scheduledTaskId: "follow-up" } },
+  ];
+  for (const enabled of [true, false]) {
+    state.tasks = state.threads.map((thread) => ({ threadId: thread.id, enabled }));
+    await render(true);
+    expect(container.querySelectorAll("a")).toHaveLength(0);
+  }
+  state.tasks = [];
+  await render(true);
+  expect(container.querySelectorAll("a")).toHaveLength(0);
+});
+
 it("keeps paused and running local workflows visible when Cloud fails and isolates environments", async () => {
   state.cloudError = "Cloud unavailable";
   state.threads = [
-    localThread("paused"),
-    { ...localThread("running"), runtime: { status: "running" } },
+    { ...localThread("paused"), source: { automationOrigin: "t3" } },
+    {
+      ...localThread("running"),
+      source: { automationOrigin: "t3" },
+      runtime: { status: "running" },
+    },
     localThread("other", "other-env"),
     { ...localThread("archived"), archivedAt: "2026-10-26T13:00:00Z" },
     localThread("manual"),
@@ -660,7 +688,10 @@ it("keeps paused and running local workflows visible when Cloud fails and isolat
 
 it("keeps the selected local workflow visible beyond the first page in its own environment", async () => {
   state.chats = [];
-  state.threads = Array.from({ length: 40 }, (_, index) => localThread(`workflow-${index}`));
+  state.threads = Array.from({ length: 40 }, (_, index) => ({
+    ...localThread(`workflow-${index}`),
+    source: { automationOrigin: "t3" },
+  }));
   state.tasks = state.threads.map((thread) => ({ threadId: thread.id, enabled: true }));
   state.params = { threadId: "workflow-39", environmentId: "env" };
   await render(true);
@@ -678,13 +709,19 @@ it("keeps the selected local workflow visible beyond the first page in its own e
 it("keeps fresh webhook workers in Automatic after the task is disabled or removed", async () => {
   state.chats = [];
   state.threads = [
-    { ...localThread("fresh"), source: { scheduledTaskId: "webhook" } },
+    {
+      ...localThread("fresh"),
+      source: { automationOrigin: "external", scheduledTaskId: "webhook" },
+    },
     {
       ...localThread("active"),
-      source: { scheduledTaskId: "webhook" },
+      source: { automationOrigin: "external", scheduledTaskId: "webhook" },
       runtime: { status: "running" },
     },
-    { ...localThread("other", "other-env"), source: { scheduledTaskId: "webhook" } },
+    {
+      ...localThread("other", "other-env"),
+      source: { automationOrigin: "external", scheduledTaskId: "webhook" },
+    },
     localThread("manual"),
   ];
   state.tasks = [];
@@ -712,7 +749,7 @@ it("includes recorded scans and automatic origins without exposing ticket prepar
     },
     { ...localThread("refining"), source: { automationOrigin: "t3", ticketWorkflowId: "ticket" } },
     { ...localThread("crm"), source: { automationOrigin: "external", executionDestination: null } },
-    { ...localThread("legacy"), source: { scheduledTaskId: "old-hook" } },
+    { ...localThread("legacy"), source: { automationOrigin: null, scheduledTaskId: "old-hook" } },
     localThread("manual"),
   ];
   await render(true);

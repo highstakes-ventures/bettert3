@@ -1156,6 +1156,12 @@ it.effect.each([
         yield* store.getThreadProjection(threadId),
       );
       assert.equal(projected.scheduledTaskId, "scheduled-task:webhook");
+      assert.isUndefined(projected.automationOrigin);
+      assert.isUndefined((yield* store.getThreadShell(threadId))?.automationOrigin);
+      assert.isUndefined(
+        (yield* store.getShellSnapshot()).threads.find((thread) => thread.id === threadId)
+          ?.automationOrigin,
+      );
     }).pipe(Effect.provide(layer)),
 );
 

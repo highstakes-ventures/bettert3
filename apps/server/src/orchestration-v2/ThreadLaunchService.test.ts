@@ -395,9 +395,9 @@ it.effect.each(
       const projection = yield* threads.getThreadProjection(thread!.id);
       const wire = yield* encodeThreadProjection(projection);
       assert.equal(wire.thread.automationOrigin, target === "new" ? "t3" : undefined);
-      assert.equal(
+      assert.strictEqual(
         (yield* threads.getThreadShell(thread!.id))?.automationOrigin,
-        target === "new" ? "t3" : null,
+        target === "new" ? "t3" : undefined,
       );
       assert.equal(wire.messages[0]?.text, task.prompt);
       assert.equal(wire.messages[0]?.scheduledTaskId, task.id);

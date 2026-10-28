@@ -540,18 +540,15 @@ export function resolveSidebarRowThreadId(
   return thread?.id ?? threadId;
 }
 
-export function isAutomaticSidebarThread(
-  thread: { readonly source?: SidebarThreadSummary["source"] },
-  boundToScheduledTask: boolean,
-): boolean {
+export function isAutomaticSidebarThread(thread: {
+  readonly source?: SidebarThreadSummary["source"];
+}): boolean {
   const source = thread.source;
   return (
     source?.ticketWorkflowId === undefined &&
     (source?.automationOrigin !== undefined ||
       source?.backgroundWorkflowId !== undefined ||
-      source?.runDestination?.origin === "automatic" ||
-      source?.scheduledTaskId !== undefined ||
-      boundToScheduledTask)
+      source?.runDestination?.origin === "automatic")
   );
 }
 
@@ -577,10 +574,7 @@ export function filterSidebarV2VisibleThreads<
       !(
         automatic !== undefined &&
         thread.environmentId === automatic.environmentId &&
-        isAutomaticSidebarThread(
-          thread,
-          automatic.tasks.some((task) => task.threadId === thread.id),
-        )
+        isAutomaticSidebarThread(thread)
       ) &&
       !isSidebarSubagentThread(thread) &&
       (scopedProjectKeys === null ||

@@ -492,10 +492,7 @@ export function AutomaticChatsSection({
       (thread) =>
         thread.environmentId === environmentId &&
         thread.archivedAt === null &&
-        isAutomaticSidebarThread(
-          thread,
-          localTasks.some((task) => task.threadId === thread.id),
-        ),
+        isAutomaticSidebarThread(thread),
     )
     .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const data = query.data;
