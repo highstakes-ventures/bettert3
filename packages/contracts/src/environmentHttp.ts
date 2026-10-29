@@ -1,3 +1,10 @@
+import {
+  ExecutionCapabilities,
+  ExecutionLookup,
+  ExecutionRequestInput,
+  ExecutionRequestParams,
+  ExecutionResult,
+} from "./executionRequest.ts";
 import { PaiWidgetPage, PaiWidgetRequest, PaiWidgetResponse } from "./pai.ts";
 import * as Context from "effect/Context";
 import type * as DateTime from "effect/DateTime";
@@ -852,6 +859,37 @@ class EnvironmentWebhooksHttpApi extends HttpApiGroup.make("webhooks")
   .add(HttpApiEndpoint.put("webhookPut", WEBHOOK_PATH, webhookEndpoint))
   .add(HttpApiEndpoint.patch("webhookPatch", WEBHOOK_PATH, webhookEndpoint))
   .add(HttpApiEndpoint.get("webhookGet", WEBHOOK_PATH, webhookEndpoint)) {}
+
+class EnvironmentExecutionsHttpApi extends HttpApiGroup.make("executions")
+  .add(
+    HttpApiEndpoint.get("capabilities", "/api/executions/capabilities", {
+      headers: OptionalBearerHeaders,
+      success: ExecutionCapabilities,
+      error: EnvironmentOrchestrationThreadSnapshotErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("get", "/api/executions/:commandId", {
+      headers: OptionalBearerHeaders,
+      params: ExecutionRequestParams,
+      query: ExecutionLookup,
+      success: ExecutionResult,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.put("start", "/api/executions/:commandId", {
+      headers: OptionalBearerHeaders,
+      params: ExecutionRequestParams,
+      payload: ExecutionRequestInput,
+      success: ExecutionResult,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
+export class ExecutionHttpApi extends HttpApi.make("executions").add(
+  EnvironmentExecutionsHttpApi,
+) {}
 
 class EnvironmentMationHttpApi extends HttpApiGroup.make("mation")
   .add(

@@ -1,3 +1,4 @@
+import * as ExecutionRequestService from "./ExecutionRequestService.ts";
 import * as PaiService from "../pai/PaiService.ts";
 import * as Effect from "effect/Effect";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -289,15 +290,19 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
 const layerThreadLifecycleProvided = ThreadLifecycleService.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
 );
-const layerMationProvided = AutomationExecutionService.layer.pipe(
+const layerExecutionRequestsProvided = ExecutionRequestService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       layerProjectService,
       layerThreadLaunchProvided,
       layerThreadManagementProvided,
       layerCommandReceiptStoreProvided,
+      layerEventStoreProvided,
     ),
   ),
+);
+const layerMationProvided = AutomationExecutionService.layer.pipe(
+  Layer.provide(layerExecutionRequestsProvided),
 );
 const layerSecretRequestsProvided = SecretRequests.layer.pipe(
   Layer.provide(layerThreadManagementProvided),
@@ -415,6 +420,7 @@ export const layerProduction = Layer.mergeAll(
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
   layerThreadLifecycleProvided,
+  layerExecutionRequestsProvided,
   layerMationProvided,
   PaiService.layer.pipe(Layer.provide(layerMationProvided)),
   layerScheduledTaskProvided,

@@ -1,7 +1,14 @@
 import { NodeHttpPlatform } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, expect } from "@effect/vitest";
-import { AuthSessionId, EnvironmentHttpApi } from "@t3tools/contracts";
+import {
+  AuthSessionId,
+  CommandId,
+  EnvironmentId,
+  RunId,
+  EnvironmentHttpApi,
+  ExecutionHttpApi,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as HttpApi from "effect/http-api/HttpApi";
@@ -10,14 +17,41 @@ import { HttpRouter } from "effect/http";
 import * as Etag from "effect/http/Etag";
 import * as Auth from "../auth/EnvironmentAuth.ts";
 import * as AuthHttp from "../auth/http.ts";
+import * as Requests from "../orchestration-v2/ExecutionRequestService.ts";
+import * as RequestsHttp from "../orchestration-v2/executionRequestsHttp.ts";
 import * as Execution from "./AutomationExecutionService.ts";
 import { layer } from "./http.ts";
 
 class MationTestApi extends HttpApi.make("environment").add(EnvironmentHttpApi.groups.mation) {}
-it("Mation's frontend requests use the destination environment's authenticated scope", async () => {
+it("Mation frontend requests and generic executions enforce the destination environment scopes", async () => {
   const forwarded: string[] = [];
   const routes = HttpApiBuilder.layer(MationTestApi).pipe(
     Layer.provide(layer),
+    Layer.merge(HttpApiBuilder.layer(ExecutionHttpApi).pipe(Layer.provide(RequestsHttp.layer))),
+    Layer.provide(
+      Layer.mock(Requests.ExecutionRequestService)({
+        get: () =>
+          Effect.fail(
+            new Requests.ExecutionNotFoundError({ commandId: CommandId.make("fixture") }),
+          ),
+        start: (commandId, input) =>
+          Effect.sync(() => {
+            forwarded.push(`PUT ${commandId} ${input.messageId}`);
+            return {
+              ref: {
+                environmentId: EnvironmentId.make("env"),
+                threadId: input.threadId,
+                runId: RunId.make("run"),
+              },
+              status: "queued",
+              startedAt: null,
+              completedAt: null,
+              worktreePath: null,
+              branch: null,
+            } as const;
+          }),
+      }),
+    ),
     Layer.provide(AuthHttp.layerAuthenticatedAuth),
     Layer.provide(
       Layer.mock(Auth.EnvironmentAuth)({
@@ -72,6 +106,37 @@ it("Mation's frontend requests use the destination environment's authenticated s
     expect((await request("POST", "operator")).status).toBe(200);
     expect((await request("GET", "invalid")).status).toBe(401);
     expect(forwarded).toEqual(["GET automations", "POST automations"]);
+    const executionRequest = (token: string) =>
+      handler(
+        new Request("http://t3.test/api/executions/caller%3Asubmission", {
+          method: "PUT",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({
+            threadId: "thread",
+            messageId: "message",
+            title: "Request",
+            prompt: "Read only",
+            target: {
+              projectId: "project",
+              threadId: null,
+              workspaceStrategy: { type: "root" },
+              modelSelection: { instanceId: "codex", model: "test" },
+              runtimeMode: "auto",
+              interactionMode: "default",
+            },
+          }),
+        }),
+      );
+    expect((await executionRequest("reader")).status).toBe(403);
+    expect((await executionRequest("operator")).status).toBe(200);
+    expect((await executionRequest("invalid")).status).toBe(401);
+    expect(forwarded.at(-1)).toBe("PUT caller:submission message");
+    const lookup =
+      "http://t3.test/api/executions/caller%3Amissing?projectId=project&threadId=thread&messageId=message";
+    expect(
+      (await handler(new Request(lookup, { headers: { authorization: "Bearer reader" } }))).status,
+    ).toBe(404);
+    expect((await handler(new Request(lookup))).status).toBe(401);
   } finally {
     await dispose();
   }

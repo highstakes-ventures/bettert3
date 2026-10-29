@@ -1,3 +1,5 @@
+import * as Events from "./EventStore.ts";
+import * as ExecutionRequests from "./ExecutionRequestService.ts";
 import { EventId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as MationExecution from "../mation/AutomationExecutionService.ts";
@@ -2943,6 +2945,7 @@ it.effect(
   () => {
     const harness = makeHarness({ adapters: [adapter, claudeAdapter] });
     const layerMation = MationExecution.layer.pipe(
+      Layer.provide(ExecutionRequests.layer.pipe(Layer.provide(Events.layer))),
       Layer.provide(Layer.succeed(HostProcess.Environment, {})),
       Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(harness.layer))),
       Layer.provide(harness.layer),
@@ -3016,21 +3019,106 @@ it.effect(
         })
         .pipe(Effect.flip);
       assert.equal(publish._tag, "MationConflictError");
-      for (const path of [
-        "runs/another-run/emails",
-        "t3/tasks/upsert",
-        "automations/..\\runs\\00000000-0000-4000-8000-000000000001\\emails#/runs",
-        "automations/%2e%2e/runs/00000000-0000-4000-8000-000000000001/emails?x=/runs",
-        "automations/%2e%2e%5cruns%5c00000000-0000-4000-8000-000000000001%5cemails#/runs",
-        "automations/%2e%2e/overview",
-        "automations/../overview",
-        "automations/id%2fruns/runs",
-      ]) {
-        const forbidden = yield* mation
-          .frontendRequest({ path, method: "POST", body: "{}" })
-          .pipe(Effect.flip);
-        assert.equal(forbidden._tag, "MationConflictError", path);
-      }
     }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerMation)));
+  },
+);
+
+it.effect(
+  "generic execution replays caller-owned persisted identities without a replacement run",
+  () => {
+    const harness = makeHarness();
+    const requests = ExecutionRequests.layer.pipe(
+      Layer.provide(Events.layer),
+      Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(harness.layer))),
+      Layer.provide(harness.layer),
+      Layer.provide(
+        Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+          getEnvironmentId: Effect.succeed(EnvironmentId.make("execution-test")),
+        }),
+      ),
+    );
+    return Effect.gen(function* () {
+      const execution = yield* ExecutionRequests.ExecutionRequestService;
+      const launch = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const commandId = CommandId.make("mation:28a58566-9311-44b7-bd60-93a5374d05e8");
+      const threadId = ThreadId.make("mation-28a58566-9311-44b7-bd60-93a5374d05e8");
+      const messageId = MessageId.make("mation-message:28a58566-9311-44b7-bd60-93a5374d05e8");
+      const target = {
+        projectId,
+        threadId: null,
+        modelSelection,
+        runtimeMode: "auto" as const,
+        interactionMode: "default" as const,
+        workspaceStrategy: { type: "root" as const },
+      };
+      // This execution predates the generic request service, as an already-accepted client launch.
+      yield* launch.launch({
+        commandId,
+        threadId,
+        projectId,
+        title: "Existing execution",
+        modelSelection,
+        runtimeMode: "auto",
+        interactionMode: "default",
+        workspaceStrategy: { type: "root" },
+        initialMessage: { messageId, text: "Read the existing instructions", attachments: [] },
+        createdBy: "system",
+        creationSource: "server",
+      });
+      const lookup = { projectId, threadId, messageId };
+      const accepted = yield* execution.get(commandId, lookup);
+      const input = {
+        title: "Existing execution",
+        prompt: "Read the existing instructions",
+        target,
+        threadId,
+        messageId,
+      };
+      const replay = yield* execution.start(commandId, input);
+      assert.deepEqual(replay.ref, accepted.ref);
+      assert.equal((yield* threads.getThreadProjection(threadId)).messages.length, 1);
+      assert.equal((yield* threads.getThreadProjection(threadId)).runs.length, 1);
+      const nextId = CommandId.make("another-client:request-two");
+      const nextMessage = MessageId.make("another-client:message-two");
+      const next = {
+        ...input,
+        messageId: nextMessage,
+        prompt: "Continue in this chat",
+        target: { ...target, threadId },
+      };
+      const continued = yield* execution.start(nextId, next);
+      assert.deepEqual((yield* execution.start(nextId, next)).ref, continued.ref);
+      assert.equal(continued.ref.threadId, threadId);
+      assert.notEqual(continued.ref.runId, accepted.ref.runId);
+      assert.deepEqual((yield* execution.get(commandId, lookup)).ref, accepted.ref);
+      const conflict = yield* execution
+        .start(commandId, { ...input, prompt: "A different payload" })
+        .pipe(Effect.flip);
+      assert.equal(conflict._tag, "ExecutionConflictError");
+      const wrongProject = yield* execution
+        .get(commandId, { ...lookup, projectId: ProjectId.make("other-project") })
+        .pipe(Effect.flip);
+      assert.equal(wrongProject._tag, "ExecutionConflictError");
+      yield* execution.assertCaller(messageId, { threadId, runId: accepted.ref.runId });
+      const wrongRun = yield* execution
+        .assertCaller(messageId, { threadId, runId: continued.ref.runId })
+        .pipe(Effect.flip);
+      assert.equal(wrongRun._tag, "ExecutionConflictError");
+      const projection = yield* threads.getThreadProjection(threadId);
+      assert.equal(projection.messages.length, 2);
+      assert.equal(projection.runs.length, 2);
+      const changedIdentity = yield* execution
+        .get(commandId, { ...lookup, messageId: nextMessage })
+        .pipe(Effect.flip);
+      assert.equal(changedIdentity._tag, "ExecutionConflictError");
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`DELETE FROM orchestration_v2_projection_messages WHERE message_id = ${messageId}`;
+      const missing = yield* execution.get(commandId, lookup).pipe(Effect.flip);
+      assert.equal(missing._tag, "ExecutionConflictError");
+      const missingReplay = yield* execution.start(commandId, input).pipe(Effect.flip);
+      assert.equal(missingReplay._tag, "ExecutionConflictError");
+      assert.equal((yield* threads.getThreadProjection(threadId)).runs.length, 2);
+    }).pipe(Effect.provide(Layer.mergeAll(harness.layer, requests)));
   },
 );

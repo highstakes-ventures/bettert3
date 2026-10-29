@@ -28,6 +28,7 @@ export const MationExecutionTarget = Schema.Struct({
 });
 export type MationExecutionTarget = typeof MationExecutionTarget.Type;
 export const MationExecutionInput = Schema.Struct({
+  foreground: Schema.optional(Schema.Boolean),
   title: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(120_000)),
   target: MationExecutionTarget,

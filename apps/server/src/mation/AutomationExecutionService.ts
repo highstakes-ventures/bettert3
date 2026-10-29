@@ -1,6 +1,7 @@
 import {
-  type MationFrontendRequest,
-  type MationFrontendResponse,
+  MationFrontendRequest,
+  EnvironmentId,
+  MationFrontendResponse,
   CommandId,
   MessageId,
   ThreadId,
@@ -12,18 +13,12 @@ import {
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest, type HttpMethod } from "effect/http";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
-import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
-import * as CommandReceipts from "../orchestration-v2/CommandReceiptStore.ts";
-import * as ProjectService from "../project/ProjectService.ts";
-import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as ExecutionRequests from "../orchestration-v2/ExecutionRequestService.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 
 export class MationOperationError extends Schema.TaggedError<MationOperationError>()(
@@ -83,12 +78,17 @@ export class AutomationExecutionService extends Context.Service<
   }
 >()("t3/mation/AutomationExecutionService") {}
 
+const encodeFrontendRequest = Schema.encodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      environmentId: EnvironmentId,
+      request: MationFrontendRequest,
+    }),
+  ),
+);
+
 const make = Effect.gen(function* () {
-  const threads = yield* ThreadManagement.ThreadManagementService;
-  const launch = yield* ThreadLaunch.ThreadLaunchService;
-  const receipts = yield* CommandReceipts.CommandReceiptStoreV2;
-  const projects = yield* ProjectService.ProjectService;
-  const providers = yield* ProviderRegistry.ProviderRegistry;
+  const execution = yield* ExecutionRequests.ExecutionRequestService;
   const environment = yield* ServerEnvironment.ServerEnvironmentIdentity;
   const http = yield* HttpClient.HttpClient;
   const variables = yield* HostProcess.Environment;
@@ -100,107 +100,32 @@ const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => undefined),
       )
     : variables.MATION_SERVICE_TOKEN;
-  const threadFor = (requestId: string, query: MationExecutionQuery) =>
-    query.threadId ?? ThreadId.make(`mation-${requestId}`);
-  const inspect = Effect.fn("mation.inspectExecution")(function* (
+  // Compatibility identities are owned here; execution itself is application-independent.
+  const lookup = (
     requestId: string,
-    query: MationExecutionQuery,
-  ) {
-    const threadId = threadFor(requestId, query);
-    const receipt = yield* receipts
-      .getByCommandId(CommandId.make(`mation:${requestId}`))
-      .pipe(Effect.mapError((cause) => new MationOperationError({ operation: "read", cause })));
-    if (Option.isSome(receipt) && receipt.value.threadId !== threadId)
-      return yield* new MationConflictError({ requestId });
-    const shell = yield* threads
-      .getThreadShell(threadId)
-      .pipe(Effect.mapError((cause) => new MationOperationError({ operation: "read", cause })));
-    if (!shell || shell.deletedAt !== null || shell.projectId !== query.projectId) {
-      if (Option.isSome(receipt)) return yield* new MationConflictError({ requestId });
-      return null;
-    }
-    const projection = yield* threads
-      .getProjectThreadRecords({ projectId: query.projectId, threadId }, ["runs", "messages"])
-      .pipe(
-        Effect.catchTags({ ThreadManagementThreadNotFoundError: () => Effect.succeed(null) }),
-        Effect.mapError((cause) => new MationOperationError({ operation: "read", cause })),
-      );
-    if (!projection) return null;
-    const message = projection.messages.find(
-      (message) => message.id === `mation-message:${requestId}`,
-    );
-    const run = projection.runs.find((run) => run.id === message?.runId);
-    if (!message || !run) return null;
-    return {
-      message,
-      execution: {
-        ref: { environmentId: yield* environment.getEnvironmentId, threadId, runId: run.id },
-        status: run.status,
-        startedAt: run.startedAt === null ? null : DateTime.formatIso(run.startedAt),
-        completedAt: run.completedAt === null ? null : DateTime.formatIso(run.completedAt),
-        worktreePath: projection.thread.worktreePath,
-        branch: projection.thread.branch,
-      } satisfies MationExecution,
-    };
+    query: { projectId: MationExecutionQuery["projectId"]; threadId?: ThreadId | null },
+  ) => ({
+    projectId: query.projectId,
+    threadId: query.threadId ?? ThreadId.make(`mation-${requestId}`),
+    messageId: MessageId.make(`mation-message:${requestId}`),
+  });
+  const failures = (requestId: string) => ({
+    ExecutionOperationError: (cause: ExecutionRequests.ExecutionOperationError) =>
+      Effect.fail(new MationOperationError({ operation: cause.operation, cause })),
+    ExecutionConflictError: () => Effect.fail(new MationConflictError({ requestId })),
+    ExecutionNotFoundError: () => Effect.fail(new MationNotFoundError({ requestId })),
   });
   const get: AutomationExecutionService["Service"]["get"] = (requestId, query) =>
-    inspect(requestId, query).pipe(
-      Effect.flatMap((value) =>
-        value
-          ? Effect.succeed(value.execution)
-          : Effect.fail(new MationNotFoundError({ requestId })),
-      ),
-    );
-  const start = Effect.fn("mation.startExecution")(function* (
-    requestId: string,
-    input: MationExecutionInput,
-  ) {
-    const query = {
-      projectId: input.target.projectId,
-      ...(input.target.threadId ? { threadId: input.target.threadId } : {}),
-    };
-    const existing = yield* inspect(requestId, query);
-    if (existing) {
-      if (existing.message.text !== input.prompt)
-        return yield* new MationConflictError({ requestId });
-      return existing.execution;
-    }
-    const commandId = CommandId.make(`mation:${requestId}`);
-    const messageId = MessageId.make(`mation-message:${requestId}`);
-    if (input.target.threadId) {
-      yield* threads
-        .sendToThread({
-          projectId: input.target.projectId,
-          threadId: input.target.threadId,
-          commandId,
-          messageId,
-          text: input.prompt,
-          attachments: [],
-          mode: "queue",
-          createdBy: "system",
-          creationSource: "server",
-        })
-        .pipe(Effect.mapError((cause) => new MationOperationError({ operation: "start", cause })));
-    } else {
-      yield* launch
-        .launch({
-          commandId,
-          threadId: threadFor(requestId, query),
-          projectId: input.target.projectId,
-          title: input.title,
-          modelSelection: input.target.modelSelection,
-          runtimeMode: input.target.runtimeMode,
-          interactionMode: input.target.interactionMode,
-          workspaceStrategy: input.target.workspaceStrategy,
-          automationOrigin: "external",
-          initialMessage: { messageId, text: input.prompt, attachments: [] },
-          createdBy: "system",
-          creationSource: "server",
-        })
-        .pipe(Effect.mapError((cause) => new MationOperationError({ operation: "start", cause })));
-    }
-    return yield* get(requestId, query);
-  });
+    execution
+      .get(CommandId.make(`mation:${requestId}`), lookup(requestId, query))
+      .pipe(Effect.catchTags(failures(requestId)));
+  const start: AutomationExecutionService["Service"]["start"] = (requestId, input) =>
+    execution
+      .start(CommandId.make(`mation:${requestId}`), {
+        ...input,
+        ...lookup(requestId, input.target),
+      })
+      .pipe(Effect.catchTags(failures(requestId)));
   const proxy = Effect.fn("mation.proxy")(function* (
     path: string | URL,
     method: string,
@@ -254,20 +179,14 @@ const make = Effect.gen(function* () {
       contentType: response.headers["content-type"] ?? "application/octet-stream",
     };
   });
-  const assertCaller = Effect.fn("mation.assertExecutionCaller")(function* (
-    requestId: string,
-    caller: { threadId: ThreadId; runId: RunId },
-  ) {
-    const records = yield* threads
-      .getThreadRecords(caller.threadId, ["messages"])
-      .pipe(Effect.mapError((cause) => new MationOperationError({ operation: "read", cause })));
-    if (
-      !records.messages.some(
-        (message) => message.id === `mation-message:${requestId}` && message.runId === caller.runId,
-      )
-    )
-      return yield* new MationConflictError({ requestId });
-  });
+  const assertCaller: AutomationExecutionService["Service"]["assertCaller"] = (requestId, caller) =>
+    execution.assertCaller(MessageId.make(`mation-message:${requestId}`), caller).pipe(
+      Effect.catchTags({
+        ExecutionOperationError: (cause) =>
+          Effect.fail(new MationOperationError({ operation: cause.operation, cause })),
+        ExecutionConflictError: () => Effect.fail(new MationConflictError({ requestId })),
+      }),
+    );
   const frontend = proxy("/embed.html", "GET").pipe(
     Effect.flatMap((result) =>
       result.status === 200
@@ -283,40 +202,24 @@ const make = Effect.gen(function* () {
   const frontendRequest = Effect.fn("mation.frontendRequest")(function* (
     input: MationFrontendRequest,
   ) {
-    const url = yield* Effect.try({
-      try: () => {
-        const rawPath = input.path.split("?")[0] ?? "";
-        if (input.path.includes("\\") || input.path.includes("#"))
-          throw new Error("Ambiguous frontend path.");
-        for (const segment of rawPath.split("/")) {
-          const decoded = decodeURIComponent(segment);
-          if (decoded === "." || decoded === ".." || /[\\/#?]/.test(decoded))
-            throw new Error("Ambiguous frontend path.");
-        }
-        return new URL(`/api/${input.path}`, endpoint ?? "http://mation.invalid/");
-      },
-      catch: () => new MationConflictError({ requestId: "frontend" }),
-    });
-    const pathname = url.pathname;
-    const allowed =
-      input.method === "GET"
-        ? ["/api/overview", "/api/runs", "/api/profiles/pai"].includes(pathname ?? "") ||
-          /^\/api\/email\/reports\/[a-f0-9]{64}$/.test(pathname)
-        : input.method === "POST"
-          ? pathname === "/api/automations" ||
-            /^\/api\/automations\/[^/]+\/runs$/.test(pathname ?? "") ||
-            /^\/api\/email\/reports\/[a-f0-9]{64}\/actions$/.test(pathname)
-          : pathname === "/api/profiles/pai" || /^\/api\/automations\/[^/]+$/.test(pathname ?? "");
-    if (pathname.startsWith("/api/email/reports/"))
-      url.searchParams.set("environmentId", yield* environment.getEnvironmentId);
-    if (!allowed) return yield* new MationConflictError({ requestId: "frontend" });
     const result = yield* proxy(
-      url,
-      input.method,
-      input.body === undefined ? undefined : new TextEncoder().encode(input.body),
+      "/api/frontend/request",
+      "POST",
+      new TextEncoder().encode(
+        yield* encodeFrontendRequest({
+          environmentId: yield* environment.getEnvironmentId,
+          request: input,
+        }).pipe(
+          Effect.mapError((cause) => new MationOperationError({ operation: "proxy", cause })),
+        ),
+      ),
       "application/json",
     );
-    return { status: result.status, body: new TextDecoder().decode(result.body) };
+    const body = new TextDecoder().decode(result.body);
+    if (result.status !== 200) return { status: result.status, body };
+    return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(MationFrontendResponse))(
+      body,
+    ).pipe(Effect.mapError((cause) => new MationOperationError({ operation: "proxy", cause })));
   });
   return AutomationExecutionService.of({
     frontend,
@@ -325,25 +228,9 @@ const make = Effect.gen(function* () {
     get,
     start,
     proxy,
-    projects: Effect.gen(function* () {
-      const inventory = yield* projects.snapshot;
-      const catalog = yield* providers.getProviders;
-      return {
-        environmentId: yield* environment.getEnvironmentId,
-        projects: inventory.projects.map((project) => ({
-          id: project.id,
-          title: project.title,
-          workspaceRoot: project.workspaceRoot,
-        })),
-        models: catalog.flatMap((provider) =>
-          provider.models.map((model) => ({
-            instanceId: provider.instanceId,
-            model: model.slug,
-            label: `${provider.displayName ?? provider.instanceId} · ${model.name ?? model.slug}`,
-          })),
-        ),
-      };
-    }).pipe(Effect.mapError((cause) => new MationOperationError({ operation: "read", cause }))),
+    projects: execution.capabilities.pipe(
+      Effect.mapError((cause) => new MationOperationError({ operation: "read", cause })),
+    ),
   });
 });
 export const layer = Layer.effect(AutomationExecutionService, make);

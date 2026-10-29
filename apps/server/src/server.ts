@@ -1,3 +1,4 @@
+import * as ExecutionRequestsHttp from "./orchestration-v2/executionRequestsHttp.ts";
 import * as PaiHttp from "./pai/http.ts";
 import * as CodexCloudChats from "./provider/CodexCloudChats.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -14,7 +15,7 @@ import * as NodeHttp from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentHttpApi, type RepositoryIdentity } from "@t3tools/contracts";
+import { EnvironmentHttpApi, ExecutionHttpApi, type RepositoryIdentity } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -704,6 +705,10 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(PaiHttp.layer),
       Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),
       Layer.provide(WebhookRoute.layer.pipe(Layer.provide(RelayDeliveryProof.layer))),
+      Layer.provide(AuthHttp.layerAuthenticatedAuth),
+    ),
+    HttpApiBuilder.layer(ExecutionHttpApi).pipe(
+      Layer.provide(ExecutionRequestsHttp.layer),
       Layer.provide(AuthHttp.layerAuthenticatedAuth),
     ),
     ServerHttp.layerOtlpTracesProxyRoute,
