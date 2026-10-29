@@ -1,4 +1,4 @@
-import { threadNeedsUserAttention } from "@t3tools/shared/threadAttention";
+import { isAutomaticThread } from "@t3tools/shared/threadAttention";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
@@ -544,14 +544,7 @@ export function resolveSidebarRowThreadId(
 export function isAutomaticSidebarThread(thread: {
   readonly source?: SidebarThreadSummary["source"];
 }): boolean {
-  const source = thread.source;
-  return (
-    !threadNeedsUserAttention(source ?? {}) &&
-    source?.ticketWorkflowId === undefined &&
-    (source?.automationOrigin !== undefined ||
-      source?.backgroundWorkflowId !== undefined ||
-      source?.runDestination?.origin === "automatic")
-  );
+  return isAutomaticThread(thread.source ?? {});
 }
 
 export function filterSidebarV2VisibleThreads<

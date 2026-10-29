@@ -68,6 +68,7 @@ describe("automatic sidebar membership", () => {
     const threads = [
       thread("manual"),
       thread("webhook", { ...base.source, scheduledTaskId: ScheduledTaskId.make("webhook") }),
+      thread("manual-timer", { ...base.source, createdBy: "user", automationOrigin: null }),
       thread("external", { ...base.source, automationOrigin: "external" }),
       thread("email-review", {
         ...base.source,
@@ -98,6 +99,7 @@ describe("automatic sidebar membership", () => {
     expect(visible.map((thread) => thread.id)).toEqual([
       "manual",
       "webhook",
+      "manual-timer",
       "email-review",
       "paused-bound",
       "ticket",
@@ -111,7 +113,7 @@ describe("automatic sidebar membership", () => {
           { threadId: ThreadId.make("webhook-bound") },
         ],
       }).map((thread) => thread.id),
-    ).toEqual(["manual", "webhook", "email-review", "paused-bound", "ticket"]);
+    ).toEqual(["manual", "webhook", "manual-timer", "email-review", "paused-bound", "ticket"]);
   });
 });
 

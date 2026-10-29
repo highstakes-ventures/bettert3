@@ -27,6 +27,7 @@ const state = vi.hoisted(() => ({
     pendingSubagentRequest?: null;
     runtime?: { status: string; lastErrorClass?: string } | null;
     source: {
+      createdBy?: "user" | "agent" | "system";
       runDestination?: { accountId: string; existingThreadId: string; origin?: "automatic" };
       automationOrigin?: "t3" | "external" | null;
       backgroundWorkflowId?: string;
@@ -644,6 +645,10 @@ it("keeps manual chats out of Automatic before and after their timer fires", asy
   state.threads = [
     localThread("before-wake"),
     { ...localThread("after-wake"), source: { scheduledTaskId: "follow-up" } },
+    {
+      ...localThread("older-server-wake"),
+      source: { createdBy: "user", automationOrigin: null, scheduledTaskId: "follow-up" },
+    },
   ];
   for (const enabled of [true, false]) {
     state.tasks = state.threads.map((thread) => ({ threadId: thread.id, enabled }));

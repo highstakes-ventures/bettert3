@@ -3,6 +3,7 @@ import {
   ProjectId,
   RunId,
   RuntimeRequestId,
+  ScheduledTaskId,
   ThreadId,
   type OrchestrationV2ShellSnapshot,
   type OrchestrationV2ThreadShell,
@@ -53,6 +54,28 @@ function makeHarness(environmentIds: ReadonlyArray<EnvironmentId> = [environment
 }
 
 describe("v2 thread shell lists", () => {
+  it("keeps manual timer chats in navigation across old and current server metadata", () => {
+    const { registry, threads, snapshotAtom } = makeHarness();
+    const dispose = registry.mount(threads.navigationThreadShellsAtom);
+    for (const automationOrigin of [undefined, null]) {
+      registry.set(snapshotAtom(environmentId), {
+        ...v2ShellSnapshot,
+        threads: [
+          {
+            ...v2ThreadShell,
+            createdBy: "user",
+            automationOrigin,
+            scheduledTaskId: ScheduledTaskId.make("follow-up"),
+          },
+        ],
+      });
+      expect(registry.get(threads.navigationThreadShellsAtom).map((thread) => thread.id)).toEqual([
+        v2ThreadShell.id,
+      ]);
+    }
+    dispose();
+    registry.dispose();
+  });
   it("preserves ordered reference arrays when a middle thread changes", () => {
     const { registry, threads, snapshotAtom } = makeHarness();
     const snapshot = {

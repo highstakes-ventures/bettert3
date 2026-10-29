@@ -1,4 +1,4 @@
-import { RuntimeRequestId } from "@t3tools/contracts";
+import { RuntimeRequestId, ScheduledTaskId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import { isAutomaticThread, threadNeedsUserAttention } from "./threadAttention.ts";
@@ -9,6 +9,31 @@ describe("automatic chat attention", () => {
     expect(isAutomaticThread(independent)).toBe(true);
     expect(threadNeedsUserAttention(independent)).toBe(false);
     expect(isAutomaticThread({})).toBe(false);
+    const timer = { scheduledTaskId: ScheduledTaskId.make("follow-up") };
+    expect(isAutomaticThread(timer)).toBe(false);
+    expect(isAutomaticThread({ ...independent, ...timer })).toBe(true);
+  });
+  it("keeps a user-created chat manual when an older server infers automatic origin from a timer", () => {
+    const manual = {
+      createdBy: "user" as const,
+      automationOrigin: null,
+      scheduledTaskId: ScheduledTaskId.make("follow-up"),
+    };
+    expect(isAutomaticThread(manual)).toBe(false);
+    expect(isAutomaticThread({ ...manual, createdBy: "system" })).toBe(true);
+    expect(
+      isAutomaticThread({
+        ...manual,
+        runDestination: {
+          kind: "codexCloud",
+          accountId: "account",
+          existingThreadId: "cloud-chat",
+          name: "Cloud",
+          cwd: "/workspace",
+          origin: "automatic",
+        },
+      }),
+    ).toBe(true);
   });
   it.each([
     "user_input",

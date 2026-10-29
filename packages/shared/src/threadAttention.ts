@@ -3,6 +3,7 @@ import type { OrchestrationV2ThreadShell } from "@t3tools/contracts";
 type ThreadAttentionSource = Partial<
   Pick<
     OrchestrationV2ThreadShell,
+    | "createdBy"
     | "automationOrigin"
     | "backgroundWorkflowId"
     | "ticketWorkflowId"
@@ -21,17 +22,14 @@ export function threadNeedsUserAttention(thread: ThreadAttentionSource): boolean
 }
 
 /** Inbox visibility does not stop or settle the underlying automation. */
-export function isAutomaticThread(
-  thread: ThreadAttentionSource,
-  boundToScheduledTask = false,
-): boolean {
+export function isAutomaticThread(thread: ThreadAttentionSource): boolean {
   return (
     !threadNeedsUserAttention(thread) &&
     thread.ticketWorkflowId === undefined &&
-    (thread.automationOrigin !== undefined ||
+    // Older servers infer a null origin when a timer fires in an existing chat.
+    ((thread.automationOrigin !== undefined &&
+      (thread.automationOrigin !== null || thread.createdBy !== "user")) ||
       thread.backgroundWorkflowId !== undefined ||
-      thread.scheduledTaskId !== undefined ||
-      thread.runDestination?.origin === "automatic" ||
-      boundToScheduledTask)
+      thread.runDestination?.origin === "automatic")
   );
 }
