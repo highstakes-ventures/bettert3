@@ -1,4 +1,4 @@
-import { isAutomaticThread, threadNeedsUserAttention } from "@t3tools/shared/threadAttention";
+import { threadNeedsUserAttention } from "@t3tools/shared/threadAttention";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
@@ -541,11 +541,17 @@ export function resolveSidebarRowThreadId(
   return thread?.id ?? threadId;
 }
 
-export function isAutomaticSidebarThread(
-  thread: { readonly source?: SidebarThreadSummary["source"] },
-  boundToScheduledTask: boolean,
-): boolean {
-  return isAutomaticThread(thread.source ?? {}, boundToScheduledTask);
+export function isAutomaticSidebarThread(thread: {
+  readonly source?: SidebarThreadSummary["source"];
+}): boolean {
+  const source = thread.source;
+  return (
+    !threadNeedsUserAttention(source ?? {}) &&
+    source?.ticketWorkflowId === undefined &&
+    (source?.automationOrigin !== undefined ||
+      source?.backgroundWorkflowId !== undefined ||
+      source?.runDestination?.origin === "automatic")
+  );
 }
 
 export function filterSidebarV2VisibleThreads<
@@ -566,13 +572,11 @@ export function filterSidebarV2VisibleThreads<
   return threads.filter(
     (thread) =>
       thread.archivedAt === null &&
-      (thread.source?.backgroundWorkflowId === undefined ||
-        threadNeedsUserAttention(thread.source)) &&
-      !isAutomaticSidebarThread(
-        thread,
+      thread.source?.backgroundWorkflowId === undefined &&
+      !(
         automatic !== undefined &&
-          thread.environmentId === automatic.environmentId &&
-          automatic.tasks.some((task) => task.threadId === thread.id),
+        thread.environmentId === automatic.environmentId &&
+        isAutomaticSidebarThread(thread)
       ) &&
       !isSidebarSubagentThread(thread) &&
       (scopedProjectKeys === null ||

@@ -1068,6 +1068,8 @@ type ShellThreadRow = {
   readonly latest_run_requested_at: string | null;
   readonly latest_run_started_at: string | null;
   readonly latest_run_completed_at: string | null;
+  readonly completed_run_duration_ms: number | null;
+  readonly activity_run_execution_started_at: string | null;
   readonly latest_run_stop_requested: number;
   readonly active_run_id: string | null;
   readonly active_run_status: string | null;
@@ -1652,6 +1654,24 @@ export function threadShellFromProjection(
     latestRunRequestedAt: latestRun?.requestedAt ?? null,
     latestRunStartedAt: latestRun?.startedAt ?? null,
     latestRunCompletedAt: latestRun?.completedAt ?? null,
+    // Imported run dates can be ordering fallbacks. Cloud retains timing authority
+    // even after a native run becomes the latest run.
+    completedRunDurationMs: projection.runs.some((run) =>
+      run.id.startsWith(`cloud-run:${projection.thread.id}:`),
+    )
+      ? null
+      : projection.runs.reduce(
+          (total, run) =>
+            run.startedAt !== null && run.completedAt !== null && !isActivityRunForShell(run)
+              ? total +
+                Math.max(
+                  0,
+                  DateTime.toEpochMillis(run.completedAt) - DateTime.toEpochMillis(run.startedAt),
+                )
+              : total,
+          0,
+        ),
+    activityRunExecutionStartedAt: activityRun?.startedAt ?? null,
     latestRunStopRequested:
       latestRun != null &&
       projection.turnItems.some(
@@ -1761,6 +1781,8 @@ type ShellThreadState = {
   readonly latestRunRequestedAt: DateTime.Utc | null;
   readonly latestRunStartedAt: DateTime.Utc | null;
   readonly latestRunCompletedAt: DateTime.Utc | null;
+  readonly completedRunDurationMs: number | null;
+  readonly activityRunExecutionStartedAt: DateTime.Utc | null;
   readonly latestRunStopRequested: boolean;
   readonly activeRunId: RunId | null;
   readonly blockedOnThreadWait: boolean;
@@ -1939,6 +1961,8 @@ function shellFromState(input: {
     latestRunRequestedAt: input.state.latestRunRequestedAt,
     latestRunStartedAt: input.state.latestRunStartedAt,
     latestRunCompletedAt: input.state.latestRunCompletedAt,
+    completedRunDurationMs: input.state.completedRunDurationMs,
+    activityRunExecutionStartedAt: input.state.activityRunExecutionStartedAt,
     latestRunStopRequested: input.state.latestRunStopRequested,
     activeRunId: input.state.activeRunId,
     blockedOnThreadWait: input.state.blockedOnThreadWait,
@@ -5759,6 +5783,26 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               presented.requested_at AS latest_run_requested_at,
               json_extract(presented.payload_json, '$.startedAt') AS latest_run_started_at,
               presented.completed_at AS latest_run_completed_at,
+              (
+                SELECT CASE
+                  WHEN MAX(instr(r.run_id, 'cloud-run:' || t.thread_id || ':') = 1) = 1 THEN NULL
+                  ELSE COALESCE(SUM(CASE
+                    WHEN r.status NOT IN ('preparing', 'starting', 'running', 'waiting')
+                    THEN MAX(0, CAST(ROUND(
+                      (julianday(r.completed_at) - julianday(json_extract(r.payload_json, '$.startedAt'))) * 86400000
+                    ) AS INTEGER)) ELSE 0 END), 0)
+                END
+                FROM orchestration_v2_projection_runs r
+                WHERE r.thread_id = t.thread_id
+              ) AS completed_run_duration_ms,
+              (
+                SELECT json_extract(r.payload_json, '$.startedAt')
+                FROM orchestration_v2_projection_runs r
+                WHERE r.thread_id = t.thread_id
+                  AND r.status IN ('preparing', 'starting', 'running', 'waiting')
+                ORDER BY r.ordinal DESC, r.run_id DESC
+                LIMIT 1
+              ) AS activity_run_execution_started_at,
               EXISTS (
                 SELECT 1 FROM orchestration_v2_projection_turn_items stop_request
                 WHERE stop_request.thread_id = t.thread_id AND stop_request.run_id = presented.run_id
@@ -6394,6 +6438,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           latestRunRequestedAt,
           latestRunStartedAt,
           latestRunCompletedAt,
+          completedRunDurationMs: row.completed_run_duration_ms,
+          activityRunExecutionStartedAt:
+            row.activity_run_execution_started_at === null
+              ? null
+              : DateTime.makeUnsafe(row.activity_run_execution_started_at),
           latestRunStopRequested,
           activeRunId: row.active_run_id === null ? null : RunId.make(row.active_run_id),
           blockedOnThreadWait: deriveBlockedOnThreadWait({

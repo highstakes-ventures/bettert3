@@ -1,6 +1,8 @@
 import { Link, useParams } from "@tanstack/react-router";
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { CloudChatSummary } from "@t3tools/contracts";
 import {
+  CheckCheckIcon,
   CircleHelpIcon,
   ClockIcon,
   CloudIcon,
@@ -11,22 +13,33 @@ import {
 } from "lucide-react";
 import { useLayoutEffect, useState, type ComponentProps, type ReactNode } from "react";
 import * as DateTime from "effect/DateTime";
-import { deriveSubagentElapsedMs } from "@t3tools/shared/orchestrationTiming";
-import { cloudChatVisitKey } from "../../lib/cloudChatVisits";
+import { formatDuration } from "@t3tools/shared/orchestrationTiming";
+import { cloudChatVisitKey, isUnopenedAutomaticChat } from "../../lib/cloudChatVisits";
 import { cn } from "../../lib/utils";
 import { deriveProjectIdentity } from "../../projectIdentity";
-import { useProject, useThreadShells } from "../../state/entities";
+import {
+  readEnvironmentSupportsVisitedTracking,
+  useProject,
+  useThreadShells,
+} from "../../state/entities";
 import { cloudChats } from "../../state/cloudChats";
 import { useEnvironmentMachines, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
 import type { ThreadShell } from "../../types";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useUiStateStore } from "../../uiStateStore";
 import { ProjectMonogram } from "../ProjectMonogram";
 import { executionLocationLabel, ThreadExecutionIcon } from "../ThreadExecutionIcon";
-import { AgentElapsed } from "../chat/AgentElapsed";
-import { isAutomaticSidebarThread, resolveSidebarThreadStatus } from "../Sidebar.logic";
+import { AgentElapsed, formatCompactElapsedSeconds } from "../chat/AgentElapsed";
+import {
+  hasUnseenCompletion,
+  isAutomaticSidebarThread,
+  resolveSidebarThreadStatus,
+  resolveThreadLastVisitedAt,
+} from "../Sidebar.logic";
 import { CollapsibleSectionHeader } from "../ui/collapsible-section-header";
 import { useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -34,25 +47,17 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 const AUTOMATIC_INITIAL_COUNT = 10;
 const AUTOMATIC_PAGE_COUNT = 25;
 
-type RunTiming = ComponentProps<typeof AgentElapsed>["agent"];
+type RunTiming = { completedMs: number; activeStartedAt: string | null };
 
-type AutomaticOrigin = ThreadShell["source"]["automationOrigin"] | "mation";
-
-function AutomaticOriginIcon({ origin }: { origin: AutomaticOrigin }) {
+function AutomaticOriginIcon({ origin }: { origin: ThreadShell["source"]["automationOrigin"] }) {
   const label =
     origin === "t3"
       ? "Started by T3"
-      : origin === "mation"
-        ? "Triggered by Mation"
-        : origin === "external"
-          ? "Triggered externally"
-          : "Origin unknown";
+      : origin === "external"
+        ? "Triggered externally"
+        : "Origin unknown";
   const Icon =
-    origin === "t3"
-      ? WorkflowIcon
-      : origin === "external" || origin === "mation"
-        ? WebhookIcon
-        : CircleHelpIcon;
+    origin === "t3" ? WorkflowIcon : origin === "external" ? WebhookIcon : CircleHelpIcon;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -72,50 +77,59 @@ function AutomaticOriginIcon({ origin }: { origin: AutomaticOrigin }) {
 }
 
 function cloudRunTiming(chat: CloudChatSummary): RunTiming | null {
-  const turn = chat.latestTurn;
+  if (chat.completedRunDurationMs == null) return null;
   const running = chat.status === "active";
-  return turn?.startedAt != null && (running || turn.completedAt != null)
-    ? {
-        status: running ? "running" : "completed",
-        startedAt: new Date(turn.startedAt * 1000).toISOString(),
-        completedAt:
-          turn.completedAt != null ? new Date(turn.completedAt * 1000).toISOString() : null,
-      }
-    : null;
+  const start = chat.latestTurn?.startedAt;
+  if (running && start == null) return null;
+  return {
+    completedMs: chat.completedRunDurationMs,
+    activeStartedAt: running && start != null ? new Date(start * 1000).toISOString() : null,
+  };
 }
 
 function AutomaticRunDuration({ elapsed }: { elapsed: RunTiming | null }) {
-  if (!elapsed || elapsed.startedAt === null || deriveSubagentElapsedMs(elapsed, 0) === null)
-    return null;
-  const durationLabel = elapsed.status === "running" ? "Current run duration" : "Last run duration";
+  if (!elapsed) return null;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <span
-            aria-label={durationLabel}
+            aria-label="Total task duration"
             className="inline-flex shrink-0 items-center gap-1 text-xs text-secondary-label"
           />
         }
       >
         <ClockIcon aria-hidden className="size-3" />
-        <AgentElapsed agent={elapsed} compact />
+        {elapsed.activeStartedAt ? (
+          <AgentElapsed
+            agent={{ status: "running", startedAt: elapsed.activeStartedAt, completedAt: null }}
+            elapsedOffsetMs={elapsed.completedMs}
+            compact
+          />
+        ) : (
+          formatCompactElapsedSeconds(elapsed.completedMs / 1000)
+        )}
       </TooltipTrigger>
       <TooltipPopup>
-        {durationLabel} · Started {new Date(elapsed.startedAt).toLocaleString()}
-        {elapsed.completedAt ? ` · Finished ${new Date(elapsed.completedAt).toLocaleString()}` : ""}
+        Total task duration · {formatDuration(elapsed.completedMs)} completed
+        {elapsed.activeStartedAt
+          ? ` · Running since ${new Date(elapsed.activeStartedAt).toLocaleString()}`
+          : ""}
       </TooltipPopup>
     </Tooltip>
   );
 }
 
-function automaticRowClassName(active: boolean, running: boolean) {
+function automaticRowClassName(active: boolean, unopened: boolean, running: boolean) {
   return cn(
     "group/sidebar-row relative grid h-12 w-full cursor-pointer grid-cols-[1rem_minmax(0,1fr)_0.875rem_0.875rem_2.75rem_1.5rem] grid-rows-2 items-center gap-x-1 overflow-hidden rounded-md px-2 py-1 text-left text-sm outline-none select-none [content-visibility:auto] [contain-intrinsic-size:auto_48px] @min-[24rem]/automatic-row:h-9 @min-[24rem]/automatic-row:grid-cols-[minmax(0,5rem)_minmax(0,1fr)_0.875rem_0.875rem_3.5rem_2rem] @min-[24rem]/automatic-row:grid-rows-1 @min-[24rem]/automatic-row:gap-x-2.5 @min-[24rem]/automatic-row:px-2.5 @min-[24rem]/automatic-row:py-0 @min-[24rem]/automatic-row:[contain-intrinsic-size:auto_36px] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-    !active && !running && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
+    !active &&
+      !unopened &&
+      !running &&
+      "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     active
       ? "bg-sidebar-row-active text-sidebar-foreground"
-      : running
+      : unopened || running
         ? "text-sidebar-foreground hover:bg-sidebar-row-hover"
         : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
   );
@@ -131,16 +145,18 @@ function AutomaticRowContent({
   elapsed,
   updatedAt,
   status,
+  unopened,
 }: {
   title: string;
   projectName: string | null;
   projectDescription?: string | null;
-  origin: AutomaticOrigin;
+  origin: ThreadShell["source"]["automationOrigin"];
   executionIcon: ReactNode;
   location: string;
   elapsed: RunTiming | null;
   updatedAt: string;
   status: string;
+  unopened: boolean;
 }) {
   const identity = projectName ? deriveProjectIdentity(projectName) : null;
   const relativeTime = formatRelativeTimeLabel(updatedAt);
@@ -184,9 +200,17 @@ function AutomaticRowContent({
         </span>
       </span>
       <span className="col-start-2 col-end-7 row-start-1 flex min-w-0 items-center gap-1 @min-[24rem]/automatic-row:col-end-3">
-        <span className="min-w-0 flex-1 truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground">
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
+            unopened && "font-medium",
+          )}
+        >
           {title}
         </span>
+        {unopened ? (
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
+        ) : null}
       </span>
       <span className="col-start-3 row-start-2 flex items-center @min-[24rem]/automatic-row:row-start-1">
         <AutomaticOriginIcon origin={origin} />
@@ -264,6 +288,7 @@ function LocalAutomaticRow({
   bound,
   cloudChat,
   accountId,
+  unopened,
   machine,
   onThreadOpen,
 }: {
@@ -272,6 +297,7 @@ function LocalAutomaticRow({
   bound: boolean;
   cloudChat: CloudChatSummary | undefined;
   accountId: string | undefined;
+  unopened: boolean;
   machine: ComponentProps<typeof ThreadExecutionIcon>["machine"];
   onThreadOpen: (() => void) | undefined;
 }) {
@@ -288,29 +314,21 @@ function LocalAutomaticRow({
       params.cloudEnvironmentId === thread.environmentId);
   const source = thread.source;
   const { hasNativeRun, status } = localAutomaticState(thread, enabled, bound, cloudChat);
-  const running = ["preparing", "starting", "running", "waiting"].includes(
-    source.activityRunStatus ?? source.status ?? thread.runtime?.status ?? "",
-  );
-  const startedAt = running
-    ? (source.activityRunStartedAt ?? source.latestRunStartedAt)
-    : source.latestRunStartedAt;
-  // Imported run timestamps may contain ordering fallbacks. The Cloud summary
-  // preserves the actual timing, including unknown values. T3-created runs own theirs.
+  // Imported timestamps may be ordering fallbacks; Cloud owns their measured timing.
   const importedRun = source.latestRunId?.startsWith(`cloud-run:${thread.id}:`) === true;
   const elapsed: RunTiming | null =
-    !hasNativeRun || importedRun
+    !hasNativeRun || importedRun || source.completedRunDurationMs === null
       ? cloudChat
         ? cloudRunTiming(cloudChat)
         : null
-      : startedAt == null
+      : source.completedRunDurationMs == null
         ? null
         : {
-            status: running ? "running" : "completed",
-            startedAt: DateTime.formatIso(startedAt),
-            completedAt:
-              !running && source.latestRunCompletedAt != null
-                ? DateTime.formatIso(source.latestRunCompletedAt)
-                : null,
+            completedMs: source.completedRunDurationMs,
+            activeStartedAt:
+              source.activityRunExecutionStartedAt == null
+                ? null
+                : DateTime.formatIso(source.activityRunExecutionStartedAt),
           };
   // Cloud history proves execution there when an import has no attached native runtime yet.
   const importedCloud =
@@ -324,7 +342,7 @@ function LocalAutomaticRow({
         to="/$environmentId/$threadId"
         params={{ environmentId: thread.environmentId, threadId: thread.id }}
         aria-current={active ? "page" : undefined}
-        aria-label={`${thread.title}, ${status.toLowerCase()}`}
+        aria-label={`${thread.title}, ${status.toLowerCase()}${unopened ? ", new" : ""}`}
         onClick={(event) => {
           if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey)
             onThreadOpen?.();
@@ -335,26 +353,22 @@ function LocalAutomaticRow({
               new Date().toISOString(),
             );
         }}
-        className={automaticRowClassName(active, status === "Running")}
+        className={automaticRowClassName(active, unopened, status === "Running")}
       >
         <AutomaticRowContent
           title={thread.title}
           projectName={project?.title ?? cloudChat?.repository?.split("/").at(-1) ?? null}
           projectDescription={project?.title ?? cloudChat?.repository ?? null}
           status={status}
+          unopened={unopened}
           updatedAt={thread.updatedAt}
           elapsed={elapsed}
           origin={
-            source.automationOrigin === "external" &&
-            /^mation-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-              thread.id,
-            )
-              ? "mation"
-              : source.automationOrigin !== undefined
-                ? source.automationOrigin
-                : source.runDestination?.origin === "automatic"
-                  ? "external"
-                  : undefined
+            source.automationOrigin !== undefined
+              ? source.automationOrigin
+              : source.runDestination?.origin === "automatic"
+                ? "external"
+                : undefined
           }
           location={location}
           executionIcon={
@@ -379,12 +393,14 @@ function AutomaticChatRow({
   chat,
   environmentId,
   accountId,
+  unopened,
   normalThreadId,
   onThreadOpen,
 }: {
   chat: CloudChatSummary;
   environmentId: string;
   accountId: string;
+  unopened: boolean;
   normalThreadId: string | undefined;
   onThreadOpen: (() => void) | undefined;
 }) {
@@ -426,8 +442,8 @@ function AutomaticChatRow({
             );
         }}
         aria-current={active ? "page" : undefined}
-        aria-label={`${chat.title}${chat.repository ? `, ${chat.repository}` : ""}${running ? ", running" : ""}`}
-        className={automaticRowClassName(active, running)}
+        aria-label={`${chat.title}${chat.repository ? `, ${chat.repository}` : ""}${unopened ? ", new" : ""}${running ? ", running" : ""}`}
+        className={automaticRowClassName(active, unopened, running)}
       >
         <AutomaticRowContent
           title={chat.title}
@@ -439,6 +455,7 @@ function AutomaticChatRow({
           elapsed={elapsed}
           updatedAt={updatedAt}
           status={running ? "Running" : chat.status === "unknown" ? "No status" : "Completed"}
+          unopened={unopened}
         />
       </Link>
     </li>
@@ -460,22 +477,22 @@ export function AutomaticChatsSection({
   const machines = useEnvironmentMachines();
   const params = useParams({ strict: false });
   const threads = useThreadShells();
+  const visits = useUiStateStore((state) => state.threadLastVisitedAtById);
+  const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   const query = useEnvironmentQuery(
     environmentId ? cloudChats.list({ environmentId, input: {} }) : null,
   );
   const localQuery = useEnvironmentQuery(
     environmentId ? serverEnvironment.scheduledTasksLive({ environmentId, input: {} }) : null,
   );
+  const visitThread = useAtomCommand(threadEnvironment.visit);
   const localTasks = localQuery.data?.tasks ?? [];
   const localRows = threads
     .filter(
       (thread) =>
+        thread.environmentId === environmentId &&
         thread.archivedAt === null &&
-        isAutomaticSidebarThread(
-          thread,
-          thread.environmentId === environmentId &&
-            localTasks.some((task) => task.threadId === thread.id),
-        ),
+        isAutomaticSidebarThread(thread),
     )
     .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const data = query.data;
@@ -486,18 +503,15 @@ export function AutomaticChatsSection({
         Number(b.status === "active") - Number(a.status === "active") || b.updatedAt - a.updatedAt,
     );
   const localCloudIds = new Set(
-    threads
-      .filter((thread) => thread.environmentId === environmentId && thread.archivedAt === null)
-      .flatMap((thread) => {
-        const destination = thread.source.runDestination;
-        return destination?.accountId === data?.accountId && destination?.existingThreadId
-          ? [destination.existingThreadId]
-          : [];
-      }),
+    localRows.flatMap((thread) => {
+      const destination = thread.source.runDestination;
+      return destination?.accountId === data?.accountId && destination?.existingThreadId
+        ? [destination.existingThreadId]
+        : [];
+    }),
   );
   const cloudOnlyRows = rows.filter((chat) => !localCloudIds.has(chat.id));
   const localCloudChat = (thread: ThreadShell) =>
-    thread.environmentId === environmentId &&
     thread.source.runDestination?.accountId === data?.accountId
       ? rows.find((chat) => chat.id === thread.source.runDestination?.existingThreadId)
       : undefined;
@@ -531,7 +545,7 @@ export function AutomaticChatsSection({
         thread.source.runDestination?.existingThreadId === routeChatId) ||
       ("threadId" in params &&
         params.threadId === thread.id &&
-        params.environmentId === thread.environmentId),
+        params.environmentId === environmentId),
   );
   const hiddenCount =
     cloudOnlyRows.length - visibleRows.length + localRows.length - visibleLocalRows.length;
@@ -539,10 +553,8 @@ export function AutomaticChatsSection({
     (thread) =>
       localAutomaticState(
         thread,
-        thread.environmentId === environmentId &&
-          localTasks.some((task) => task.threadId === thread.id && task.enabled),
-        thread.environmentId === environmentId &&
-          localTasks.some((task) => task.threadId === thread.id),
+        localTasks.some((task) => task.threadId === thread.id && task.enabled),
+        localTasks.some((task) => task.threadId === thread.id),
         localCloudChat(thread),
       ).status,
   );
@@ -565,6 +577,55 @@ export function AutomaticChatsSection({
       ? `At least ${running} running`
       : "Cloud activity couldn't be checked for every automatic chat."
     : runningLabel;
+  const isUnopened = (chat: CloudChatSummary) =>
+    !!environmentId &&
+    !!data &&
+    isUnopenedAutomaticChat(chat, environmentId, data.accountId, visits);
+  const isLocalUnopened = (thread: ThreadShell) => {
+    const lastVisitedAt = resolveThreadLastVisitedAt(
+      thread.lastVisitedAt,
+      visits[scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))],
+    );
+    const destination = thread.source.runDestination;
+    const cloudVisitedAt = destination?.existingThreadId
+      ? visits[
+          cloudChatVisitKey(
+            thread.environmentId,
+            destination.accountId,
+            destination.existingThreadId,
+          )
+        ]
+      : undefined;
+    return (
+      (lastVisitedAt === undefined &&
+        (thread.lastVisitedAt !== undefined || cloudVisitedAt === undefined)) ||
+      hasUnseenCompletion({ ...thread, lastVisitedAt })
+    );
+  };
+  const unopenedLocalRows = localRows.filter(isLocalUnopened);
+  const unopened = unopenedLocalRows.length + cloudOnlyRows.filter(isUnopened).length;
+  const markAllRead = () => {
+    if (!expanded || !environmentId) return;
+    const visitedAt = new Date().toISOString();
+    for (const thread of unopenedLocalRows) {
+      if (readEnvironmentSupportsVisitedTracking(thread.environmentId)) {
+        void visitThread({
+          environmentId: thread.environmentId,
+          input: { threadId: thread.id, visitedAt: thread.updatedAt },
+        });
+      } else {
+        markThreadVisited(
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          thread.updatedAt,
+        );
+      }
+    }
+    if (data) {
+      for (const chat of rows.filter(isUnopened)) {
+        markThreadVisited(cloudChatVisitKey(environmentId, data.accountId, chat.id), visitedAt);
+      }
+    }
+  };
   const layoutKey = expanded
     ? `${query.error ?? ""}:${data !== null}:${visibleRows.map((chat) => chat.id).join(":")}:${visibleLocalRows.map((thread) => thread.id).join(":")}`
     : "collapsed";
@@ -578,7 +639,7 @@ export function AutomaticChatsSection({
       <li className="mx-0.5 h-8 list-none" data-testid="sidebar-automatic-header">
         <CollapsibleSectionHeader
           expanded={expanded}
-          tone="muted"
+          tone={unopened > 0 ? "accent" : "muted"}
           onClick={onToggle}
           accessory={
             <span
@@ -592,7 +653,31 @@ export function AutomaticChatsSection({
                   <span>Loading… ·</span>
                 ) : null}
                 {data?.hasMore ? <span>Recent ·</span> : null}
-
+                {unopened > 0 && expanded ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          onClick={markAllRead}
+                          aria-label="Mark all automatic chats as read"
+                          className="group/mark-read pointer-events-auto -mx-1 grid cursor-pointer rounded-sm px-1 hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+                        />
+                      }
+                    >
+                      <span className="col-start-1 row-start-1 group-hover/mark-read:invisible group-focus-visible/mark-read:invisible">
+                        {unopened} new
+                      </span>
+                      <CheckCheckIcon
+                        aria-hidden
+                        className="invisible col-start-1 row-start-1 size-4 self-center justify-self-center group-hover/mark-read:visible group-focus-visible/mark-read:visible"
+                      />
+                    </TooltipTrigger>
+                    <TooltipPopup>Mark all as read</TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  <span>{unopened} new</span>
+                )}
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -607,7 +692,7 @@ export function AutomaticChatsSection({
                       />
                     }
                   >
-                    {runningLabel}
+                    · {runningLabel}
                   </TooltipTrigger>
                   <TooltipPopup>{runningDescription}</TooltipPopup>
                 </Tooltip>
@@ -624,16 +709,11 @@ export function AutomaticChatsSection({
             <LocalAutomaticRow
               key={thread.id}
               thread={thread}
-              enabled={
-                thread.environmentId === environmentId &&
-                localTasks.some((task) => task.threadId === thread.id && task.enabled)
-              }
-              bound={
-                thread.environmentId === environmentId &&
-                localTasks.some((task) => task.threadId === thread.id)
-              }
+              enabled={localTasks.some((task) => task.threadId === thread.id && task.enabled)}
+              bound={localTasks.some((task) => task.threadId === thread.id)}
               cloudChat={localCloudChat(thread)}
               accountId={data?.accountId}
+              unopened={isLocalUnopened(thread)}
               machine={machines.get(thread.environmentId) ?? "server"}
               onThreadOpen={onThreadOpen}
             />
@@ -661,6 +741,7 @@ export function AutomaticChatsSection({
                   chat={chat}
                   environmentId={environmentId}
                   accountId={data.accountId}
+                  unopened={isUnopened(chat)}
                   onThreadOpen={onThreadOpen}
                   normalThreadId={
                     threads.find(
@@ -692,7 +773,7 @@ export function AutomaticChatsSection({
           ) : null}
           {data?.hasMore && !query.error ? (
             <li className="list-none px-2.5 py-2 text-xs text-sidebar-muted-foreground">
-              Activity covers automatic chats among the 100 most recent Cloud chats.
+              Counts and read actions cover automatic chats among the 100 most recent Cloud chats.
             </li>
           ) : null}
         </>

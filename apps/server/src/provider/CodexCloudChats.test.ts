@@ -275,6 +275,168 @@ it.effect(
     ),
 );
 
+it.effect("totals paginated automatic turn metadata without downloading tool output", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      wire.response = (method, params) =>
+        method === "thread/list"
+          ? { data: [{ ...thread, threadSource: "automation" }], nextCursor: null }
+          : params.sortDirection === "desc"
+            ? params.cursor === "older"
+              ? {
+                  data: [
+                    { id: "first", status: "completed", startedAt: 0, completedAt: 120, items: [] },
+                  ],
+                  nextCursor: null,
+                }
+              : {
+                  data: [
+                    {
+                      id: "last",
+                      status: "completed",
+                      startedAt: 600,
+                      completedAt: 625,
+                      items: [],
+                    },
+                  ],
+                  nextCursor: "older",
+                }
+            : page;
+      expect((yield* service.list()).chats[0]).toMatchObject({
+        status: "idle",
+        completedRunDurationMs: 145_000,
+        latestTurn: { startedAt: 600, completedAt: 625 },
+      });
+      const reads = wire.requests.filter(
+        ({ method, params }) => method === "thread/turns/list" && params.sortDirection === "desc",
+      );
+      expect(reads).toHaveLength(2);
+      expect(reads.every(({ params }) => params.itemsView === "notLoaded")).toBe(true);
+    }),
+  ),
+);
+
+it.effect("reuses settled Cloud timing and reads only new turns on refresh", () =>
+  provide(
+    Effect.gen(function* () {
+      const service = yield* CodexCloudChats.CodexCloudChats;
+      let phase = "settled";
+      const settled = {
+        id: "last",
+        status: "completed",
+        startedAt: 600,
+        completedAt: 625,
+        items: [],
+      };
+      wire.response = (method, params) =>
+        method === "thread/list"
+          ? { data: [{ ...thread, threadSource: "automation" }], nextCursor: null }
+          : params.sortDirection !== "desc"
+            ? page
+            : params.cursor === "older"
+              ? {
+                  data: [
+                    { id: "first", status: "completed", startedAt: 0, completedAt: 120, items: [] },
+                  ],
+                  nextCursor: null,
+                }
+              : params.cursor === "settled"
+                ? { data: [settled], nextCursor: "older" }
+                : phase === "settled"
+                  ? { data: [settled], nextCursor: "older" }
+                  : {
+                      data: [
+                        {
+                          id: "new",
+                          status: phase === "running" ? "inProgress" : "completed",
+                          startedAt: 900,
+                          completedAt: phase === "running" ? null : 930,
+                          items: [],
+                        },
+                      ],
+                      nextCursor: "settled",
+                    };
+      const refreshReads = () =>
+        wire.requests.filter(
+          ({ method, params }) => method === "thread/turns/list" && params.sortDirection === "desc",
+        );
+      expect((yield* service.list()).chats[0]?.completedRunDurationMs).toBe(145_000);
+      const initialReads = refreshReads().length;
+      expect((yield* service.list()).chats[0]?.completedRunDurationMs).toBe(145_000);
+      expect(
+        refreshReads()
+          .slice(initialReads)
+          .map(({ params }) => params.cursor),
+      ).toEqual([null]);
+      phase = "running";
+      const beforeNew = refreshReads().length;
+      expect((yield* service.list()).chats[0]).toMatchObject({
+        status: "active",
+        completedRunDurationMs: 145_000,
+        latestTurn: { startedAt: 900, completedAt: null },
+      });
+      phase = "completed";
+      expect((yield* service.list()).chats[0]?.completedRunDurationMs).toBe(175_000);
+      expect(
+        refreshReads()
+          .slice(beforeNew)
+          .some(({ params }) => params.cursor === "older"),
+      ).toBe(false);
+      const beforeSettled = refreshReads().length;
+      expect((yield* service.list()).chats[0]?.completedRunDurationMs).toBe(175_000);
+      expect(refreshReads().slice(beforeSettled)).toHaveLength(1);
+    }),
+  ),
+);
+
+it.effect.each(["unavailable-page", "unknown-time", "repeated-cursor"])(
+  "omits the total when older Cloud timing is incomplete: %s",
+  (failure) =>
+    provide(
+      Effect.gen(function* () {
+        const service = yield* CodexCloudChats.CodexCloudChats;
+        wire.response = (method, params) =>
+          method === "thread/list"
+            ? { data: [{ ...thread, threadSource: "automation" }], nextCursor: null }
+            : params.sortDirection === "desc"
+              ? params.cursor === "older"
+                ? failure === "unavailable-page"
+                  ? "protocol-error"
+                  : {
+                      data: [
+                        {
+                          id: "first",
+                          status: "completed",
+                          startedAt: failure === "unknown-time" ? null : 0,
+                          completedAt: 120,
+                          items: [],
+                        },
+                      ],
+                      nextCursor: failure === "repeated-cursor" ? "older" : null,
+                    }
+                : {
+                    data: [
+                      {
+                        id: "last",
+                        status: "completed",
+                        startedAt: 600,
+                        completedAt: 625,
+                        items: [],
+                      },
+                    ],
+                    nextCursor: "older",
+                  }
+              : page;
+        expect((yield* service.list()).chats[0]).toMatchObject({
+          status: "idle",
+          completedRunDurationMs: null,
+          latestTurn: { startedAt: 600, completedAt: 625 },
+        });
+      }),
+    ),
+);
+
 it.effect.each(["protocol-error", "missing-status"])(
   "keeps automatic chats visible with unknown activity after a %s status read",
   (failure) =>
