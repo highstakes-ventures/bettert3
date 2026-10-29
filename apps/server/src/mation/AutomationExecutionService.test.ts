@@ -33,6 +33,8 @@ import type {
   ProjectionRecords,
 } from "../orchestration-v2/ProjectionStore.ts";
 
+const decodeExecutionInput = Schema.decodeEffect(MationExecutionInput);
+
 it.effect(
   "user-started email actions launch in the normal roster while scheduled executions remain Automatic",
   () =>
@@ -63,7 +65,7 @@ it.effect(
         const service = yield* Execution.AutomationExecutionService;
         for (const foreground of [true, undefined]) {
           launched = undefined;
-          const input = yield* Schema.decodeUnknownEffect(MationExecutionInput)({
+          const input = yield* decodeExecutionInput({
             title: "Investigate this email",
             prompt: "Read the Sentry alert",
             ...(foreground ? { foreground } : {}),
@@ -222,7 +224,7 @@ it.effect(
       );
       yield* Effect.gen(function* () {
         const service = yield* Execution.AutomationExecutionService;
-        const input = yield* Schema.decodeUnknownEffect(MationExecutionInput)({
+        const input = yield* decodeExecutionInput({
           foreground: true,
           title: "Investigation",
           prompt: records.messages[0]!.text,

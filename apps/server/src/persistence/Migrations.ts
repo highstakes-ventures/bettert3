@@ -77,7 +77,7 @@ import Migration0063 from "./Migrations/063_ProjectSections.ts";
 import Migration0064 from "./Migrations/064_Workflows.ts";
 import Migration0065 from "./Migrations/065_WorkflowThreadLookup.ts";
 
-export const migrationEntries = [
+const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
   [3, "CheckpointDiffBlobs", Migration0003],
