@@ -1615,7 +1615,7 @@ export function threadShellFromProjection(
     ...(projection.thread.automationOrigin !== undefined
       ? { automationOrigin: projection.thread.automationOrigin }
       : scheduledTaskId !== undefined
-        ? { automationOrigin: null }
+        ? { automationOrigin: undefined }
         : {}),
     ...(scheduledTaskId === undefined ? {} : { scheduledTaskId }),
     ...(executionDestination === undefined ? {} : { executionDestination }),
@@ -1912,7 +1912,7 @@ function shellFromState(input: {
       : input.state.backgroundWorkflowId !== null && input.state.ticketWorkflowId === null
         ? { automationOrigin: "t3" as const }
         : input.state.scheduledTaskId !== undefined
-          ? { automationOrigin: null }
+          ? { automationOrigin: undefined }
           : {}),
     ...(input.state.scheduledTaskId === undefined
       ? {}
