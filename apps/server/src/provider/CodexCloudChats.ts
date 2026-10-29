@@ -388,8 +388,8 @@ const make = Effect.gen(function* () {
   });
   const connections = yield* RcMap.make({
     idleTimeToLive: "30 seconds",
-    lookup: (auth: CloudIdentity) =>
-      Effect.gen(function* () {
+    lookup: Effect.fn("CodexCloudChats.connect")(
+      function* (auth: CloudIdentity) {
         const connection = yield* connect(auth.token, auth.accountId);
         yield* connection.request("initialize", {
           clientInfo: { name: "t3_cloud_chats", title: "T3 Cloud chats", version: "0.0.45" },
@@ -400,22 +400,22 @@ const make = Effect.gen(function* () {
           catch: () => new CloudChatError({ reason: "connection" }),
         });
         return connection;
-      }).pipe(
-        Effect.result,
-        // Share acquisition failures too, so concurrent borrowers invalidate the
-        // failed entry once without discarding a newer replacement.
-        Effect.map((result) => ({ result, invalidated: false })),
-      ),
+      },
+      Effect.result,
+      // Share acquisition failures too, so concurrent borrowers invalidate the
+      // failed entry once without discarding a newer replacement.
+      Effect.map((result) => ({ result, invalidated: false })),
+    ),
   });
-  const withCloud = <A>(
-    expectedAccount: string | null,
-    operation: (
-      request: CloudRequest,
-      accountId: string,
-      instanceId: ProviderInstanceId,
-    ) => Effect.Effect<A, CloudChatError>,
-  ) =>
-    Effect.gen(function* () {
+  const withCloud = Effect.fn("CodexCloudChats.withCloud")(
+    function* <A>(
+      expectedAccount: string | null,
+      operation: (
+        request: CloudRequest,
+        accountId: string,
+        instanceId: ProviderInstanceId,
+      ) => Effect.Effect<A, CloudChatError>,
+    ) {
       const auth = new CloudIdentity(yield* authenticate(expectedAccount));
       const attempt = Effect.scoped(
         Effect.gen(function* () {
@@ -440,10 +440,10 @@ const make = Effect.gen(function* () {
           () => attempt,
         ),
       );
-    }).pipe(
-      Effect.timeout("60 seconds"),
-      Effect.catchTags({ TimeoutError: () => new CloudChatError({ reason: "connection" }) }),
-    );
+    },
+    Effect.timeout("60 seconds"),
+    Effect.catchTags({ TimeoutError: () => new CloudChatError({ reason: "connection" }) }),
+  );
   const turns = (
     request: CloudRequest,
     threadId: string,
@@ -464,52 +464,57 @@ const make = Effect.gen(function* () {
       ),
     );
   let cachedAccount: string | null = null;
-  const summaries = new Map<
-    string,
-    { title: string; provenance: ReturnType<typeof cloudChatOrigin> }
-  >();
+  type Summary = {
+    title: string;
+    provenance: ReturnType<typeof cloudChatOrigin>;
+    timing?: { totalMs: number; turn: TurnsPage["data"][number] };
+  };
+  const summaries = new Map<string, Summary>();
   return CodexCloudChats.of({
     destinations: (instanceId) => authenticate(null, instanceId).pipe(Effect.flatMap(catalog)),
-    openClient: (destination, instanceId, onTermination) =>
-      Effect.gen(function* () {
-        const auth = yield* authenticate(destination.accountId, instanceId);
-        let verified = destination;
-        if (destination.existingThreadId) {
-          const connection = yield* connect(auth.token, auth.accountId);
-          yield* connection.request("initialize", {
-            clientInfo: { name: "t3_cloud_binding", version: "0.0.45" },
-            capabilities: { experimentalApi: true },
-          });
-          yield* Effect.sync(connection.notify);
-          const response = yield* connection.request("thread/read", {
-            threadId: destination.existingThreadId,
-            includeTurns: false,
-          });
-          const { thread } = yield* decodeCloudThread(response).pipe(
-            Effect.mapError(() => new CloudChatError({ reason: "protocol" })),
-          );
-          if (
-            thread.id !== destination.existingThreadId ||
-            thread.canAcceptDirectInput === false ||
-            thread.environments.length !== 1 ||
-            thread.environments[0]?.cwd !== destination.cwd
-          )
-            return yield* new CloudChatError({ reason: "protocol" });
-        } else {
-          const choices = yield* catalog(auth);
-          const choice = choices.find(
-            (choice) => choice.environmentConfigId === destination.environmentConfigId,
-          );
-          if (!choice || destination.cwd !== choice.cwd)
-            return yield* new CloudChatError({ reason: "protocol" });
-          verified = choice;
-        }
-        return yield* CodexCloudTransport.open({
-          token: auth.token,
-          destination: verified,
-          onTermination,
-        }).pipe(Effect.mapError(() => new CloudChatError({ reason: "connection" })));
-      }),
+    openClient: Effect.fn("CodexCloudChats.openClient")(function* (
+      ...[destination, instanceId, onTermination]: Parameters<
+        CodexCloudChats["Service"]["openClient"]
+      >
+    ) {
+      const auth = yield* authenticate(destination.accountId, instanceId);
+      let verified = destination;
+      if (destination.existingThreadId) {
+        const connection = yield* connect(auth.token, auth.accountId);
+        yield* connection.request("initialize", {
+          clientInfo: { name: "t3_cloud_binding", version: "0.0.45" },
+          capabilities: { experimentalApi: true },
+        });
+        yield* Effect.sync(connection.notify);
+        const response = yield* connection.request("thread/read", {
+          threadId: destination.existingThreadId,
+          includeTurns: false,
+        });
+        const { thread } = yield* decodeCloudThread(response).pipe(
+          Effect.mapError(() => new CloudChatError({ reason: "protocol" })),
+        );
+        if (
+          thread.id !== destination.existingThreadId ||
+          thread.canAcceptDirectInput === false ||
+          thread.environments.length !== 1 ||
+          thread.environments[0]?.cwd !== destination.cwd
+        )
+          return yield* new CloudChatError({ reason: "protocol" });
+      } else {
+        const choices = yield* catalog(auth);
+        const choice = choices.find(
+          (choice) => choice.environmentConfigId === destination.environmentConfigId,
+        );
+        if (!choice || destination.cwd !== choice.cwd)
+          return yield* new CloudChatError({ reason: "protocol" });
+        verified = choice;
+      }
+      return yield* CodexCloudTransport.open({
+        token: auth.token,
+        destination: verified,
+        onTermination,
+      }).pipe(Effect.mapError(() => new CloudChatError({ reason: "connection" })));
+    }),
     interrupt: (input) =>
       withCloud(input.accountId, (request) =>
         Effect.gen(function* () {
@@ -595,7 +600,7 @@ const make = Effect.gen(function* () {
             visible,
             (thread) =>
               Effect.gen(function* () {
-                let summary =
+                let summary: Summary | undefined =
                   thread.threadSource === "user" && thread.name?.trim()
                     ? {
                         title: thread.name.trim(),
@@ -628,9 +633,10 @@ const make = Effect.gen(function* () {
                 }
                 let status = thread.status.type;
                 let latestTurn: CloudChatSummary["latestTurn"];
+                let completedRunDurationMs: number | null = null;
                 if (summary.provenance.origin === "automatic") {
-                  // Cloud's list can say idle while a turn is running. Read only the
-                  // newest turn's metadata, without downloading its tool output.
+                  // Always refresh current activity. Settled turn metadata is reused
+                  // from this account's summary, without downloading tool output.
                   const latest = yield* turns(
                     request,
                     thread.id,
@@ -643,6 +649,70 @@ const make = Effect.gen(function* () {
                   latestTurn = turn
                     ? { startedAt: turn.startedAt ?? null, completedAt: turn.completedAt ?? null }
                     : null;
+                  if (latest._tag === "Success") {
+                    let metadata: TurnsPage | null = latest.success;
+                    let total = 0;
+                    let known = metadata.data.length > 0;
+                    const seen = new Set<string>();
+                    const cursors = new Set<string>();
+                    history: while (metadata !== null) {
+                      for (const item of metadata.data) {
+                        const cached = summary.timing;
+                        if (
+                          cached &&
+                          item.id === cached.turn.id &&
+                          item.status === cached.turn.status &&
+                          item.startedAt === cached.turn.startedAt &&
+                          item.completedAt === cached.turn.completedAt
+                        ) {
+                          total += cached.totalMs;
+                          break history;
+                        }
+                        if (seen.has(item.id)) continue;
+                        seen.add(item.id);
+                        if (item.startedAt == null) {
+                          known = false;
+                          continue;
+                        }
+                        if (item.status === "inProgress") continue;
+                        if (item.completedAt == null) {
+                          known = false;
+                          continue;
+                        }
+                        total += Math.max(
+                          0,
+                          Math.round((item.completedAt - item.startedAt) * 1000),
+                        );
+                      }
+                      const cursor: string | null = metadata.nextCursor;
+                      if (cursor === null) break;
+                      if (cursors.has(cursor)) {
+                        known = false;
+                        break;
+                      }
+                      cursors.add(cursor);
+                      const older: TurnsPage | null = yield* turns(
+                        request,
+                        thread.id,
+                        100,
+                        cursor,
+                        "desc",
+                        "notLoaded",
+                      ).pipe(Effect.orElseSucceed(() => null));
+                      metadata = older;
+                      if (metadata === null) known = false;
+                    }
+                    completedRunDurationMs = known ? total : null;
+                    if (
+                      known &&
+                      turn &&
+                      turn.status !== "inProgress" &&
+                      cachedAccount === accountSummaries
+                    ) {
+                      summary.timing = { totalMs: total, turn };
+                      summaries.set(thread.id, summary);
+                    }
+                  }
                   const turnStatus = turn?.status;
                   status =
                     turnStatus === "inProgress"
@@ -663,7 +733,7 @@ const make = Effect.gen(function* () {
                   origin: summary.provenance.origin,
                   repository: summary.provenance.repository,
                   githubRunUrl: summary.provenance.githubRunUrl,
-                  ...(latestTurn !== undefined ? { latestTurn } : {}),
+                  ...(latestTurn !== undefined ? { latestTurn, completedRunDurationMs } : {}),
                 };
               }),
             { concurrency: 4 },
