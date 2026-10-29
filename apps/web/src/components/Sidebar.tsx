@@ -162,7 +162,7 @@ import {
   filterSidebarProjectScopeItems,
   firstValidTimestampMs,
   isSidebarNestedLinkClick,
-  isSidebarThreadWorking,
+  resolveInboxThreadSection,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   planSidebarThreadDrop,
@@ -567,12 +567,14 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const active: EnvironmentThreadShell[] = [];
   const timer: EnvironmentThreadShell[] = [];
   const working: EnvironmentThreadShell[] = [];
+  const sections = { active, timer, working };
   const inbox = (thread: EnvironmentThreadShell) =>
-    !isSidebarThreadWorking(thread) && input.timerThreadKeys.has(threadShellKey(thread))
-      ? timer
-      : workingShelfEnabled && isSidebarThreadWorking(thread)
-        ? working
-        : active;
+    sections[
+      resolveInboxThreadSection(thread, {
+        hasTimer: input.timerThreadKeys.has(threadShellKey(thread)),
+        workingShelfEnabled,
+      })
+    ];
   const snoozed: EnvironmentThreadShell[] = [];
   const settled: EnvironmentThreadShell[] = [];
   const draggable = new Set<string>();
@@ -3459,7 +3461,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 marker="timer-header"
                                 className="mt-auto"
                                 label={
-                                  timerShelfExpanded ? "Timer" : `Timer (${timerThreads.length})`
+                                  timerShelfExpanded
+                                    ? "Waiting"
+                                    : `Waiting (${timerThreads.length})`
                                 }
                                 toggle={{
                                   expanded: timerShelfExpanded,

@@ -11,6 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   createInboxReturnTracker,
   createTimerThreadKeysAtom,
+  resolveInboxThreadSection,
   sortWorkingThreadsBySend,
 } from "./threadInbox.ts";
 
@@ -104,6 +105,42 @@ function thread(id: string, working: boolean) {
       : null,
   };
 }
+
+describe("inbox activity sections", () => {
+  const options = { hasTimer: false, workingShelfEnabled: true };
+  const running = thread("active", true);
+  const waiting = { ...running, runtime: { ...running.runtime!, status: "idle" as const } };
+
+  it("moves stopped background work and explicit thread waits to Waiting", () => {
+    expect(resolveInboxThreadSection(running, options)).toBe("working");
+    expect(resolveInboxThreadSection(waiting, options)).toBe("timer");
+    expect(resolveInboxThreadSection({ ...running, blockedOnThreadWait: true }, options)).toBe(
+      "timer",
+    );
+    expect(resolveInboxThreadSection(running, { ...options, workingShelfEnabled: false })).toBe(
+      "active",
+    );
+    expect(resolveInboxThreadSection(waiting, { ...options, workingShelfEnabled: false })).toBe(
+      "timer",
+    );
+    expect(resolveInboxThreadSection({ ...waiting, runtime: null }, options)).toBe("active");
+    expect(
+      resolveInboxThreadSection({ ...waiting, runtime: null }, { ...options, hasTimer: true }),
+    ).toBe("timer");
+  });
+
+  it("keeps attention requests and errors in the inbox even with a timer", () => {
+    for (const attention of [
+      { ...waiting, hasPendingApprovals: true },
+      { ...waiting, hasPendingUserInput: true },
+      { ...waiting, pendingSubagentRequest: "user_input" as const },
+      { ...waiting, interactionMode: "plan" as const, hasActionableProposedPlan: true },
+      { ...waiting, runtime: { ...waiting.runtime, status: "failed" as const } },
+    ]) {
+      expect(resolveInboxThreadSection(attention, { ...options, hasTimer: true })).toBe("active");
+    }
+  });
+});
 
 describe("createInboxReturnTracker", () => {
   it("stamps a thread when it stops working, but never on the first observation", () => {

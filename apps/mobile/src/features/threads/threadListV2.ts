@@ -18,7 +18,7 @@ import { resolveThreadProviderStack } from "@t3tools/client-runtime/state/models
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import {
   createInboxReturnTracker,
-  isThreadWorking,
+  resolveInboxThreadSection,
   sortInboxThreadsByReturn,
   sortWorkingThreadsBySend,
 } from "@t3tools/client-runtime/state/thread-inbox";
@@ -780,15 +780,12 @@ export function buildThreadListV2Items(input: {
       settled.push(thread);
     } else if (thread.pinnedAt != null) {
       pinned.push(thread);
-    } else if (
-      !isThreadWorking(thread) &&
-      input.timerThreadKeys?.has(`${thread.environmentId}:${thread.id}`)
-    ) {
-      timer.push(thread);
-    } else if (workingShelfEnabled && isThreadWorking(thread)) {
-      working.push(thread);
     } else {
-      active.push(thread);
+      const section = resolveInboxThreadSection(thread, {
+        hasTimer: input.timerThreadKeys?.has(`${thread.environmentId}:${thread.id}`) === true,
+        workingShelfEnabled,
+      });
+      (section === "timer" ? timer : section === "working" ? working : active).push(thread);
     }
   }
 

@@ -61,6 +61,32 @@ export function isThreadWorking(thread: WorkingThreadInput): boolean {
   return !(thread.interactionMode === "plan" && thread.hasActionableProposedPlan && runSettled);
 }
 
+/** The existing timer shelf is labelled Waiting; retain its key for saved expansion state. */
+export function resolveInboxThreadSection(
+  thread: WorkingThreadInput & { readonly blockedOnThreadWait?: boolean | undefined },
+  options: { readonly hasTimer: boolean; readonly workingShelfEnabled: boolean },
+): "active" | "timer" | "working" {
+  const waiting =
+    thread.runtime?.status === "idle" ||
+    (thread.runtime?.status === "running" && thread.blockedOnThreadWait === true);
+  if (
+    thread.hasPendingApprovals ||
+    thread.hasPendingUserInput ||
+    thread.pendingSubagentRequest != null ||
+    thread.runtime?.status === "failed" ||
+    (thread.interactionMode === "plan" &&
+      thread.hasActionableProposedPlan &&
+      (waiting || !threadRuntimeIsActive(thread.runtime)))
+  ) {
+    return "active";
+  }
+  if (isThreadWorking(thread)) {
+    if (waiting) return "timer";
+    return options.workingShelfEnabled ? "working" : "active";
+  }
+  return options.hasTimer ? "timer" : "active";
+}
+
 type InboxThreadInput = Pick<
   EnvironmentThreadShell,
   "id" | "environmentId" | "createdAt" | "unsettledAt" | "latestRun"

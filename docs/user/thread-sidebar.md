@@ -143,19 +143,20 @@ rename a thread, regenerate its title, or link and unlink a pull request. These 
 appear on web, desktop, and mobile without requiring the originating browser to remain
 open.
 
-Chats with an enabled interval or fixed-time schedule appear in the collapsible **Timer**
-section above Working while they are not working. Busy chats stay in Working and return to
-Timer when their work ends. Pausing or deleting the schedule returns the chat to its usual section.
-Pinned, snoozed, and settled chats keep their sections.
+Chats waiting for a timer, a background result, or another chat appear in the collapsible
+**Waiting** section. When work resumes, they move to Working if that section is enabled.
+Questions, approvals, errors, and plans that need your response stay in the active list.
+Pausing or deleting a timer returns its chat to the active list unless it is still waiting
+for background work. Pinned, snoozed, and settled chats keep their sections.
 
 ### Fold working threads (beta)
 
 Turn on **Settings → General → Working section (beta)** on web and desktop, or **Settings →
-Thread behavior → Working section** on iOS and Android, to move threads that are working or
-monitoring into a collapsed **Working** section below the active list. A thread returns to the top
-of the active list when it finishes, fails, or needs an approval or answer. The Working section
-lists the thread you last sent work to first. Pinned threads stay in the pinned section. Each
-device keeps its own choice.
+Thread behavior → Working section** on iOS and Android, to move active agent runs into a
+collapsed **Working** section below the active list. Chats waiting for background work or a
+timer stay in **Waiting**. A thread returns to the active list when no work or wait remains,
+or when it fails or needs an approval or answer. Working lists the thread you last sent work
+to first. Pinned threads stay in the pinned section. Each device keeps its own choice.
 
 While this is on, the active list is ordered by when each thread last came back to you, so you
 cannot drag or move threads within it. Your saved order returns when you turn it off.

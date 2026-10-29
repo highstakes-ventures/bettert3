@@ -243,7 +243,7 @@ type ThreadListV2ShelfHeaderProps = {
 };
 
 const SHELF_LABEL = {
-  timer: "Timer",
+  timer: "Waiting",
   working: "Working",
   snoozed: "Snoozed",
   settled: "Settled",
@@ -262,8 +262,8 @@ function ThreadListV2ShelfHeader(
         expanded: props.expanded,
         disabled: props.disabled,
         onToggle: props.onToggle,
-        accessibilityLabel: `${props.count} ${props.kind} ${props.count === 1 ? "thread" : "threads"}`,
-        accessibilityHint: `${props.expanded ? "Collapses" : "Expands"} the ${props.kind} threads.`,
+        accessibilityLabel: `${props.count} ${label.toLowerCase()} ${props.count === 1 ? "thread" : "threads"}`,
+        accessibilityHint: `${props.expanded ? "Collapses" : "Expands"} the ${label.toLowerCase()} threads.`,
       }}
     />
   );

@@ -1581,12 +1581,58 @@ describe("Working section beta", () => {
       ...input,
       threads: [{ ...timed, runtime: { ...running, status: "idle" } }],
     });
-    expect(waiting.timerCount).toBe(0);
-    expect(waiting.workingCount).toBe(1);
+    expect(waiting.timerCount).toBe(1);
+    expect(waiting.workingCount).toBe(0);
     const stopped = build({ ...input, threads: [{ ...timed, runtime: null }] });
     expect(stopped.timerCount).toBe(1);
     expect(stopped.workingCount).toBe(0);
     expect(ids(stopped)).toEqual(["timed"]);
+  });
+
+  it("moves background and thread waits into Waiting and back to Working when activity resumes", () => {
+    const active = makeThread({ id: ThreadId.make("active"), title: "active", runtime: running });
+    for (const waiting of [
+      { ...active, runtime: { ...running, status: "idle" as const } },
+      { ...active, blockedOnThreadWait: true },
+    ]) {
+      const layout = build({
+        threads: [waiting],
+        timerShelfExpanded: true,
+        workingShelfExpanded: true,
+      });
+      expect(layout.timerCount).toBe(1);
+      expect(layout.workingCount).toBe(0);
+      expect(ids(layout)).toEqual(["active"]);
+      expect(build({ threads: [waiting], workingShelfEnabled: false }).timerCount).toBe(1);
+    }
+    const resumed = build({
+      threads: [active],
+      timerShelfExpanded: true,
+      workingShelfExpanded: true,
+    });
+    expect(resumed.timerCount).toBe(0);
+    expect(resumed.workingCount).toBe(1);
+  });
+
+  it("keeps timed chats with questions, approvals, plans or errors in the inbox", () => {
+    const timed = makeThread({ id: ThreadId.make("timed-attention"), title: "timed-attention" });
+    for (const attention of [
+      { ...timed, runtime: { ...running, status: "idle" as const }, hasPendingApprovals: true },
+      { ...timed, hasPendingUserInput: true },
+      { ...timed, pendingSubagentRequest: "user_input" as const },
+      { ...timed, interactionMode: "plan" as const, hasActionableProposedPlan: true },
+      { ...timed, runtime: { ...running, status: "failed" as const } },
+    ]) {
+      const layout = build({
+        threads: [attention],
+        timerThreadKeys: new Set([`${environmentId}:timed-attention`]),
+        timerShelfExpanded: true,
+        workingShelfExpanded: true,
+      });
+      expect(layout.timerCount).toBe(0);
+      expect(layout.workingCount).toBe(0);
+      expect(ids(layout)).toEqual(["timed-attention"]);
+    }
   });
 
   it("folds unpinned working threads into a collapsed shelf", () => {
