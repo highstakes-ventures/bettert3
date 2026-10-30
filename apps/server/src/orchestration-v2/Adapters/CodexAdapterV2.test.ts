@@ -2,6 +2,7 @@ import { CloudChatError } from "@t3tools/contracts";
 import * as CodexCloudChats from "../../provider/CodexCloudChats.ts";
 import * as PlatformError from "effect/PlatformError";
 import * as Path from "effect/Path";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as CodexError from "effect-codex-app-server/errors";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import {
@@ -1669,7 +1670,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       ),
   );
 
-  it.effect("adds the session MCP server without replacing launch-argument servers", () =>
+  it.effect("keeps MCP and terminal credentials thread-local", () =>
     Effect.gen(function* () {
       const scenario = "launch-mcp-servers";
       yield* (yield* McpProviderSessions.McpProviderSessions).set({
@@ -1704,6 +1705,10 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           config: {
             "tools.update_plan.enabled": true,
             mcp_optional_startup_grace_ms: 10_000,
+            "shell_environment_policy.set.T3_ACP_MCP_NODE": "/t3/node",
+            "shell_environment_policy.set.T3_ACP_MCP_ENTRYPOINT": "/t3/bin.mjs",
+            "shell_environment_policy.set.T3_ACP_MCP_ENDPOINT": "http://127.0.0.1:43123/mcp",
+            "shell_environment_policy.set.T3_ACP_MCP_AUTHORIZATION": "Bearer secret-codex-token",
             "mcp_servers.t3-code": {
               url: "http://127.0.0.1:43123/mcp",
               tool_timeout_sec: 3_900,
@@ -1714,6 +1719,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       ]);
     }).pipe(
       Effect.scoped,
+      Effect.provideService(HostProcess.ExecutablePath, "/t3/node"),
+      Effect.provideService(HostProcess.Arguments, ["/t3/node", "/t3/bin.mjs"]),
+      Effect.provideService(HostProcess.IsExecutable, false),
       Effect.provide(
         Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
       ),

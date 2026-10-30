@@ -119,6 +119,7 @@ import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEve
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "../../provider/codexLaunchArgs.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import {
   MCP_APP_EXTENSION_ID,
@@ -1363,6 +1364,7 @@ export const CODEX_THREAD_CONFIG = {
 const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 
 function codexThreadRuntimeParams(input: {
+  readonly selfInvocation: SelfInvocation;
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
   readonly modelSelection?: { readonly model: string };
   readonly runtimePolicy?: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
@@ -1380,6 +1382,17 @@ function codexThreadRuntimeParams(input: {
       ...(mcpSession === undefined
         ? {}
         : {
+            // The shared app-server serves many chats. Keep bridge credentials
+            // in this thread's shell settings rather than its process environment.
+            "shell_environment_policy.set.T3_ACP_MCP_ENDPOINT": mcpSession.endpoint,
+            "shell_environment_policy.set.T3_ACP_MCP_AUTHORIZATION": mcpSession.authorizationHeader,
+            "shell_environment_policy.set.T3_ACP_MCP_NODE": input.selfInvocation.command,
+            ...(input.selfInvocation.entrypoint === undefined
+              ? {}
+              : {
+                  "shell_environment_policy.set.T3_ACP_MCP_ENTRYPOINT":
+                    input.selfInvocation.entrypoint,
+                }),
             // Override only T3's server so launch-argument MCP servers survive.
             "mcp_servers.t3-code": {
               url: mcpSession.endpoint,
@@ -1778,6 +1791,7 @@ export interface CodexAdapterV2Options {
 export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
   adapterOptions: CodexAdapterV2Options,
 ) {
+  const selfInvocation = yield* resolveSelfInvocation();
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const readMcpSession = (threadId: ThreadId | null) =>
     threadId === null ? Effect.succeed(undefined) : mcpSessions.read(threadId);
@@ -6815,6 +6829,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   return yield* client.request(
                     "thread/start",
                     codexThreadRuntimeParams({
+                      selfInvocation,
                       mcpSession,
                       modelSelection: threadInput.modelSelection,
                       runtimePolicy: yield* resolveRuntimePolicy(threadInput.runtimePolicy),
@@ -6849,6 +6864,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 threadId: nativeThreadId,
                 excludeTurns: true,
                 ...codexThreadRuntimeParams({
+                  selfInvocation,
                   mcpSession: input.runtimePolicy.runDestination
                     ? undefined
                     : yield* readMcpSession(
@@ -7591,6 +7607,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   threadId,
                   excludeTurns: true,
                   ...codexThreadRuntimeParams({
+                    selfInvocation,
                     mcpSession: input.runtimePolicy.runDestination
                       ? undefined
                       : yield* readMcpSession(threadInput.providerThread.appThreadId),
@@ -7645,6 +7662,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       ? {}
                       : { lastTurnId: boundary.lastTurnId }),
                     ...codexThreadRuntimeParams({
+                      selfInvocation,
                       mcpSession: yield* mcpSessions.read(threadInput.targetThreadId),
                       ...(threadInput.modelSelection === undefined
                         ? {}
