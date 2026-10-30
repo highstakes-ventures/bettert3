@@ -2514,6 +2514,61 @@ describe("composerDraftStore attachment references", () => {
 
 describe("remembered run destination", () => {
   beforeEach(resetComposerDraftStore);
+  it.each(["new", "reused", "retargeted"] as const)(
+    "uses the selected project for a %s draft after its remembered project was deleted",
+    (kind) => {
+      const deleted = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("deleted-project"));
+      const selected = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("selected-project"));
+      const first = DraftId.make("draft-before-project-deletion");
+      const next = kind === "reused" ? first : DraftId.make("draft-after-project-deletion");
+      const store = useComposerDraftStore.getState();
+      store.setLogicalProjectDraftThreadId("shared-project", deleted, first);
+      store.setDraftThreadContext(first, {
+        environmentSelection: "manual",
+        branch: "old-branch",
+        worktreePath: "/old-worktree",
+        envMode: "worktree",
+        runDestination: {
+          kind: "codexCloud",
+          accountId: "account",
+          environmentConfigId: "cloud-workspace",
+          name: "Cloud",
+          cwd: "/workspace",
+        },
+      });
+      store.setPrompt(first, "Keep my saved prompt");
+      if (kind === "retargeted") {
+        store.setLogicalProjectDraftThreadId("other-project", selected, next);
+        store.setPrompt(next, "Keep my current prompt");
+      }
+      const merge = useComposerDraftStore.persist.getOptions().merge!;
+      useComposerDraftStore.setState(
+        merge(
+          JSON.parse(
+            JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
+          ),
+          useComposerDraftStore.getInitialState(),
+        ),
+      );
+
+      store.setLogicalProjectDraftThreadId("shared-project", selected, next, {
+        isProjectMissing: (ref) => ref.projectId === deleted.projectId,
+      });
+
+      expect(store.getDraftSession(next)).toMatchObject({
+        ...selected,
+        runDestination: null,
+        branch: null,
+        worktreePath: null,
+      });
+      expect(store.getDraftSession(next)?.environmentSelection).not.toBe("manual");
+      expect(store.getComposerDraft(first)?.prompt).toBe("Keep my saved prompt");
+      if (kind === "retargeted") {
+        expect(store.getComposerDraft(next)?.prompt).toBe("Keep my current prompt");
+      }
+    },
+  );
+
   it.each([TEST_ENVIRONMENT_ID, OTHER_TEST_ENVIRONMENT_ID])(
     "checks uploads against the remembered destination when moving a draft from %s",
     (sourceEnvironmentId) => {
@@ -2591,7 +2646,10 @@ describe("remembered run destination", () => {
       runDestination: null,
       environmentSelection: "manual",
     });
-    store.setLogicalProjectDraftThreadId("shared-project", local, draft, { envMode: "local" });
+    store.setLogicalProjectDraftThreadId("shared-project", local, draft, {
+      envMode: "local",
+      isProjectMissing: () => false,
+    });
     expect(store.getDraftSession(draft)).toMatchObject(remote);
   });
 
@@ -2801,6 +2859,7 @@ describe("remembered run destination", () => {
     );
     useComposerDraftStore.setState(hydrated);
     useComposerDraftStore.getState().setLogicalProjectDraftThreadId(key, projectRef, second, {
+      isProjectMissing: () => false,
       envMode: "worktree",
       branch: "main",
     });

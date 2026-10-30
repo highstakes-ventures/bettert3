@@ -23,6 +23,7 @@ import {
 import { resolveNewThreadEnvMode, resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   readProject,
+  isProjectMissing,
   readProjects,
   readThreadShell,
   readThreadShells,
@@ -170,8 +171,13 @@ export function useNewThreadHandler() {
     const logicalProjectKey = project
       ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
       : scopedProjectKey(projectRef);
-    const preference =
+    const savedPreference =
       useComposerDraftStore.getState().lastRunDestinationByProject[logicalProjectKey];
+    const preference =
+      savedPreference &&
+      !isProjectMissing(scopeProjectRef(savedPreference.environmentId, savedPreference.projectId))
+        ? savedPreference
+        : undefined;
     const rememberedWorkspace = preference?.runDestination
       ? { envMode: "local" as const, startFromOrigin: false, branch: null, worktreePath: null }
       : preference?.workspace;
@@ -284,6 +290,7 @@ export function useNewThreadHandler() {
           projectRef,
           emptyStoredDraftThread.draftId,
           {
+            isProjectMissing,
             threadId: emptyStoredDraftThread.threadId,
             ...workspaceContext,
             ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
@@ -327,6 +334,7 @@ export function useNewThreadHandler() {
         setDraftThreadContext(currentRouteTarget.draftId, pickExplicitWorkspaceOptions(options));
       }
       setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, currentRouteTarget.draftId, {
+        isProjectMissing,
         threadId: latestActiveDraftThread.threadId,
         createdAt: latestActiveDraftThread.createdAt,
         runtimeMode: latestActiveDraftThread.runtimeMode,
@@ -358,6 +366,7 @@ export function useNewThreadHandler() {
         readThreadShell(scopeThreadRef(racedDraft.environmentId, racedDraft.threadId)) === null
       ) {
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, racedDraft.draftId, {
+          isProjectMissing,
           threadId: racedDraft.threadId,
           createdAt: racedDraft.createdAt,
           runtimeMode: racedDraft.runtimeMode,
@@ -372,6 +381,7 @@ export function useNewThreadHandler() {
         return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
       }
       setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
+        isProjectMissing,
         threadId,
         createdAt,
         ...(options?.sectionId === undefined ? {} : { sectionId: options.sectionId }),

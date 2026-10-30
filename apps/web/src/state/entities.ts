@@ -27,6 +27,7 @@ import type {
 } from "@t3tools/contracts";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { Atom } from "effect/reactivity";
+import * as Option from "effect/Option";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "./projects";
 import { environmentPresentations } from "./presentation";
@@ -34,6 +35,7 @@ import { environmentServerConfigsAtom } from "./server";
 import {
   allEnvironmentProjectSnapshotsReadyAtom,
   allEnvironmentShellsBootstrappedAtom,
+  environmentShell,
 } from "./shell";
 import { environmentThreadDetails, environmentThreadShells } from "./threads";
 import { waitForAtomValue } from "./waitForAtomValue";
@@ -243,6 +245,16 @@ export function useThreadCheckpointSummaries(
 
 export function readProject(ref: ScopedProjectRef): EnvironmentProject | null {
   return appAtomRegistry.get(environmentProjects.projectAtom(ref));
+}
+
+/** A pending or disconnected snapshot cannot establish that a project was deleted. */
+export function isProjectMissing(ref: ScopedProjectRef): boolean {
+  const shell = appAtomRegistry.get(environmentShell.stateValueAtom(ref.environmentId));
+  return (
+    shell.status === "live" &&
+    Option.isSome(shell.snapshot) &&
+    !shell.snapshot.value.projects.some((project) => project.id === ref.projectId)
+  );
 }
 
 export function readProjects(): ReadonlyArray<EnvironmentProject> {

@@ -30,6 +30,8 @@ const testState = vi.hoisted(() => {
     lastRunDestinationByProject: {} as Record<
       string,
       {
+        environmentId: string;
+        projectId: string;
         workspace?: {
           envMode: "local" | "worktree";
           startFromOrigin: boolean;
@@ -191,7 +193,16 @@ vi.mock("../state/entities", () => {
     defaultModelSelection: null,
   };
   return {
-    readProject: () => (testState.projectRemoved ? null : project),
+    isProjectMissing: (ref: { environmentId: string; projectId: string }) =>
+      testState.projectRemoved ||
+      ref.environmentId !== project.environmentId ||
+      ref.projectId !== project.id,
+    readProject: (ref: { environmentId: string; projectId: string }) =>
+      !testState.projectRemoved &&
+      ref.environmentId === project.environmentId &&
+      ref.projectId === project.id
+        ? project
+        : null,
     readProjects: () => (testState.projectRemoved ? [] : [project]),
     readThreadShell: () => null,
     readThreadShells: () => [],
@@ -232,7 +243,11 @@ describe.each([
       branch: "t3/existing",
       worktreePath: "/existing",
     };
-    testState.draftStore.lastRunDestinationByProject["remote-project"] = { workspace };
+    testState.draftStore.lastRunDestinationByProject["remote-project"] = {
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+      workspace,
+    };
     const pendingOpen = useNewThreadHandler()({
       environmentId: "environment-ssh",
       projectId: "project-remote",
@@ -244,6 +259,37 @@ describe.each([
       expect.anything(),
       opened!.draftId,
       expect.objectContaining(workspace),
+    );
+  });
+
+  it("ignores a deleted project's remembered workspace when opening its replacement", async () => {
+    testState.reset(draft, { envMode: "local", startFromOrigin: false });
+    testState.draftStore.lastRunDestinationByProject["remote-project"] = {
+      environmentId: "environment-ssh",
+      projectId: "deleted-project",
+      workspace: {
+        envMode: "worktree",
+        startFromOrigin: true,
+        branch: "old-branch",
+        worktreePath: "/deleted-project-worktree",
+      },
+    };
+    const pendingOpen = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    const opened = await pendingOpen;
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      expect.anything(),
+      opened!.draftId,
+      expect.objectContaining({
+        envMode: "local",
+        startFromOrigin: false,
+        branch: null,
+        worktreePath: null,
+      }),
     );
   });
 

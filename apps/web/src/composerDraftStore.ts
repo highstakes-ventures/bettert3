@@ -486,6 +486,7 @@ interface ComposerDraftStoreState {
     projectRef: ScopedProjectRef,
     draftId: DraftId,
     options?: {
+      isProjectMissing?: (projectRef: ScopedProjectRef) => boolean;
       threadId?: ThreadId;
       branch?: string | null;
       worktreePath?: string | null;
@@ -2628,16 +2629,24 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const logicalProjectChanged =
               existingThread !== undefined &&
               existingThread.logicalProjectKey !== normalizedLogicalProjectKey;
+            const projectIsAvailable = (environmentId: EnvironmentId, projectId: ProjectId) =>
+              !options?.isProjectMissing?.(scopeProjectRef(environmentId, projectId));
+            const draftProjectMissing =
+              existingThread !== undefined &&
+              !projectIsAvailable(existingThread.environmentId, existingThread.projectId);
             const preference =
               (!existingThread ||
                 existingThread.logicalProjectKey !== normalizedLogicalProjectKey) &&
-              options?.environmentSelection === undefined
+              options?.environmentSelection === undefined &&
+              savedPreference !== undefined &&
+              projectIsAvailable(savedPreference.environmentId, savedPreference.projectId)
                 ? savedPreference
                 : undefined;
             const keepDraftDestination =
               existingThread?.logicalProjectKey === normalizedLogicalProjectKey &&
               existingThread.environmentSelection === "manual" &&
-              options?.environmentSelection === undefined;
+              options?.environmentSelection === undefined &&
+              !draftProjectMissing;
             const preferredProjectRef =
               preference && preference.environmentSelection !== "auto"
                 ? scopeProjectRef(preference.environmentId, preference.projectId)
@@ -2664,7 +2673,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                         }
                       : {}),
                   }
-                : logicalProjectChanged
+                : logicalProjectChanged || draftProjectMissing
                   ? {
                       runDestination: null,
                       environmentSelection: "auto",

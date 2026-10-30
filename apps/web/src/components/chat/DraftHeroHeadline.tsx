@@ -31,7 +31,7 @@ import {
   buildSidebarProjectSnapshots,
   projectGroupsSpanEnvironments,
 } from "~/sidebarProjectGrouping";
-import { useProjects, useThreadShells } from "~/state/entities";
+import { isProjectMissing, useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { ProjectEnvironmentBadge } from "../ProjectEnvironmentBadge";
 import { ProjectFavicon } from "../ProjectFavicon";
@@ -193,8 +193,13 @@ export function DraftHeroHeadline({
     }
     const originalSession = useComposerDraftStore.getState().getDraftSession(draftId);
     if (!originalSession || originalSession.promotedTo) return;
-    const preference =
+    const savedPreference =
       useComposerDraftStore.getState().lastRunDestinationByProject[logicalProjectKey];
+    const preference =
+      savedPreference &&
+      !isProjectMissing(scopeProjectRef(savedPreference.environmentId, savedPreference.projectId))
+        ? savedPreference
+        : undefined;
     const config = environments.find(
       (environment) => environment.environmentId === project.environmentId,
     )?.serverConfig;
@@ -226,6 +231,7 @@ export function DraftHeroHeadline({
       scopeProjectRef(project.environmentId, project.id),
       draftId,
       {
+        isProjectMissing,
         envMode,
         startFromOrigin: resolveNewDraftStartFromOrigin({
           envMode,

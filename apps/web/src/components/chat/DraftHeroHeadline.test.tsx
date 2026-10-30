@@ -24,6 +24,10 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("~/state/entities", () => ({
+  isProjectMissing: (ref: { environmentId: string; projectId: string }) =>
+    !state.projects.some(
+      (project) => project.environmentId === ref.environmentId && project.id === ref.projectId,
+    ),
   useProjects: () => state.projects,
   useThreadShells: () => [],
 }));
