@@ -1,5 +1,6 @@
 import {
   CommandId,
+  ProjectId,
   type ModelSelection,
   type OrchestrationV2ThreadProjection,
   type ProviderInteractionMode,
@@ -12,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import * as ThreadManagement from "./ThreadManagementService.ts";
+import type { OrchestratorV2DispatchResult } from "./Orchestrator.ts";
 
 export class ThreadLifecycleError extends Schema.TaggedError<ThreadLifecycleError>()(
   "ThreadLifecycleError",
@@ -21,6 +23,7 @@ export class ThreadLifecycleError extends Schema.TaggedError<ThreadLifecycleErro
       "unarchive",
       "delete",
       "update-metadata",
+      "move-to-project",
       "set-runtime-mode",
       "set-interaction-mode",
       "set-model-selection",
@@ -56,6 +59,12 @@ export class ThreadLifecycleService extends Context.Service<
       readonly branch?: string | null;
       readonly worktreePath?: string | null;
     }) => Effect.Effect<Pick<OrchestrationV2ThreadProjection, "thread">, ThreadLifecycleError>;
+    readonly moveToProject: (input: {
+      readonly commandId: CommandId;
+      readonly threadId: ThreadId;
+      readonly sourceProjectId: ProjectId;
+      readonly targetProjectId: ProjectId;
+    }) => Effect.Effect<OrchestratorV2DispatchResult, ThreadLifecycleError>;
     readonly setRuntimeMode: (input: {
       readonly commandId: CommandId;
       readonly threadId: ThreadId;
@@ -88,6 +97,17 @@ const make = Effect.gen(function* () {
     );
 
   return ThreadLifecycleService.of({
+    moveToProject: (input) =>
+      threads.dispatch({ type: "thread.project.move", ...input }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ThreadLifecycleError({
+              operation: "move-to-project",
+              threadId: input.threadId,
+              cause,
+            }),
+        ),
+      ),
     archive: (input) =>
       dispatch("archive", input.threadId, {
         type: "thread.archive",

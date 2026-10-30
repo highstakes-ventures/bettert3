@@ -15,14 +15,16 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
-import type { McpInvocationScope } from "./McpInvocationContext.ts";
+import * as ThreadLifecycleService from "../orchestration-v2/ThreadLifecycleService.ts";
+import { assertFullAccess, readCaller } from "./threadAccess.ts";
+import * as McpInvocation from "./McpInvocationContext.ts";
 import { threadNotFound } from "./OrchestratorMcpService.ts";
 
 export class ThreadMetadataMcpService extends Context.Service<
   ThreadMetadataMcpService,
   {
     readonly update: (
-      scope: McpInvocationScope,
+      scope: McpInvocation.McpInvocationScope,
       input: ThreadMetadataMcpUpdateInput,
     ) => Effect.Effect<ThreadMetadataMcpUpdateResult, OrchestratorMcpFailure>;
   }
@@ -49,7 +51,7 @@ function stablePart(value: string): string {
 }
 
 function commandId(input: {
-  readonly scope: McpInvocationScope;
+  readonly scope: McpInvocation.McpInvocationScope;
   readonly threadId: ThreadId;
   readonly action: ThreadMetadataMcpAction;
   readonly requestKey: string;
@@ -74,6 +76,8 @@ function metadataCommand(input: {
   readonly update: ThreadMetadataMcpUpdateInput;
 }): Extract<OrchestrationV2Command, { readonly type: "thread.metadata.update" }> {
   switch (input.update.action) {
+    case "move_to_project":
+      throw new Error("Project moves are dispatched through ThreadLifecycleService.");
     case "set_section":
       return {
         type: "thread.metadata.update",
@@ -121,11 +125,18 @@ function resultFromThread(input: {
   readonly sequence: number;
   readonly thread: Pick<
     OrchestrationV2AppThread,
-    "id" | "sectionId" | "title" | "titleRegeneration" | "linkedPullRequest" | "updatedAt"
+    | "id"
+    | "projectId"
+    | "sectionId"
+    | "title"
+    | "titleRegeneration"
+    | "linkedPullRequest"
+    | "updatedAt"
   >;
 }): ThreadMetadataMcpUpdateResult {
   return {
     threadId: input.thread.id,
+    projectId: input.thread.projectId,
     action: input.action,
     commandId: input.commandId,
     sequence: input.sequence,
@@ -146,15 +157,26 @@ function resultFromThread(input: {
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+  const lifecycle = yield* ThreadLifecycleService.ThreadLifecycleService;
 
   const update = Effect.fn("ThreadMetadataMcpService.update")(function* (
-    scope: McpInvocationScope,
+    scope: McpInvocation.McpInvocationScope,
     input: ThreadMetadataMcpUpdateInput,
   ) {
     if (!scope.capabilities.has("orchestration")) {
       return yield* failure(
         "capability_denied",
         "This MCP credential does not grant orchestration capabilities.",
+      );
+    }
+
+    if (input.action === "move_to_project") {
+      yield* readCaller().pipe(
+        Effect.tap((caller) =>
+          assertFullAccess(caller, "Moving chats between projects requires full access."),
+        ),
+        Effect.provideService(McpInvocation.McpInvocationContext, scope),
+        Effect.provideService(ThreadManagementService.ThreadManagementService, threadManagement),
       );
     }
 
@@ -191,23 +213,31 @@ const make = Effect.gen(function* () {
       action: input.action,
       requestKey,
     });
-    const dispatched = yield* threadManagement
-      .dispatch(
+    const dispatched = yield* Effect.gen(function* () {
+      if (input.action === "move_to_project") {
+        return yield* lifecycle.moveToProject({
+          commandId: updateCommandId,
+          threadId,
+          sourceProjectId: input.sourceProjectId!,
+          targetProjectId: input.targetProjectId!,
+        });
+      }
+      return yield* threadManagement.dispatch(
         metadataCommand({
           commandId: updateCommandId,
           threadId,
           projectId: target.thread.projectId,
           update: input,
         }),
-      )
-      .pipe(
-        Effect.mapError((error) =>
-          failure(
-            "orchestration_error",
-            `Unable to ${input.action} for thread ${threadId}: ${errorMessage(error)}`,
-          ),
-        ),
       );
+    }).pipe(
+      Effect.mapError((error) =>
+        failure(
+          "orchestration_error",
+          `Unable to ${input.action} for thread ${threadId}: ${errorMessage(error)}`,
+        ),
+      ),
+    );
     const metadataEvent = dispatched.storedEvents.find(
       (stored) => stored.event.type === "thread.metadata-updated",
     );
@@ -240,4 +270,4 @@ export const layer: Layer.Layer<
   ThreadMetadataMcpService,
   never,
   Crypto.Crypto | ThreadManagementService.ThreadManagementService
-> = Layer.effect(ThreadMetadataMcpService, make);
+> = Layer.effect(ThreadMetadataMcpService, make).pipe(Layer.provide(ThreadLifecycleService.layer));

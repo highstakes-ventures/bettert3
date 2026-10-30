@@ -458,6 +458,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.active.reorder":
     case "thread.visit":
     case "thread.mark-unread":
+    case "thread.project.move":
     case "thread.metadata.update":
     case "thread.pull-request.link":
     case "thread.pull-request.unlink":
@@ -2705,6 +2706,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.active.reorder"
           | "thread.mark-unread"
           | "thread.metadata.update"
+          | "thread.project.move"
           | "thread.pull-request.link"
           | "thread.pull-request.unlink"
           | "thread.pull-request-link.sync"
@@ -2747,6 +2749,75 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         commandType: command.type,
         cause: `Thread ${command.threadId} is deleted.`,
       });
+    }
+    let movedSectionId = thread.sectionId;
+    if (command.type === "thread.project.move") {
+      const source = yield* projects.get(command.sourceProjectId).pipe(mapDispatchError(command));
+      const target = yield* projects.get(command.targetProjectId).pipe(mapDispatchError(command));
+      if (
+        Option.isNone(source) ||
+        Option.isNone(target) ||
+        source.value.deletedAt !== null ||
+        target.value.deletedAt !== null
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Both move projects must exist and be active.",
+        });
+      }
+      if (
+        thread.projectId !== command.sourceProjectId &&
+        thread.projectId !== command.targetProjectId
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "The chat no longer belongs to the expected source project.",
+        });
+      }
+      const sourceRoot = yield* fileSystem
+        .realPath(source.value.workspaceRoot)
+        .pipe(mapDispatchError(command));
+      const targetRoot = yield* fileSystem
+        .realPath(target.value.workspaceRoot)
+        .pipe(mapDispatchError(command));
+      if (sourceRoot !== targetRoot) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Project moves require the same checkout.",
+        });
+      }
+      const records = yield* projectionStore
+        .getThreadRecords(command.threadId, [
+          "runs",
+          "runtimeRequests",
+          "providerThreads",
+          "turnItems",
+        ])
+        .pipe(mapDispatchError(command));
+      if (
+        records.runs.some((run) => isBlockingRun(run) || run.status === "queued") ||
+        records.runtimeRequests.some((request) => request.status === "pending") ||
+        derivePendingBackgroundWork({
+          latestRun: latestExecutedRun(records.runs),
+          runs: records.runs,
+          providerThreads: records.providerThreads,
+          turnItems: records.turnItems,
+          activeProviderThreadId: thread.activeProviderThreadId,
+          pullRequests: thread.pullRequests,
+        }).length > 0
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Stop all chat work before moving it to another project.",
+        });
+      }
+      movedSectionId = target.value.sections?.some((section) => section.id === thread.sectionId)
+        ? thread.sectionId
+        : null;
     }
     if (
       command.type === "thread.pull-request.watch" &&
@@ -3255,6 +3326,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
         case "thread.mark-unread":
           return { ...thread, lastVisitedAt: markUnreadVisitedAt };
+        case "thread.project.move":
+          return {
+            ...thread,
+            projectId: command.targetProjectId,
+            sectionId: movedSectionId,
+            ...(thread.linkedPullRequest
+              ? {
+                  linkedPullRequest: {
+                    ...thread.linkedPullRequest,
+                    projectId: command.targetProjectId,
+                  },
+                }
+              : {}),
+          };
         case "thread.metadata.update": {
           const previousRecovery =
             thread.limitRecovery?.runId === command.limitRecovery?.runId &&
@@ -3611,6 +3696,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.active-reordered" as const;
         case "thread.mark-unread":
           return "thread.marked-unread" as const;
+        case "thread.project.move":
         case "thread.metadata.update":
         case "thread.title.regeneration.complete":
           return "thread.metadata-updated" as const;
@@ -11653,6 +11739,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.pin.reorder":
       case "thread.active.reorder":
       case "thread.mark-unread":
+      case "thread.project.move":
       case "thread.metadata.update":
       case "thread.pull-request.link":
       case "thread.pull-request.unlink":

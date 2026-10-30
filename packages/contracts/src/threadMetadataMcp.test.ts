@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
+import { ProjectId } from "./baseSchemas.ts";
 import { ThreadMetadataMcpUpdateInput } from "./threadMetadataMcp.ts";
 
 const decodeUpdate = Schema.decodeUnknownSync(ThreadMetadataMcpUpdateInput);
@@ -66,6 +67,33 @@ describe("ThreadMetadataMcpUpdateInput", () => {
           url: "https://github.com/pingdotgg/t3code/pull/8689",
         },
       }),
+    );
+  });
+
+  it("requires both project IDs and rejects mixed move payloads", () => {
+    assert.deepEqual(
+      decodeUpdate({
+        action: "move_to_project",
+        sourceProjectId: "old",
+        targetProjectId: "current",
+      }),
+      {
+        action: "move_to_project",
+        sourceProjectId: ProjectId.make("old"),
+        targetProjectId: ProjectId.make("current"),
+      },
+    );
+    assert.throws(() => decodeUpdate({ action: "move_to_project", targetProjectId: "current" }));
+    assert.throws(() =>
+      decodeUpdate({
+        action: "move_to_project",
+        sourceProjectId: "old",
+        targetProjectId: "current",
+        title: "Other",
+      }),
+    );
+    assert.throws(() =>
+      decodeUpdate({ action: "rename", title: "Other", targetProjectId: "current" }),
     );
   });
 

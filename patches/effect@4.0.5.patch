@@ -1,0 +1,26 @@
+diff --git a/dist/rpc/RpcGroup.d.ts b/dist/rpc/RpcGroup.d.ts
+index 3c71aa61d3e105a6c5d479b59a3be9d969d04e18..0efe51e3505dff4831480f04d38f8b2d7b90ac10 100644
+--- a/dist/rpc/RpcGroup.d.ts
++++ b/dist/rpc/RpcGroup.d.ts
+@@ -141,7 +141,7 @@ export type HandlerFrom<Rpc extends Rpc.Any, Tag extends Rpc["_tag"]> = Extract<
+  * @category utility types
+  * @since 4.0.0
+  */
+-export type HandlersServices<Rpcs extends Rpc.Any, Handlers> = keyof Handlers extends infer K ? K extends keyof Handlers & string ? HandlerServices<Rpcs, K, Handlers[K]> : never : never;
++export type HandlersServices<Rpcs extends Rpc.Any, Handlers> = keyof Handlers extends infer K ? K extends keyof Handlers & string ? HandlerServices<Extract<Rpcs, { readonly _tag: K }>, K, Handlers[K]> : never : never;
+ /**
+  * Computes the services required by a single RPC handler, excluding services
+  * provided by middleware and `Scope` where the server supplies it.
+diff --git a/src/rpc/RpcGroup.ts b/src/rpc/RpcGroup.ts
+index 1c91a06095b0241a1a868a1803ff52772e995358..626b724438391c5b1d50efca11aa9457dee4b4a4 100644
+--- a/src/rpc/RpcGroup.ts
++++ b/src/rpc/RpcGroup.ts
+@@ -212,7 +212,7 @@ export type HandlerFrom<Rpc extends Rpc.Any, Tag extends Rpc["_tag"]> = Extract<
+  * @since 4.0.0
+  */
+ export type HandlersServices<Rpcs extends Rpc.Any, Handlers> = keyof Handlers extends infer K ?
+-  K extends keyof Handlers & string ? HandlerServices<Rpcs, K, Handlers[K]> : never :
++  K extends keyof Handlers & string ? HandlerServices<Extract<Rpcs, { readonly _tag: K }>, K, Handlers[K]> : never :
+   never
+ 
+ /**

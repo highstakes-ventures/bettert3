@@ -223,7 +223,7 @@ const ThreadReadTool = Tool.make("t3_thread_read", {
 
 const ThreadUpdateTool = Tool.make("t3_thread_update", {
   description:
-    "Update metadata for a thread. Omit threadId to update this thread. Use action='rename' with title, action='regenerate_title' with no extra field, action='link_pull_request' with pullRequest, action='unlink_pull_request', or action='set_section' with sectionId, using null to remove the assignment. Section ids belong to the thread's project. Workspace and branch changes are intentionally not supported. clientRequestId makes retries idempotent.",
+    "Update metadata for a thread. Omit threadId to update this thread. Use action='rename' with title, action='regenerate_title' with no extra field, action='link_pull_request' with pullRequest, action='unlink_pull_request', or action='set_section' with sectionId, using null to remove the assignment. Use action='move_to_project' with sourceProjectId and targetProjectId to move a stopped chat between projects for the same checkout, preserving its ID and history. Section ids belong to the thread's project. Workspace and branch changes are intentionally not supported. clientRequestId makes retries idempotent.",
   parameters: ThreadMetadataMcpUpdateInput,
   success: ThreadMetadataMcpUpdateResult,
   failure: OrchestratorMcpFailure,

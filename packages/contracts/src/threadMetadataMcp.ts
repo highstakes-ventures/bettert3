@@ -5,6 +5,7 @@ import {
   IsoDateTime,
   NonNegativeInt,
   PositiveInt,
+  ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
@@ -64,9 +65,10 @@ export const ThreadMetadataMcpAction = Schema.Literals([
   "link_pull_request",
   "unlink_pull_request",
   "set_section",
+  "move_to_project",
 ]).annotate({
   description:
-    "Metadata mutation: rename, regenerate_title, link_pull_request, unlink_pull_request, or set_section.",
+    "Metadata mutation: rename, regenerate_title, link_pull_request, unlink_pull_request, set_section, or move_to_project.",
 });
 export type ThreadMetadataMcpAction = typeof ThreadMetadataMcpAction.Type;
 
@@ -84,6 +86,13 @@ export const ThreadMetadataMcpUpdateInput = Schema.Struct({
     description: "Thread to update. Omit to update the calling thread.",
   }),
   action: ThreadMetadataMcpAction,
+  sourceProjectId: Schema.optional(ProjectId).annotate({
+    description: "Expected current project for move_to_project.",
+  }),
+  targetProjectId: Schema.optional(ProjectId).annotate({
+    description:
+      "Destination project for move_to_project. Both projects must use the same checkout; the chat must be stopped.",
+  }),
   sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).annotate({
     description: "Project section id for set_section. Pass null to remove the assignment.",
   }),
@@ -94,6 +103,18 @@ export const ThreadMetadataMcpUpdateInput = Schema.Struct({
   clientRequestId: Schema.optional(ThreadMetadataClientRequestId),
 }).check(
   Schema.makeFilter((input) => {
+    if (input.action === "move_to_project") {
+      return input.sourceProjectId !== undefined &&
+        input.targetProjectId !== undefined &&
+        input.title === undefined &&
+        input.sectionId === undefined &&
+        input.pullRequest === undefined
+        ? true
+        : "move_to_project requires sourceProjectId and targetProjectId only.";
+    }
+    if (input.sourceProjectId !== undefined || input.targetProjectId !== undefined) {
+      return `${input.action} does not accept project move fields.`;
+    }
     if (input.action !== "set_section" && input.sectionId !== undefined) {
       return `${input.action} does not accept sectionId.`;
     }
@@ -124,6 +145,7 @@ export type ThreadMetadataMcpUpdateInput = typeof ThreadMetadataMcpUpdateInput.T
 
 export const ThreadMetadataMcpUpdateResult = Schema.Struct({
   threadId: ThreadId,
+  projectId: Schema.optional(ProjectId),
   action: ThreadMetadataMcpAction,
   commandId: CommandId,
   sequence: NonNegativeInt,

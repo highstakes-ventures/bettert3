@@ -269,6 +269,10 @@ When no image is found, web and desktop show a two-character monogram with a col
 from the icon palette, derived from the saved project name. For example, `Nebula` becomes `NA`,
 `Silver Orchard` becomes `SO`, and `M7 Forge` becomes `M7`.
 
+## Move chats between duplicate projects
+
+Ask your agent to move stopped chats into the project you want to keep. Both projects must point to the same checkout. Section assignments are cleared when the destination does not have that section. Chat IDs, conversation history, attachments, subchats, and settled state stay with the chats. Moving requires full access and refuses queued work, pending input, and background work. Remove the old project after verifying it is empty.
+
 ## Keep the default branch current
 
 In Source Control, enable **Automatically pull** to keep the default-branch checkout up to date

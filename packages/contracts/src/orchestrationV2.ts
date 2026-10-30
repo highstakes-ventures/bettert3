@@ -2719,6 +2719,13 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
   }),
   Schema.Struct({
+    type: Schema.Literal("thread.project.move"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    sourceProjectId: ProjectId,
+    targetProjectId: ProjectId,
+  }),
+  Schema.Struct({
     type: Schema.Literal("thread.metadata.update"),
     sectionId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     commandId: CommandId,
