@@ -22,6 +22,7 @@ import * as Stream from "effect/Stream";
 import * as GitManager from "../git/GitManager.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -310,6 +311,7 @@ export const make = Effect.gen(function* () {
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const git = yield* GitManager.GitManager;
   const pullRequests = yield* PullRequestService.PullRequestService;
+  const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const terminals = yield* TerminalManager.TerminalManager;
@@ -355,6 +357,16 @@ export const make = Effect.gen(function* () {
           autoSettleKeepPullRequests: currentSettings.sidebarAutoSettleKeepPullRequests,
         });
         if (settledAt === null) return thread;
+        // Check after PR lookups: a follow-up may have been scheduled while they ran.
+        const { tasks } = yield* scheduledTasks.list();
+        if (
+          tasks.some(
+            (task) =>
+              task.enabled && task.threadId === thread.id && task.schedule.type !== "webhook",
+          )
+        ) {
+          return null;
+        }
         const uuid = yield* crypto.randomUUIDv4();
         yield* orchestrator.dispatch({
           type: "thread.auto-settle",

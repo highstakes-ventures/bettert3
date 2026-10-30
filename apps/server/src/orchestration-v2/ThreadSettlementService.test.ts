@@ -7,7 +7,9 @@ import {
   ProjectId,
   EventId,
   ProviderInstanceId,
+  ScheduledTaskId,
   ThreadId,
+  type ScheduledTask,
   type OrchestrationProjectShell,
   type OrchestrationV2AppThread,
   type OrchestrationV2Command,
@@ -33,6 +35,7 @@ import { TestClock } from "effect/testing";
 import * as GitManager from "../git/GitManager.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerActivation from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -506,6 +509,7 @@ function makeBranchPullRequest(state: "open" | "closed" | "merged") {
 
 interface HarnessOptions {
   readonly snapshot: SettlementSnapshot;
+  readonly scheduledTasks?: ReadonlyArray<ScheduledTask>;
   readonly settings?: ContractServerSettings;
   readonly branchPullRequest?: GitManager.GitManager["Service"]["branchPullRequest"];
   readonly pullRequestSummary?: PullRequestService.PullRequestService["Service"]["summary"];
@@ -521,6 +525,7 @@ interface HarnessOptions {
 const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options: HarnessOptions) {
   const activation = yield* Deferred.make<void>();
   const snapshots = yield* Ref.make(options.snapshot);
+  const scheduledTasks = yield* Ref.make(options.scheduledTasks ?? []);
   const snapshotReadCount = yield* Ref.make(0);
   const snapshotReads = yield* Queue.unbounded<number>();
   const candidateReads = yield* Ref.make<ReadonlyArray<string | undefined>>([]);
@@ -602,6 +607,9 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   });
 
   const layerDependencies = Layer.mergeAll(
+    Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+      list: () => Ref.get(scheduledTasks).pipe(Effect.map((tasks) => ({ tasks }))),
+    }),
     Layer.mock(ProjectStore.ProjectStoreV2)({
       listShells: () => Ref.get(snapshots).pipe(Effect.map((snapshot) => snapshot.projects)),
     }),
@@ -660,6 +668,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   return {
     activation,
     snapshots,
+    scheduledTasks,
     snapshotReadCount,
     snapshotReads,
     candidateReads,
@@ -694,6 +703,82 @@ const startHarness = Effect.fn("startThreadSettlementHarness")(function* (
 });
 
 describe("ThreadSettlementServiceV2 worker", () => {
+  it.effect(
+    "keeps timed follow-ups waiting after merge until their timers are paused or deleted",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* TestClock.setTime(Date.parse(NOW));
+          const interval = makeThread("interval", { branch: "feature" });
+          const fixed = makeThread("fixed", { branch: "feature" });
+          const paused = makeThread("paused", { branch: "feature" });
+          const webhook = makeThread("webhook", { branch: "feature" });
+          const unbound = makeThread("unbound", { branch: "feature" });
+          const timer: ScheduledTask = {
+            id: ScheduledTaskId.make("interval"),
+            title: "Review setup once",
+            prompt: "Check the completed setup tomorrow.",
+            enabled: true,
+            schedule: { type: "interval", everyMs: DAY_MS },
+            projectId: PROJECT_ID,
+            threadId: interval.id,
+            workspaceStrategy: { type: "root" },
+            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdBy: "agent",
+            creationSource: "mcp",
+            createdAt: NOW,
+            updatedAt: NOW,
+            nextRunAt: "2026-09-02T12:00:00.000Z",
+            lastRunAt: null,
+            lastRunStatus: "never",
+            lastRunError: null,
+            runCount: 0,
+          };
+          const fixedTimer: ScheduledTask = {
+            ...timer,
+            id: ScheduledTaskId.make("fixed"),
+            threadId: fixed.id,
+            schedule: { type: "fixed_time", timeOfDay: "09:00" },
+          };
+          const fixture = yield* makeHarness({
+            snapshot: makeSnapshot([interval, fixed, paused, webhook, unbound]),
+            scheduledTasks: [
+              timer,
+              fixedTimer,
+              { ...timer, id: ScheduledTaskId.make("paused"), threadId: paused.id, enabled: false },
+              {
+                ...timer,
+                id: ScheduledTaskId.make("webhook"),
+                threadId: webhook.id,
+                schedule: { type: "webhook", signature: null },
+              },
+              { ...timer, id: ScheduledTaskId.make("unbound"), threadId: null },
+            ],
+            settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: null },
+            branchPullRequest: () => Effect.succeed(makeBranchPullRequest("merged")),
+          });
+          yield* Effect.gen(function* () {
+            const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+            yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+            expect(
+              (yield* Ref.get(fixture.commands)).map((command) => command.threadId).sort(),
+            ).toEqual([paused.id, webhook.id, unbound.id].sort());
+
+            yield* Ref.set(fixture.snapshots, makeSnapshot([interval, fixed]));
+            yield* Ref.set(fixture.scheduledTasks, [{ ...fixedTimer, enabled: false }]);
+            yield* TestClock.adjust("1 minute");
+            yield* Queue.take(fixture.snapshotReads);
+            yield* service.drain;
+            expect(
+              (yield* Ref.get(fixture.commands)).map((command) => command.threadId).sort(),
+            ).toEqual([paused.id, webhook.id, unbound.id, interval.id, fixed.id].sort());
+          }).pipe(Effect.provide(fixture.layer));
+        }),
+      ),
+  );
+
   it.effect("settles finished preparation even when general automatic settlement is off", () =>
     Effect.scoped(
       Effect.gen(function* () {
