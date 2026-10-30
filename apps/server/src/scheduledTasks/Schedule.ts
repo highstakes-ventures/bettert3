@@ -13,6 +13,7 @@ export function nextScheduledRunAt(
   schedule: ScheduledTaskSchedule,
   from: DateTime.DateTime,
 ): DateTime.DateTime | null {
+  if (schedule.type === "once") return null;
   if (schedule.type === "webhook") return null;
   if (schedule.type === "interval") {
     // Persisted rows created before the one-minute floor remain readable, but
@@ -46,6 +47,7 @@ function weekdayKey(weekdays: ReadonlyArray<number> | undefined): string {
 }
 
 export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedule): boolean {
+  if (a.type === "once") return b.type === "once" && a.at === b.at;
   if (a.type === "interval") {
     return b.type === "interval" && a.everyMs === b.everyMs;
   }
@@ -77,6 +79,7 @@ export function isMissedFixedTimeRun(
 }
 
 function describeSchedule(schedule: ScheduledTaskSchedule): string {
+  if (schedule.type === "once") return `Once at ${schedule.at}`;
   if (schedule.type === "webhook") return "On webhook";
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / MINUTE_MS;

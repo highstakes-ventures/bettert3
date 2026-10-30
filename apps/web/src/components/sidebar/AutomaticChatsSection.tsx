@@ -1,6 +1,6 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { CloudChatSummary } from "@t3tools/contracts";
+import type { CloudChatSummary, ScheduledTask } from "@t3tools/contracts";
 import {
   CheckCheckIcon,
   CircleHelpIcon,
@@ -253,12 +253,12 @@ function AutomaticRowContent({
 
 function localAutomaticState(
   thread: ThreadShell,
-  enabled: boolean,
+  tasks: ReadonlyArray<ScheduledTask>,
   bound: boolean,
   cloudChat: CloudChatSummary | undefined,
 ) {
   const source = thread.source;
-  const threadStatus = resolveSidebarThreadStatus(thread, [{ threadId: thread.id, enabled }]);
+  const threadStatus = resolveSidebarThreadStatus(thread, tasks);
   const hasNativeRun =
     source.latestRunId != null ||
     source.latestRunStartedAt != null ||
@@ -277,14 +277,17 @@ function localAutomaticState(
           failed: "Failed",
           limited: "Usage limit",
           waiting: "Waiting",
-          ready: bound ? "Paused" : "Completed",
+          ready:
+            bound && !tasks.some((task) => task.threadId === thread.id && task.enabled)
+              ? "Paused"
+              : "Completed",
         }[threadStatus];
   return { hasNativeRun, status };
 }
 
 function LocalAutomaticRow({
   thread,
-  enabled,
+  tasks,
   bound,
   cloudChat,
   accountId,
@@ -293,7 +296,7 @@ function LocalAutomaticRow({
   onThreadOpen,
 }: {
   thread: ThreadShell;
-  enabled: boolean;
+  tasks: ReadonlyArray<ScheduledTask>;
   bound: boolean;
   cloudChat: CloudChatSummary | undefined;
   accountId: string | undefined;
@@ -313,7 +316,7 @@ function LocalAutomaticRow({
       params.cloudThreadId === cloudChat?.id &&
       params.cloudEnvironmentId === thread.environmentId);
   const source = thread.source;
-  const { hasNativeRun, status } = localAutomaticState(thread, enabled, bound, cloudChat);
+  const { hasNativeRun, status } = localAutomaticState(thread, tasks, bound, cloudChat);
   // Imported timestamps may be ordering fallbacks; Cloud owns their measured timing.
   const importedRun = source.latestRunId?.startsWith(`cloud-run:${thread.id}:`) === true;
   const elapsed: RunTiming | null =
@@ -553,7 +556,7 @@ export function AutomaticChatsSection({
     (thread) =>
       localAutomaticState(
         thread,
-        localTasks.some((task) => task.threadId === thread.id && task.enabled),
+        localTasks,
         localTasks.some((task) => task.threadId === thread.id),
         localCloudChat(thread),
       ).status,
@@ -709,7 +712,7 @@ export function AutomaticChatsSection({
             <LocalAutomaticRow
               key={thread.id}
               thread={thread}
-              enabled={localTasks.some((task) => task.threadId === thread.id && task.enabled)}
+              tasks={localTasks}
               bound={localTasks.some((task) => task.threadId === thread.id)}
               cloudChat={localCloudChat(thread)}
               accountId={data?.accountId}

@@ -328,7 +328,13 @@ describe("resolveSidebarThreadStatus", () => {
 
   it("waits between scheduled runs even when the last completion is unread", () => {
     const thread = { ...idle, runtime: { ...runtime, status: "completed" as const } };
-    const task = { threadId: thread.id, enabled: true };
+    const task = {
+      threadId: thread.id,
+      enabled: true,
+      schedule: { type: "once" as const, at: "2026-10-31T14:04:08.930Z" },
+      nextRunAt: "2026-10-31T14:04:08.930Z",
+      lastRunStatus: "never" as const,
+    };
     const status = resolveSidebarThreadStatus(thread, [task]);
 
     expect(status).toBe("waiting");
@@ -345,13 +351,31 @@ describe("resolveSidebarThreadStatus", () => {
     expect(resolveSidebarThreadStatus({ ...thread, runtime }, [task])).toBe("working");
     expect(resolveSidebarThreadStatus(thread, [{ ...task, enabled: false }])).toBe("ready");
     expect(
+      resolveSidebarThreadStatus(thread, [
+        { ...task, nextRunAt: null, pendingDispatchThreadIds: [thread.id] },
+      ]),
+    ).toBe("waiting");
+    expect(
+      resolveSidebarThreadStatus(thread, [
+        { ...task, nextRunAt: null, pendingDispatchThreadIds: [] },
+      ]),
+    ).toBe("ready");
+    expect(
       resolveSidebarThreadStatus(thread, [{ ...task, threadId: ThreadId.make("other-thread") }]),
     ).toBe("ready");
     expect(resolveSidebarThreadStatus(thread, [])).toBe("ready");
   });
 
   it("does not let a schedule hide pending input or a failed run", () => {
-    const tasks = [{ threadId: idle.id, enabled: true }];
+    const tasks = [
+      {
+        threadId: idle.id,
+        enabled: true,
+        schedule: { type: "interval" as const, everyMs: 60_000 },
+        nextRunAt: "2026-10-31T14:04:08.930Z",
+        lastRunStatus: "never" as const,
+      },
+    ];
     expect(resolveSidebarThreadStatus({ ...idle, hasPendingApprovals: true }, tasks)).toBe(
       "approval",
     );

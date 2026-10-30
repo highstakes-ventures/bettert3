@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-import { EnvironmentId, ThreadId, type CloudChatSummary } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ThreadId,
+  type CloudChatSummary,
+  type ScheduledTask,
+} from "@t3tools/contracts";
 import { act, type ReactNode } from "react";
 import * as DateTime from "effect/DateTime";
 import { createRoot, type Root } from "react-dom/client";
@@ -49,7 +54,10 @@ const state = vi.hoisted(() => ({
   visit: vi.fn(),
   hasMore: false,
   cloudError: null as string | null,
-  tasks: [] as { threadId: string; enabled: boolean }[],
+  tasks: [] as Pick<
+    ScheduledTask,
+    "threadId" | "enabled" | "schedule" | "nextRunAt" | "pendingDispatchThreadIds"
+  >[],
 }));
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => state.params,
@@ -401,6 +409,14 @@ it.each([
 const localVisitKey = (environmentId: string, threadId: string) =>
   scopedThreadKey(scopeThreadRef(EnvironmentId.make(environmentId), ThreadId.make(threadId)));
 
+const localTask = (threadId: string, enabled: boolean) => ({
+  threadId: ThreadId.make(threadId),
+  enabled,
+  schedule: { type: "interval" as const, everyMs: 60_000 },
+  nextRunAt: enabled ? "2026-10-31T14:04:08.930Z" : null,
+  pendingDispatchThreadIds: [] as ReturnType<typeof ThreadId.make>[],
+});
+
 const localThread = (id: string, environmentId = "env") => ({
   id,
   environmentId,
@@ -651,7 +667,7 @@ it("keeps manual chats out of Automatic before and after their timer fires", asy
     },
   ];
   for (const enabled of [true, false]) {
-    state.tasks = state.threads.map((thread) => ({ threadId: thread.id, enabled }));
+    state.tasks = state.threads.map((thread) => localTask(thread.id, enabled));
     await render(true);
     expect(container.querySelectorAll("a")).toHaveLength(0);
   }
@@ -673,10 +689,9 @@ it("keeps paused and running local workflows visible when Cloud fails and isolat
     { ...localThread("archived"), archivedAt: "2026-10-26T13:00:00Z" },
     localThread("manual"),
   ];
-  state.tasks = ["paused", "running", "other", "archived"].map((threadId) => ({
-    threadId,
-    enabled: false,
-  }));
+  state.tasks = ["paused", "running", "other", "archived"].map((threadId) =>
+    localTask(threadId, false),
+  );
   await render(true);
   expect(
     container.querySelector('a[aria-label="Local paused, paused"]')?.getAttribute("href"),
@@ -686,7 +701,9 @@ it("keeps paused and running local workflows visible when Cloud fails and isolat
   expect(container.textContent).not.toContain("Local other");
   expect(container.textContent).not.toContain("Local archived");
   expect(container.textContent).not.toContain("Local manual");
-  state.tasks[0]!.enabled = true;
+  state.tasks = state.tasks.map((task, index) =>
+    index === 0 ? { ...task, enabled: true, nextRunAt: "2026-10-31T14:04:08.930Z" } : task,
+  );
   await render(true);
   expect(container.querySelector('a[aria-label="Local paused, waiting"]')).not.toBeNull();
 });
@@ -697,7 +714,7 @@ it("keeps the selected local workflow visible beyond the first page in its own e
     ...localThread(`workflow-${index}`),
     source: { automationOrigin: "t3" },
   }));
-  state.tasks = state.threads.map((thread) => ({ threadId: thread.id, enabled: true }));
+  state.tasks = state.threads.map((thread) => localTask(thread.id, true));
   state.params = { threadId: "workflow-39", environmentId: "env" };
   await render(true);
   expect(container.querySelectorAll("a")).toHaveLength(11);
@@ -1001,4 +1018,20 @@ it("keeps completed work in the task clock while another reply runs and after it
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("keeps a one-time dispatch waiting and shows its consumed trigger as completed", async () => {
+  state.threads = [{ ...localThread("one-time"), source: { automationOrigin: "external" } }];
+  const task = {
+    ...localTask("one-time", true),
+    schedule: { type: "once" as const, at: "2026-10-31T14:04:08.930Z" },
+    nextRunAt: null,
+    pendingDispatchThreadIds: [ThreadId.make("one-time")],
+  };
+  state.tasks = [task];
+  await render(true);
+  expect(container.querySelector('a[aria-label="Local one-time, waiting"]')).not.toBeNull();
+  state.tasks = [{ ...task, pendingDispatchThreadIds: [] }];
+  await render(true);
+  expect(container.querySelector('a[aria-label="Local one-time, completed"]')).not.toBeNull();
 });

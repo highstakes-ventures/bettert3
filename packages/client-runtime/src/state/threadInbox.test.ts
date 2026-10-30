@@ -6,6 +6,7 @@ import {
   type ScheduledTask,
 } from "@t3tools/contracts";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
+import * as Option from "effect/Option";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -24,12 +25,24 @@ it("tracks enabled timed schedules per environment and removes paused or deleted
     threadId: sharedThreadId,
     enabled: true,
     schedule: { type: "interval", everyMs: 60_000 },
+    nextRunAt: "2026-10-31T14:04:08.930Z",
+    lastRunStatus: "never",
   } as const;
   type Tasks = {
-    readonly tasks: ReadonlyArray<Pick<ScheduledTask, "threadId" | "enabled" | "schedule">>;
+    readonly tasks: ReadonlyArray<
+      Pick<
+        ScheduledTask,
+        | "threadId"
+        | "enabled"
+        | "schedule"
+        | "nextRunAt"
+        | "lastRunStatus"
+        | "pendingDispatchThreadIds"
+      >
+    >;
   };
   const tasks = Atom.family((_environmentId: EnvironmentId) =>
-    Atom.make(AsyncResult.success<Tasks>({ tasks: [] })),
+    Atom.make<AsyncResult.AsyncResult<Tasks, string>>(AsyncResult.success<Tasks>({ tasks: [] })),
   );
   const environments = Atom.make<ReadonlyArray<EnvironmentId>>([environmentId, otherEnvironmentId]);
   const timers = createTimerThreadKeysAtom({
@@ -65,6 +78,42 @@ it("tracks enabled timed schedules per environment and removes paused or deleted
       `${environmentId}:shared`,
       `${otherEnvironmentId}:shared`,
     ]);
+
+    const pending: Tasks = {
+      tasks: [
+        {
+          ...timer,
+          schedule: { type: "once", at: timer.nextRunAt },
+          nextRunAt: null,
+          lastRunStatus: "running",
+          pendingDispatchThreadIds: [sharedThreadId],
+        },
+      ],
+    };
+    registry.set(tasks(environmentId), AsyncResult.success(pending));
+    expect(registry.get(timers).has(`${environmentId}:shared`)).toBe(true);
+    registry.set(
+      tasks(environmentId),
+      AsyncResult.success({
+        tasks: [{ ...pending.tasks[0]!, threadId: ThreadId.make("new-target") }],
+      }),
+    );
+    expect(registry.get(timers).has(`${environmentId}:shared`)).toBe(true);
+    expect(registry.get(timers).has(`${environmentId}:new-target`)).toBe(false);
+    registry.set(
+      tasks(environmentId),
+      AsyncResult.failWithPrevious("Mation disconnected", {
+        previous: Option.some(AsyncResult.success(pending)),
+      }),
+    );
+    expect(registry.get(timers).has(`${environmentId}:shared`)).toBe(true);
+    registry.set(
+      tasks(environmentId),
+      AsyncResult.success({
+        tasks: [{ ...pending.tasks[0]!, lastRunStatus: "succeeded", pendingDispatchThreadIds: [] }],
+      }),
+    );
+    expect([...registry.get(timers)]).toEqual([`${otherEnvironmentId}:shared`]);
 
     registry.set(
       tasks(environmentId),

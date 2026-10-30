@@ -81,6 +81,8 @@ export const DEFAULT_SCHEDULE: ScheduleDraft = {
 
 export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): ScheduleDraft {
   switch (task.schedule.type) {
+    case "once":
+      throw new Error("One-time triggers are managed in Mation.");
     case "fixed_time":
       return {
         ...DEFAULT_SCHEDULE,

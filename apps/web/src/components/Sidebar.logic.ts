@@ -1,5 +1,6 @@
 import { isAutomaticThread } from "@t3tools/shared/threadAttention";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
+import { scheduledTaskKeepsThreadWaiting } from "@t3tools/contracts";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import * as React from "react";
@@ -920,7 +921,12 @@ type SidebarThreadStatusInput = Pick<
 
 export function resolveSidebarThreadStatus(
   thread: SidebarThreadStatusInput,
-  scheduledTasks: ReadonlyArray<Pick<ScheduledTask, "threadId" | "enabled">> = [],
+  scheduledTasks: ReadonlyArray<
+    Pick<
+      ScheduledTask,
+      "threadId" | "enabled" | "schedule" | "nextRunAt" | "pendingDispatchThreadIds"
+    >
+  > = [],
 ): SidebarThreadStatus {
   if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") {
     return "approval";
@@ -943,7 +949,7 @@ export function resolveSidebarThreadStatus(
   if (thread.runtime?.status === "failed") {
     return thread.runtime.lastErrorClass === "usage_limit" ? "limited" : "failed";
   }
-  if (scheduledTasks.some((task) => task.enabled && task.threadId === thread.id)) {
+  if (scheduledTasks.some((task) => scheduledTaskKeepsThreadWaiting(task, thread.id))) {
     return "waiting";
   }
   return "ready";

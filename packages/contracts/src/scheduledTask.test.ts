@@ -11,6 +11,12 @@ const decodeSchedule = Schema.decodeUnknownSync(ScheduledTaskSchedule);
 const decodeUpsertSchedule = Schema.decodeUnknownSync(ScheduledTaskUpsertSchedule);
 
 describe("ScheduledTaskSchedule", () => {
+  it("accepts one-time timestamps for writes and persisted reads, and rejects invalid instants", () => {
+    const once = { type: "once", at: "2026-10-31T14:04:08.930Z" };
+    expect(decodeUpsertSchedule(once)).toEqual(once);
+    expect(decodeSchedule(once)).toEqual(once);
+    expect(() => decodeUpsertSchedule({ ...once, at: "tomorrow" })).toThrow();
+  });
   it("keeps legacy sub-minute persisted schedules readable", () => {
     expect(
       decodeSchedule({

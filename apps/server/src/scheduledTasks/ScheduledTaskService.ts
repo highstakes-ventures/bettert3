@@ -1060,6 +1060,8 @@ export const layer = Layer.effect(
     const upsert: ScheduledTaskService["Service"]["upsert"] = Effect.fn(
       "ScheduledTaskService.upsert",
     )(function* (input) {
+      if (input.schedule.type === "once")
+        return yield* taskError("One-time triggers require Mation scheduling ownership.");
       const now = yield* localNow;
       const uuid =
         input.commandId === undefined

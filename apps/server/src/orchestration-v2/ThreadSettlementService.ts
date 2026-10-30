@@ -3,6 +3,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
   CommandId,
+  scheduledTaskKeepsThreadWaiting,
   type ThreadId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
@@ -359,12 +360,7 @@ export const make = Effect.gen(function* () {
         if (settledAt === null) return thread;
         // Check after PR lookups: a follow-up may have been scheduled while they ran.
         const { tasks } = yield* scheduledTasks.list();
-        if (
-          tasks.some(
-            (task) =>
-              task.enabled && task.threadId === thread.id && task.schedule.type !== "webhook",
-          )
-        ) {
+        if (tasks.some((task) => scheduledTaskKeepsThreadWaiting(task, thread.id))) {
           return null;
         }
         const uuid = yield* crypto.randomUUIDv4();

@@ -1,7 +1,20 @@
 import { EnvironmentId, ThreadId, ScheduledTaskId, type ScheduledTask } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 
-const state = vi.hoisted(() => ({ allowed: true, toggle: vi.fn(), run: vi.fn() }));
+const state = vi.hoisted(() => ({
+  allowed: true,
+  mationOwned: false,
+  toggle: vi.fn(),
+  run: vi.fn(),
+}));
+vi.mock(import("../../state/environments"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  useEnvironment: (() => ({
+    serverConfig: {
+      environment: { capabilities: { scheduledTaskOwner: state.mationOwned ? "mation" : "t3" } },
+    },
+  })) as never,
+}));
 vi.mock(import("../../state/session"), async (importOriginal) => ({
   ...(await importOriginal()),
   useEnvironmentScope: () => state.allowed,
@@ -44,6 +57,7 @@ const task = {
 
 async function setup() {
   state.allowed = true;
+  state.mationOwned = false;
   state.toggle.mockReset().mockResolvedValue({ _tag: "Success" });
   state.run.mockReset().mockResolvedValue({ _tag: "Success" });
 
@@ -85,4 +99,19 @@ it("rejects a retained toggle after task permission is revoked", async () => {
   state.allowed = true;
   await act(async () => byLabel("Pause Daily review").click());
   expect(state.toggle).toHaveBeenCalledOnce();
+});
+
+it("disables native schedule controls when Mation owns scheduling", async () => {
+  await using fixture = await setup();
+  state.mationOwned = true;
+  await fixture.renderPanel();
+  for (const label of ["Edit Daily review", "Run Daily review now", "Pause Daily review"]) {
+    await expect.element(fixture.byLabel(label)).toBeDisabled();
+  }
+  await act(async () => {
+    fixture.byLabel("Run Daily review now").click();
+    fixture.byLabel("Pause Daily review").click();
+  });
+  expect(state.run).not.toHaveBeenCalled();
+  expect(state.toggle).not.toHaveBeenCalled();
 });

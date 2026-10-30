@@ -287,6 +287,7 @@ function splitModelKey(value: string): ModelSelection | null {
 }
 
 export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
+  if (schedule.type === "once") return `Once at ${new Date(schedule.at).toLocaleString()}`;
   if (schedule.type === "webhook") return "On webhook";
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
@@ -379,7 +380,12 @@ export function ScheduledTasksSettings(target: {
           <Button
             size="xs"
             variant="ghost-muted"
-            disabled={!defaultEnvironment || !canCreate}
+            disabled={
+              !defaultEnvironment ||
+              !canCreate ||
+              defaultEnvironment.serverConfig?.environment.capabilities.scheduledTaskOwner ===
+                "mation"
+            }
             onClick={() =>
               defaultEnvironment &&
               setEditor({ environmentId: defaultEnvironment.environmentId, task: null })
@@ -610,11 +616,16 @@ function ScheduledTaskEnvironmentSection({
   const linkedTask = tasks?.find((task) => task.id === taskId);
   const openedLink = useRef(false);
   useEffect(() => {
-    if (!openedLink.current && linkedTask) {
+    if (
+      !openedLink.current &&
+      linkedTask &&
+      environment.serverConfig?.environment.capabilities.scheduledTaskOwner !== "mation" &&
+      linkedTask.schedule.type !== "once"
+    ) {
       openedLink.current = true;
       onEdit(environment.environmentId, linkedTask);
     }
-  }, [environment.environmentId, linkedTask, onEdit]);
+  }, [environment.environmentId, environment.serverConfig, linkedTask, onEdit]);
   return (
     <SettingsSection
       title={environment.label}
@@ -626,7 +637,12 @@ function ScheduledTaskEnvironmentSection({
         />
       }
     >
-      {!connected ? (
+      {environment.serverConfig?.environment.capabilities.scheduledTaskOwner === "mation" ? (
+        <SettingsRow
+          title="Managed in Mation"
+          description="View triggers and change automations through Mation. T3's local schedule editor is disabled for this environment."
+        />
+      ) : !connected ? (
         <SettingsRow
           title="Environment disconnected"
           description={`Reconnect ${environment.label} to view its scheduled tasks.`}
@@ -1267,6 +1283,20 @@ function ScheduledTaskEditorForm({
     }
     onClose();
   };
+
+  if (
+    environment?.serverConfig?.environment.capabilities.scheduledTaskOwner === "mation" ||
+    task?.schedule.type === "once"
+  ) {
+    return (
+      <DialogHeader>
+        <DialogTitle>Managed in Mation</DialogTitle>
+        <DialogDescription>
+          Use Mation to view this trigger or ask your agent to change it.
+        </DialogDescription>
+      </DialogHeader>
+    );
+  }
 
   return (
     <>

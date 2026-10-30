@@ -714,6 +714,9 @@ describe("ThreadSettlementServiceV2 worker", () => {
           const paused = makeThread("paused", { branch: "feature" });
           const webhook = makeThread("webhook", { branch: "feature" });
           const unbound = makeThread("unbound", { branch: "feature" });
+          const consumed = makeThread("consumed", { branch: "feature" });
+          const future = makeThread("future", { branch: "feature" });
+          const pending = makeThread("pending", { branch: "feature" });
           const timer: ScheduledTask = {
             id: ScheduledTaskId.make("interval"),
             title: "Review setup once",
@@ -743,7 +746,16 @@ describe("ThreadSettlementServiceV2 worker", () => {
             schedule: { type: "fixed_time", timeOfDay: "09:00" },
           };
           const fixture = yield* makeHarness({
-            snapshot: makeSnapshot([interval, fixed, paused, webhook, unbound]),
+            snapshot: makeSnapshot([
+              interval,
+              fixed,
+              paused,
+              webhook,
+              unbound,
+              consumed,
+              future,
+              pending,
+            ]),
             scheduledTasks: [
               timer,
               fixedTimer,
@@ -755,6 +767,27 @@ describe("ThreadSettlementServiceV2 worker", () => {
                 schedule: { type: "webhook", signature: null },
               },
               { ...timer, id: ScheduledTaskId.make("unbound"), threadId: null },
+              {
+                ...timer,
+                id: ScheduledTaskId.make("consumed"),
+                threadId: consumed.id,
+                schedule: { type: "once", at: NOW },
+                nextRunAt: null,
+              },
+              {
+                ...timer,
+                id: ScheduledTaskId.make("future"),
+                threadId: future.id,
+                schedule: { type: "once", at: timer.nextRunAt! },
+              },
+              {
+                ...timer,
+                id: ScheduledTaskId.make("pending"),
+                threadId: null,
+                schedule: { type: "once", at: NOW },
+                nextRunAt: null,
+                pendingDispatchThreadIds: [pending.id],
+              },
             ],
             settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: null },
             branchPullRequest: () => Effect.succeed(makeBranchPullRequest("merged")),
@@ -764,7 +797,7 @@ describe("ThreadSettlementServiceV2 worker", () => {
             yield* startHarness(service, fixture.activation, fixture.snapshotReads);
             expect(
               (yield* Ref.get(fixture.commands)).map((command) => command.threadId).sort(),
-            ).toEqual([paused.id, webhook.id, unbound.id].sort());
+            ).toEqual([paused.id, webhook.id, unbound.id, consumed.id].sort());
 
             yield* Ref.set(fixture.snapshots, makeSnapshot([interval, fixed]));
             yield* Ref.set(fixture.scheduledTasks, [{ ...fixedTimer, enabled: false }]);
@@ -773,7 +806,9 @@ describe("ThreadSettlementServiceV2 worker", () => {
             yield* service.drain;
             expect(
               (yield* Ref.get(fixture.commands)).map((command) => command.threadId).sort(),
-            ).toEqual([paused.id, webhook.id, unbound.id, interval.id, fixed.id].sort());
+            ).toEqual(
+              [paused.id, webhook.id, unbound.id, consumed.id, interval.id, fixed.id].sort(),
+            );
           }).pipe(Effect.provide(fixture.layer));
         }),
       ),

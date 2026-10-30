@@ -26,6 +26,7 @@ import { cn } from "../../lib/utils";
 import { ScheduledRelativeLabel, scheduleLabel } from "../settings/ScheduledTasksSettings";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
+import { useEnvironment } from "../../state/environments";
 import { useAtomCommand } from "../../state/use-atom-command";
 
 import { readEnvironmentScope } from "../../state/session";
@@ -156,6 +157,9 @@ export function ThreadAutomationsPanel(props: {
     label: "thread automation run now",
   });
   const navigate = useNavigate();
+  const environment = useEnvironment(props.environmentId);
+  const mationOwned =
+    environment?.serverConfig?.environment.capabilities.scheduledTaskOwner === "mation";
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
 
   const boundTasks = (tasksQuery.data?.tasks ?? []).filter(
@@ -284,6 +288,7 @@ export function ThreadAutomationsPanel(props: {
                     variant="ghost"
                     part="icon"
                     aria-label={`Edit ${task.title}`}
+                    disabled={mationOwned || task.schedule.type === "once"}
                     onClick={() =>
                       void navigate({
                         to: "/settings/scheduled-tasks",
@@ -298,7 +303,7 @@ export function ThreadAutomationsPanel(props: {
               <TooltipPopup>Edit automation</TooltipPopup>
             </Tooltip>
             {/* A webhook task runs from its URL; there is no request to run it with. */}
-            {task.schedule.type === "webhook" ? null : (
+            {task.schedule.type === "webhook" || task.schedule.type === "once" ? null : (
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -308,7 +313,10 @@ export function ThreadAutomationsPanel(props: {
                       part="icon"
                       aria-label={`Run ${task.title} now`}
                       disabled={
-                        !canOperate || busyTaskId !== null || task.lastRunStatus === "running"
+                        mationOwned ||
+                        !canOperate ||
+                        busyTaskId !== null ||
+                        task.lastRunStatus === "running"
                       }
                       onClick={() => void runNow(task)}
                     >
@@ -321,7 +329,9 @@ export function ThreadAutomationsPanel(props: {
             )}
             <Switch
               checked={task.enabled}
-              disabled={!canOperate || busyTaskId !== null}
+              disabled={
+                mationOwned || task.schedule.type === "once" || !canOperate || busyTaskId !== null
+              }
               aria-label={task.enabled ? `Pause ${task.title}` : `Resume ${task.title}`}
               onCheckedChange={(enabled) => void toggleEnabled(task, enabled)}
             />

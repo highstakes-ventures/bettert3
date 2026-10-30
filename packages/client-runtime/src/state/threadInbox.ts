@@ -1,9 +1,18 @@
-import type { EnvironmentId, ScheduledTask } from "@t3tools/contracts";
+import {
+  scheduledTaskKeepsThreadWaiting,
+  type EnvironmentId,
+  type ScheduledTask,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import { threadRuntimeIsActive, type EnvironmentThreadShell } from "./models.ts";
 import { toSortableTimestamp } from "./threadSort.ts";
+
+type ScheduledThreadWait = Pick<
+  ScheduledTask,
+  "threadId" | "enabled" | "schedule" | "nextRunAt" | "pendingDispatchThreadIds"
+>;
 
 /** Follows existing schedule subscriptions, including changes while shelves are collapsed. */
 export function createTimerThreadKeysAtom<E>(input: {
@@ -11,10 +20,7 @@ export function createTimerThreadKeysAtom<E>(input: {
   readonly getTasksAtom: (
     environmentId: EnvironmentId,
   ) => Atom.Atom<
-    AsyncResult.AsyncResult<
-      { readonly tasks: ReadonlyArray<Pick<ScheduledTask, "threadId" | "enabled" | "schedule">> },
-      E
-    >
+    AsyncResult.AsyncResult<{ readonly tasks: ReadonlyArray<ScheduledThreadWait> }, E>
   >;
 }) {
   return Atom.make((get): ReadonlySet<string> => {
@@ -22,8 +28,9 @@ export function createTimerThreadKeysAtom<E>(input: {
     for (const environmentId of get(input.environmentIdsAtom)) {
       const tasks = Option.getOrNull(AsyncResult.value(get(input.getTasksAtom(environmentId))));
       for (const task of tasks?.tasks ?? []) {
-        if (task.enabled && task.threadId !== null && task.schedule.type !== "webhook") {
-          keys.add(`${environmentId}:${task.threadId}`);
+        for (const threadId of new Set([task.threadId, ...(task.pendingDispatchThreadIds ?? [])])) {
+          if (scheduledTaskKeepsThreadWaiting(task, threadId))
+            keys.add(`${environmentId}:${threadId}`);
         }
       }
     }

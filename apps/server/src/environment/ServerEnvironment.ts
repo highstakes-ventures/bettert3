@@ -182,6 +182,7 @@ const makeIdentity = Effect.gen(function* () {
 
 /** @public */
 export const make = Effect.gen(function* () {
+  const variables = yield* HostProcess.Environment;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -216,6 +217,7 @@ export const make = Effect.gen(function* () {
     serverVersion: packageJson.version,
     orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
     capabilities: {
+      scheduledTaskOwner: variables.MATION_OWNS_SCHEDULES === "1" ? "mation" : "t3",
       repositoryIdentity: true,
       connectionProbe: true,
       attachmentUploads: true,

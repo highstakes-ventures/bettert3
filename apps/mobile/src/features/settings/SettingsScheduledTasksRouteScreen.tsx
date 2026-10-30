@@ -103,6 +103,8 @@ const DAYS = [
 ] as const;
 
 function describeSchedule(task: ScheduledTask): string {
+  if (task.schedule.type === "once")
+    return `Once at ${new Date(task.schedule.at).toLocaleString()}`;
   if (task.schedule.type === "webhook") return "On webhook";
   if (task.schedule.type === "interval") return formatScheduledTaskInterval(task.schedule.everyMs);
   const days = task.schedule.weekdays?.length ? repeatLabel(task.schedule.weekdays) : "Every day";
@@ -364,8 +366,12 @@ export function SettingsScheduledTasksRouteScreen() {
   const { startEditor, resetEditor } = useScheduledTaskEditor();
   const navigation = useNavigation<NativeStackNavigationProp<ScheduledTaskRoutes>>();
   const insets = useSafeAreaInsets();
+  const canCreateTask = visibleEnvironments.some(
+    (environment) =>
+      environment.serverConfig?.environment.capabilities.scheduledTaskOwner !== "mation",
+  );
   const newTask = () => {
-    if (visibleEnvironments.length === 0) return;
+    if (!canCreateTask) return;
     resetEditor();
     navigation.navigate("SettingsScheduledTaskNew");
   };
@@ -379,7 +385,7 @@ export function SettingsScheduledTasksRouteScreen() {
             label: "",
             accessibilityLabel: "New task",
             icon: { type: "sfSymbol", name: "plus" } as const,
-            disabled: visibleEnvironments.length === 0,
+            disabled: !canCreateTask,
             onPress: newTask,
           }),
         ]}
@@ -392,8 +398,8 @@ export function SettingsScheduledTasksRouteScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="New task"
-              accessibilityState={{ disabled: visibleEnvironments.length === 0 }}
-              disabled={visibleEnvironments.length === 0}
+              accessibilityState={{ disabled: !canCreateTask }}
+              disabled={!canCreateTask}
               onPress={newTask}
               className="size-11 items-center justify-center rounded-full disabled:opacity-50"
             >
@@ -775,6 +781,17 @@ function TaskForm({
     }
     onSaved();
   };
+
+  if (
+    config?.environment.capabilities.scheduledTaskOwner === "mation" ||
+    draft.task?.schedule.type === "once"
+  ) {
+    return (
+      <Text className="p-4 text-base text-foreground-muted">
+        Use Mation to view this trigger or ask your agent to change it.
+      </Text>
+    );
+  }
 
   return (
     <View className="gap-5">
@@ -1306,7 +1323,11 @@ function EnvironmentTasks({
         />
       }
     >
-      {tasks.error ? (
+      {environment.serverConfig?.environment.capabilities.scheduledTaskOwner === "mation" ? (
+        <Text className="p-4 text-base text-foreground-muted">
+          Schedules are managed in Mation. This environment's local schedule editor is disabled.
+        </Text>
+      ) : tasks.error ? (
         <Text className="p-4 text-base text-danger-foreground">{tasks.error}</Text>
       ) : !tasks.data ? (
         <Text className="p-4 text-base text-foreground-muted">Loading tasks…</Text>

@@ -12,6 +12,11 @@ import * as Launch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Folders from "../project/ManagedProjectFolders.ts";
 import * as Secrets from "../secrets/SecretRequests.ts";
+import * as Adapter from "./ScheduledTasks.ts";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 it.effect.each([
   { ownsSchedules: undefined, url: "http://mation.test" },
@@ -87,4 +92,52 @@ it.effect.each([
       );
       assert.deepEqual(calls, ownsSchedules === "1" ? ["/api/t3/tasks"] : []);
     }),
+);
+
+it.effect(
+  "the Mation subscription recovers after a failed refresh without starting a native scheduler",
+  () => {
+    let calls = 0;
+    return Effect.gen(function* () {
+      const first = yield* Deferred.make<void>();
+      const failed = yield* Deferred.make<void>();
+      const selected = Adapter.layer.pipe(
+        Layer.provide(
+          Layer.mock(Execution.AutomationExecutionService)({
+            proxy: () =>
+              Effect.gen(function* () {
+                calls += 1;
+                if (calls === 1) yield* Deferred.succeed(first, undefined);
+                if (calls === 2) {
+                  yield* Deferred.succeed(failed, undefined);
+                  return yield* new Execution.MationOperationError({
+                    operation: "proxy",
+                    cause: new Error("Mation temporarily unavailable"),
+                  });
+                }
+                return {
+                  status: 200,
+                  body: new TextEncoder().encode('{"tasks":[]}'),
+                  contentType: "application/json",
+                };
+              }),
+          }),
+        ),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const service = yield* Scheduled.ScheduledTaskService;
+          const fiber = yield* service
+            .subscribeList()
+            .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild);
+          yield* Deferred.await(first);
+          yield* TestClock.adjust("5 seconds");
+          yield* Deferred.await(failed);
+          yield* TestClock.adjust("5 seconds");
+          assert.equal((yield* Fiber.join(fiber)).length, 2);
+          assert.equal(calls, 3);
+        }).pipe(Effect.provide(selected)),
+      );
+    });
+  },
 );

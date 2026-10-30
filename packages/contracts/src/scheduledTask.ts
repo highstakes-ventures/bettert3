@@ -38,6 +38,17 @@ const ScheduledTaskIntervalSchedule = Schema.Struct({
   description: "Run repeatedly after a fixed number of milliseconds.",
 });
 
+const ScheduledTaskOnceSchedule = Schema.Struct({
+  type: Schema.Literal("once"),
+  at: Schema.String.check(
+    Schema.makeFilter(
+      (value) =>
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+        Number.isFinite(Date.parse(value)),
+    ),
+  ).annotate({ description: "The one-time trigger's ISO timestamp, including its UTC offset." }),
+}).annotate({ description: "Run once through Mation, then require explicit rescheduling." });
+
 const ScheduledTaskFixedTimeSchedule = Schema.Struct({
   type: Schema.Literal("fixed_time").annotate({
     description: "Select a fixed local wall-clock time.",
@@ -192,16 +203,18 @@ const ScheduledTaskUpsertWebhookSchedule = Schema.Struct({
  * users can list, disable, edit, or delete them after the write minimum changes.
  */
 export const ScheduledTaskSchedule = Schema.Union([
+  ScheduledTaskOnceSchedule,
   ScheduledTaskIntervalSchedule,
   ScheduledTaskFixedTimeSchedule,
   ScheduledTaskWebhookSchedule,
 ]).annotate({
   description:
-    "Structured trigger. Pass an object with type 'interval', 'fixed_time' or 'webhook'.",
+    "Structured Mation trigger. Pass an object with type 'once', 'interval', 'fixed_time' or 'webhook'.",
 });
 export type ScheduledTaskSchedule = typeof ScheduledTaskSchedule.Type;
 
 export const ScheduledTaskUpsertSchedule = Schema.Union([
+  ScheduledTaskOnceSchedule,
   Schema.Struct({
     type: Schema.Literal("interval").annotate({
       description: "Select interval scheduling.",
@@ -217,7 +230,8 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
   ScheduledTaskFixedTimeSchedule,
   ScheduledTaskUpsertWebhookSchedule,
 ]).annotate({
-  description: "Writable trigger. Pass an object with type 'interval', 'fixed_time' or 'webhook'.",
+  description:
+    "Writable Mation trigger. Pass an object with type 'once', 'interval', 'fixed_time' or 'webhook'.",
 });
 export type ScheduledTaskUpsertSchedule = typeof ScheduledTaskUpsertSchedule.Type;
 
@@ -239,6 +253,7 @@ export const ScheduledTask = Schema.Struct({
   schedule: ScheduledTaskSchedule,
   projectId: ProjectId,
   threadId: Schema.NullOr(ThreadId),
+  pendingDispatchThreadIds: Schema.optionalKey(Schema.Array(ThreadId)),
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
@@ -256,6 +271,21 @@ export const ScheduledTask = Schema.Struct({
 });
 export type ScheduledTask = typeof ScheduledTask.Type;
 
+export function scheduledTaskKeepsThreadWaiting(
+  task: Pick<
+    ScheduledTask,
+    "threadId" | "enabled" | "schedule" | "nextRunAt" | "pendingDispatchThreadIds"
+  >,
+  threadId = task.threadId,
+): boolean {
+  return (
+    threadId !== null &&
+    task.enabled &&
+    ((task.threadId === threadId && task.schedule.type !== "webhook" && task.nextRunAt !== null) ||
+      task.pendingDispatchThreadIds?.includes(threadId) === true)
+  );
+}
+
 export const ScheduledTaskListInput = Schema.Struct({});
 export type ScheduledTaskListInput = typeof ScheduledTaskListInput.Type;
 
@@ -268,6 +298,7 @@ export type ScheduledTaskListResult = typeof ScheduledTaskListResult.Type;
 
 export const ScheduledTaskUpsertInput = Schema.Struct({
   id: Schema.optional(ScheduledTaskId),
+  expectedUpdatedAt: Schema.optional(IsoDateTime),
   requireExisting: Schema.optional(Schema.Boolean).annotate({
     description: "Reject the save if the task no longer exists, for edits from a client form.",
   }),

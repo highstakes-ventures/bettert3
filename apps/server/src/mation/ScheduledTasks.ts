@@ -60,7 +60,10 @@ export const layer = Layer.effect(
     return ScheduledTasks.ScheduledTaskService.of({
       list,
       subscribeList: () =>
-        Stream.fromEffect(list()).pipe(Stream.repeat(Schedule.spaced("5 seconds"))),
+        Stream.fromEffect(list()).pipe(
+          Stream.repeat(Schedule.spaced("5 seconds")),
+          Stream.retry(Schedule.spaced("5 seconds")),
+        ),
       upsert: (input) => call("upsert", input, ScheduledTaskMutationResult),
       setEnabled: (input) => call("enabled", input, ScheduledTaskMutationResult),
       delete: (input) => call("delete", input, ScheduledTaskDeleteResult),
