@@ -37,7 +37,7 @@ export const PaiToolkit = Toolkit.make(
   }),
   Tool.make("pai_complete_email_action", {
     description:
-      "Record the verified result of this PAI email action. Use the PAI action ID from the request. Only the action's own T3 chat can complete it, including a follow-up supplying missing context. For Ignore verify the exact message is read and remains in Inbox. For Personal prepare Joseph's draft without sending. For PAI follow exact-message approval before any send. If more input is needed, ask Joseph and leave the action incomplete.",
+      "Record the verified result of this PAI email action. Use the PAI action ID from the request. Only the action's own T3 chat can complete it, including a follow-up supplying missing context. For Ignore verify the exact message is read and remains in Inbox. For Personal prepare Joseph's draft without sending. Choosing PAI authorizes sending as PAI within Joseph's submitted instruction without a second approval. Ask only when required information or a decision is missing, and leave the action incomplete until resolved.",
     parameters: PaiCompleteEmailActionInput,
     success: Schema.Struct({ completed: Schema.Boolean }),
     failure: OrchestratorMcpFailure,
