@@ -13,28 +13,33 @@ describe("automatic chat attention", () => {
     expect(isAutomaticThread(timer)).toBe(false);
     expect(isAutomaticThread({ ...independent, ...timer })).toBe(true);
   });
-  it("keeps a user-created chat manual when an older server infers automatic origin from a timer", () => {
-    const manual = {
-      createdBy: "user" as const,
-      automationOrigin: null,
-      scheduledTaskId: ScheduledTaskId.make("follow-up"),
-    };
-    expect(isAutomaticThread(manual)).toBe(false);
-    expect(isAutomaticThread({ ...manual, createdBy: "system" })).toBe(true);
-    expect(
-      isAutomaticThread({
-        ...manual,
-        runDestination: {
-          kind: "codexCloud",
-          accountId: "account",
-          existingThreadId: "cloud-chat",
-          name: "Cloud",
-          cwd: "/workspace",
-          origin: "automatic",
-        },
-      }),
-    ).toBe(true);
-  });
+  it.each(["user", "agent"] as const)(
+    "keeps normal chats created by %s manual when an older server infers automatic origin from a timer",
+    (createdBy) => {
+      const manual = {
+        createdBy,
+        automationOrigin: null,
+        scheduledTaskId: ScheduledTaskId.make("follow-up"),
+      };
+      expect(isAutomaticThread(manual)).toBe(false);
+      expect(isAutomaticThread({ ...manual, createdBy: "system" })).toBe(true);
+      expect(isAutomaticThread({ ...manual, automationOrigin: "t3" })).toBe(true);
+      expect(isAutomaticThread({ ...manual, automationOrigin: "external" })).toBe(true);
+      expect(
+        isAutomaticThread({
+          ...manual,
+          runDestination: {
+            kind: "codexCloud",
+            accountId: "account",
+            existingThreadId: "cloud-chat",
+            name: "Cloud",
+            cwd: "/workspace",
+            origin: "automatic",
+          },
+        }),
+      ).toBe(true);
+    },
+  );
   it.each([
     "user_input",
     "command",

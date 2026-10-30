@@ -28,7 +28,8 @@ export function isAutomaticThread(thread: ThreadAttentionSource): boolean {
     thread.ticketWorkflowId === undefined &&
     // Older servers infer a null origin when a timer fires in an existing chat.
     ((thread.automationOrigin !== undefined &&
-      (thread.automationOrigin !== null || thread.createdBy !== "user")) ||
+      (thread.automationOrigin !== null ||
+        (thread.createdBy !== "user" && thread.createdBy !== "agent"))) ||
       thread.backgroundWorkflowId !== undefined ||
       thread.runDestination?.origin === "automatic")
   );
