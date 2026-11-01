@@ -48,29 +48,31 @@ export const fetchEnvironmentMation = Effect.fn("clientRuntime.state.fetchEnviro
   },
 );
 
+export const requestEnvironmentMation = Effect.fn("clientRuntime.state.mation.request")(function* (
+  input: MationInput,
+) {
+  const supervisor = yield* Supervisor.EnvironmentSupervisor;
+  const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+  if (Option.isNone(prepared))
+    return yield* new EnvironmentRpcUnavailableError({
+      environmentId: supervisor.target.environmentId,
+      message: "The T3 environment is disconnected.",
+    });
+  return yield* fetchEnvironmentMation({
+    request: input,
+    prepared: prepared.value,
+    signer: yield* Effect.serviceOption(Signer.ManagedRelayDpopSigner),
+    remoteAuthorization: yield* Effect.serviceOption(Authorization.RemoteEnvironmentAuthorization),
+  });
+});
+
 export function createMationEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | HttpClient.HttpClient | R, E>,
 ) {
   return {
     request: createEnvironmentCommand(runtime, {
       label: "environment-data:mation",
-      execute: Effect.fn("clientRuntime.state.mation.request")(function* (input: MationInput) {
-        const supervisor = yield* Supervisor.EnvironmentSupervisor;
-        const prepared = yield* SubscriptionRef.get(supervisor.prepared);
-        if (Option.isNone(prepared))
-          return yield* new EnvironmentRpcUnavailableError({
-            environmentId: supervisor.target.environmentId,
-            message: "The T3 environment is disconnected.",
-          });
-        return yield* fetchEnvironmentMation({
-          request: input,
-          prepared: prepared.value,
-          signer: yield* Effect.serviceOption(Signer.ManagedRelayDpopSigner),
-          remoteAuthorization: yield* Effect.serviceOption(
-            Authorization.RemoteEnvironmentAuthorization,
-          ),
-        });
-      }),
+      execute: requestEnvironmentMation,
     }),
   };
 }

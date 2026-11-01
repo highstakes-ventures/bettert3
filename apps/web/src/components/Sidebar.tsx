@@ -1,3 +1,4 @@
+import { todoThreadKeysAtom } from "../state/mationTodos";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { useEnvironmentScope } from "../state/session";
 import { SnoozeMenu } from "./SnoozeMenu";
@@ -312,6 +313,7 @@ type SidebarOptimisticDrop = {
 interface SidebarThreadPartitionInput {
   readonly scheduledTasks: readonly Pick<ScheduledTask, "threadId">[];
   readonly timerThreadKeys: ReadonlySet<string>;
+  readonly todoThreadKeys: ReadonlySet<string>;
   readonly sectionFilter: string | null;
   readonly projectByKey: ReadonlyMap<string, EnvironmentProject>;
   readonly primaryEnvironmentId: EnvironmentId | null;
@@ -380,6 +382,7 @@ function routeThreadOnly(
 function useSidebarThreads(input: {
   readonly scheduledTasks: readonly Pick<ScheduledTask, "threadId">[];
   readonly timerThreadKeys: ReadonlySet<string>;
+  readonly todoThreadKeys: ReadonlySet<string>;
   readonly sectionFilter: string | null;
   readonly projectByKey: ReadonlyMap<string, EnvironmentProject>;
   readonly primaryEnvironmentId: EnvironmentId | null;
@@ -436,6 +439,7 @@ function useSidebarThreads(input: {
   const partition = partitionSidebarThreads({
     scheduledTasks: input.scheduledTasks,
     timerThreadKeys: input.timerThreadKeys,
+    todoThreadKeys: input.todoThreadKeys,
     sectionFilter: input.sectionFilter,
     projectByKey: input.projectByKey,
     primaryEnvironmentId: input.primaryEnvironmentId,
@@ -553,6 +557,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, {
     environmentId: input.primaryEnvironmentId,
     tasks: input.scheduledTasks,
+    todoThreadKeys: input.todoThreadKeys,
   }).filter((thread) => {
     if (input.sectionFilter === null) return true;
     const project = input.projectByKey.get(`${thread.environmentId}:${thread.projectId}`);
@@ -571,7 +576,9 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const inbox = (thread: EnvironmentThreadShell) =>
     sections[
       resolveInboxThreadSection(thread, {
-        hasTimer: input.timerThreadKeys.has(threadShellKey(thread)),
+        hasTimer:
+          input.timerThreadKeys.has(threadShellKey(thread)) ||
+          input.todoThreadKeys.has(threadShellKey(thread)),
         workingShelfEnabled,
       })
     ];
@@ -607,6 +614,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
       );
     } else {
       const section = resolveSidebarThreadSection({
+        hasOpenTodo: input.todoThreadKeys.has(threadKey),
         snoozed: supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }),
         settled: supportsSettlement && thread.settledOverride === "settled",
         pinned: thread.pinnedAt != null,
@@ -820,6 +828,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     projectScopeItems,
   } = useSidebarLookups();
   const timerThreadKeys = useAtomValue(timerThreadKeysAtom);
+  const todoThreadKeys = useAtomValue(todoThreadKeysAtom);
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const { expandedShelf, toggleShelf, onThreadOpen, onMouseLeave } = useSidebarShelves(isMobile);
@@ -1166,6 +1175,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   } = useSidebarThreads({
     scheduledTasks: scheduledTasks.data?.tasks ?? [],
     timerThreadKeys,
+    todoThreadKeys,
     sectionFilter,
     projectByKey,
     primaryEnvironmentId,

@@ -34,6 +34,16 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { Kbd } from "../ui/kbd";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import {
+  Dialog,
+  DialogTrigger,
+  DialogPopup,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogPanel,
+  DialogFooter,
+} from "../ui/dialog";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SidebarMenuButton, SidebarMenuItem, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -61,7 +71,7 @@ type Props = {
 
 export function WorkflowActionShortcuts() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const { isMobile, setOpenMobile, setOpen } = useSidebar();
+  const { isMobile, setOpenMobile } = useSidebar();
   const route = useParams({
     strict: false,
     select: (params) =>
@@ -77,7 +87,6 @@ export function WorkflowActionShortcuts() {
         return;
       }
       if (isMobile) setOpenMobile(true);
-      else setOpen(true);
     };
     const keydown = (event: KeyboardEvent) => {
       if (!route || event.defaultPrevented || event.repeat) return;
@@ -94,7 +103,7 @@ export function WorkflowActionShortcuts() {
       window.removeEventListener("keydown", keydown);
       window.removeEventListener(WORKFLOW_ACTION_EVENT, showControls);
     };
-  }, [keybindings, isMobile, route, setOpen, setOpenMobile]);
+  }, [keybindings, route, isMobile, setOpenMobile]);
   useEffect(() => {
     if (!route) takeWorkflowAction();
     return () => {
@@ -191,7 +200,7 @@ function WorkflowControls(
   );
   const intake = useAtomCommand(serverEnvironment.intakeWorkflow);
   const openWorkflowRun = useOpenWorkflowRun(props.environmentId);
-  const { isMobile, setOpenMobile, setOpen: setSidebarOpen } = useSidebar();
+  const { isMobile, setOpenMobile } = useSidebar();
   const modifiers = useShortcutModifierState();
   const queue = useRefinementQueue(props.environmentId, live.data?.runs ?? []);
   const configured = live.data?.connected && live.data.configuration !== null;
@@ -200,11 +209,7 @@ function WorkflowControls(
     setOpen(false);
     if (isMobile) setOpenMobile(false);
   }
-  const openIntake = () => {
-    if (isMobile) setOpenMobile(true);
-    else setSidebarOpen(true);
-    setOpen(true);
-  };
+  const openIntake = () => setOpen(true);
   const refine = () => {
     const tickets = live.data?.runs ?? [];
     const ready = readyRefinementQueue(props.environmentId, tickets);
@@ -270,11 +275,16 @@ function WorkflowControls(
           </div>
         </div>
       )}
-      <Popover open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(value) => {
+          if (!busy) setOpen(value);
+        }}
+      >
         <Tooltip open={showShortcuts || open ? false : undefined}>
           <TooltipTrigger
             render={
-              <PopoverTrigger
+              <DialogTrigger
                 render={
                   <SidebarMenuButton
                     size="icon"
@@ -294,24 +304,32 @@ function WorkflowControls(
             </span>
           </TooltipPopup>
         </Tooltip>
-        <PopoverPopup
+        <DialogPopup
           ref={intakePopupRef}
-          side="top"
-          align="start"
-          width="auto"
           initialFocus={(interactionType) => {
             if (interactionType === "touch") return intakePopupRef.current;
             const request = ticketRequestRef.current;
             return request && !request.disabled ? request : true;
           }}
         >
-          <div className="w-80 max-w-full space-y-3 p-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium">Add a ticket</h2>
-              <Button size="xs" variant="ghost" onClick={() => setSettings(!settings)}>
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-4">
+              <DialogTitle>Add a ticket</DialogTitle>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => setSettings(!settings)}
+                disabled={busy}
+              >
                 {settings ? "Back" : "Workflow settings"}
               </Button>
             </div>
+            <DialogDescription>
+              An agent checks existing work, prepares the ticket in Linear, and puts it in your
+              refinement queue.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
             {!configured || settings ? (
               <WorkflowSetup
                 {...props}
@@ -322,38 +340,33 @@ function WorkflowControls(
                 }}
               />
             ) : (
-              <>
-                <label className="block text-xs text-muted-foreground">
-                  What should we work on?
-                  <Textarea
-                    ref={ticketRequestRef}
-                    aria-label="Ticket request"
-                    value={text}
-                    maxLength={20_000}
-                    disabled={busy || !canIntake}
-                    onChange={(event) => {
-                      setText(event.target.value);
-                      setRequestId(null);
-                    }}
-                  />
-                </label>
-                <p className="text-xs text-muted-foreground">
-                  An agent checks existing work, prepares the ticket in Linear, and puts it in your
-                  refinement queue.
-                </p>
-                <div className="flex justify-end">
-                  <Button
-                    size="sm"
-                    disabled={busy || !canIntake || !text.trim()}
-                    onClick={() => void submit()}
-                  >
-                    {busy ? "Adding…" : "Add ticket"}
-                  </Button>
-                </div>
-              </>
+              <label className="block space-y-2 text-sm">
+                What should we work on?
+                <Textarea
+                  ref={ticketRequestRef}
+                  aria-label="Ticket request"
+                  value={text}
+                  maxLength={20_000}
+                  disabled={busy || !canIntake}
+                  onChange={(event) => {
+                    setText(event.target.value);
+                    setRequestId(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === "Enter" &&
+                      !event.shiftKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
+                      event.preventDefault();
+                      void submit();
+                    }
+                  }}
+                />
+              </label>
             )}
             {live.error && (
-              <p role="alert" className="text-xs text-destructive">
+              <p role="alert" className="text-sm text-destructive">
                 {live.error}
               </p>
             )}
@@ -362,9 +375,19 @@ function WorkflowControls(
               projectId={props.projectId}
               onOpenRun={(run) => void openRun(run)}
             />
-          </div>
-        </PopoverPopup>
-      </Popover>
+          </DialogPanel>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+              Cancel
+            </Button>
+            {configured && !settings && (
+              <Button disabled={busy || !canIntake || !text.trim()} onClick={() => void submit()}>
+                {busy ? "Adding…" : "Add ticket"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
       <div className="relative">
         <Tooltip open={showShortcuts ? false : undefined}>
           <TooltipTrigger

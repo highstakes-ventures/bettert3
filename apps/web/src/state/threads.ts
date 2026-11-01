@@ -1,8 +1,14 @@
+import { EnvironmentSupervisor } from "@t3tools/client-runtime/connection";
+import { createEnvironmentCommand } from "@t3tools/client-runtime/state/runtime";
+import * as Effect from "effect/Effect";
+import * as Data from "effect/Data";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { useAtomValue } from "@effect/atom-react";
 import { enabledEnvironmentIds } from "@t3tools/client-runtime/state/connections";
 import { arrayElementsEqual } from "@t3tools/client-runtime/state/entities";
 import {
   createEnvironmentThreadDetailAtoms,
+  ThreadSnapshotLoader,
   createEnvironmentThreadShellAtoms,
   createEnvironmentThreadStateAtoms,
   EMPTY_ENVIRONMENT_THREAD_STATE,
@@ -121,4 +127,27 @@ export const runningThreadKeepAliveAtom = createRunningThreadKeepAliveAtom({
   ]),
   threadsAtom: environmentThreadShells.environmentThreadsAtom,
   stateAtom: environmentThreads.stateAtom,
+});
+
+class ThreadSnapshotUnavailable extends Data.TaggedError("ThreadSnapshotUnavailable")<{
+  readonly message: string;
+}> {}
+
+export const readFreshThreadSnapshot = createEnvironmentCommand(connectionAtomRuntime, {
+  label: "thread:fresh-snapshot",
+  execute: Effect.fn("web.thread.readFreshSnapshot")(function* (input: { threadId: ThreadId }) {
+    const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+    const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+    if (Option.isNone(prepared))
+      return yield* Effect.fail(
+        new ThreadSnapshotUnavailable({ message: "Reconnect before capturing this conversation." }),
+      );
+    const loader = yield* ThreadSnapshotLoader;
+    const fresh = yield* loader.load(prepared.value, input.threadId);
+    if (fresh._tag !== "present")
+      return yield* Effect.fail(
+        new ThreadSnapshotUnavailable({ message: "The conversation could not be loaded." }),
+      );
+    return fresh.snapshot.projection;
+  }),
 });

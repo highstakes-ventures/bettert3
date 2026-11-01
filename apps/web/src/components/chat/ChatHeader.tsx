@@ -1,3 +1,4 @@
+import { ConvertChatToTodoButton } from "./ConvertChatToTodoButton";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
@@ -414,6 +415,12 @@ export const ChatHeader = memo(function ChatHeader({
           ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {isServerThread && (
+        <ConvertChatToTodoButton
+          key={`${activeThreadEnvironmentId}:${activeThreadId}`}
+          threadRef={activeThreadRef}
+        />
+      )}
     </div>
   );
 });

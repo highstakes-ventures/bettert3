@@ -222,12 +222,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu({
               onClick={handlePullRequestsClick}
             />
           ) : null}
-          <TodoSidebarButton
-            onClick={() => {
-              closeMobileSidebar();
-              void navigate({ to: "/mation", search: { view: "todos" } });
-            }}
-          />
+          <TodoSidebarButton onClick={closeMobileSidebar} />
           <SidebarUtilityItem
             icon={<WorkflowIcon />}
             label="Mation"

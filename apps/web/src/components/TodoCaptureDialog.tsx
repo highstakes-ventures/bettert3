@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
 import { randomUUID } from "~/lib/utils";
@@ -158,6 +159,27 @@ export function TodoCaptureDialog() {
           )}
         </DialogPanel>
         <DialogFooter>
+          <div className="sm:mr-auto">
+            <Button
+              variant="ghost"
+              disabled={busy}
+              render={
+                <Link
+                  to="/mation"
+                  search={{ view: "todos" }}
+                  onClick={(event) => {
+                    if (busy) {
+                      event.preventDefault();
+                      return;
+                    }
+                    setOpen(false);
+                  }}
+                />
+              }
+            >
+              View todos
+            </Button>
+          </div>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
             Cancel
           </Button>

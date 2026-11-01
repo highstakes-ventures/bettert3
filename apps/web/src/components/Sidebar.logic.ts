@@ -122,10 +122,12 @@ export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
 export type SidebarSection = "pinned" | "active" | "timer" | "working" | "snoozed" | "settled";
 
 export function resolveSidebarThreadSection(input: {
+  readonly hasOpenTodo?: boolean;
   readonly snoozed: boolean;
   readonly settled: boolean;
   readonly pinned: boolean;
 }): SidebarSection {
+  if (input.hasOpenTodo) return "active";
   if (input.snoozed) return "snoozed";
   if (input.settled) return "settled";
   if (input.pinned) return "pinned";
@@ -561,18 +563,20 @@ export function filterSidebarV2VisibleThreads<
   automatic?: {
     readonly environmentId: string | null;
     readonly tasks: readonly Pick<ScheduledTask, "threadId">[];
+    readonly todoThreadKeys?: ReadonlySet<string>;
   },
 ): T[] {
   return threads.filter(
     (thread) =>
-      thread.archivedAt === null &&
-      thread.source?.backgroundWorkflowId === undefined &&
-      !(
-        automatic !== undefined &&
-        thread.environmentId === automatic.environmentId &&
-        isAutomaticSidebarThread(thread)
-      ) &&
-      !isSidebarSubagentThread(thread) &&
+      (automatic?.todoThreadKeys?.has(`${thread.environmentId}:${thread.id}`) ||
+        (thread.archivedAt === null &&
+          thread.source?.backgroundWorkflowId === undefined &&
+          !(
+            automatic !== undefined &&
+            thread.environmentId === automatic.environmentId &&
+            isAutomaticSidebarThread(thread)
+          ) &&
+          !isSidebarSubagentThread(thread))) &&
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );

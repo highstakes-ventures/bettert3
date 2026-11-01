@@ -1,3 +1,6 @@
+import { useAtomValue } from "@effect/atom-react";
+import { ConvertChatToTodoButton } from "../chat/ConvertChatToTodoButton";
+import { todoThreadKeysAtom } from "../../state/mationTodos";
 import { SnoozeMenu } from "../SnoozeMenu";
 import { ThreadExecutionIcon } from "../ThreadExecutionIcon";
 import { ThreadAutomationsIndicator } from "../chat/ThreadAutomationsPanel";
@@ -627,7 +630,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const scheduledTasksQuery = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId: thread.environmentId, input: {} }),
   );
-  const status = resolveSidebarThreadStatus(thread, scheduledTasksQuery.data?.tasks);
+  const todoThreadKeys = useAtomValue(todoThreadKeysAtom);
+  const linkedTodo = todoThreadKeys.has(threadKey);
+  const resolvedStatus = resolveSidebarThreadStatus(thread, scheduledTasksQuery.data?.tasks);
+  const status = linkedTodo && resolvedStatus === "ready" ? "waiting" : resolvedStatus;
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
   const isWoke =
@@ -1389,6 +1395,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         snoozeMenuOpen && "pointer-events-auto static opacity-100",
                       )}
                     >
+                      <ConvertChatToTodoButton threadRef={threadRef} compact />
                       {hasUnsentDraft ? (
                         <Tooltip>
                           <TooltipTrigger

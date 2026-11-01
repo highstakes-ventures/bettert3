@@ -131,3 +131,23 @@ it("retains an uncertain capture and retries its same submission before refreshi
     window.removeEventListener("t3:todos-changed", changed);
   }
 });
+
+it("keeps capture and a failed-save retry visible when View todos is clicked during saving", async () => {
+  state.keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
+  let reject!: (reason: Error) => void;
+  state.request.mockReset().mockReturnValue(
+    new Promise((_, fail) => {
+      reject = fail;
+    }),
+  );
+  await using screen = await render(<TodoCaptureDialog />);
+  await act(async () => requestTodoCapture());
+  await page.getByRole("textbox", { name: "What do you want to remember?" }).fill("Keep this note");
+  await page.getByRole("button", { name: "Add todo" }).click();
+  await page.getByRole("link", { name: "View todos" }).click({ force: true });
+  await expect.element(page.getByRole("dialog")).toBeVisible();
+  await act(async () => reject(new Error("lost response")));
+  await expect.element(page.getByRole("alert")).toBeVisible();
+  await expect.element(page.getByRole("button", { name: "Retry save" })).toBeVisible();
+  expect(screen.router?.state.location.pathname).toBe("/");
+});

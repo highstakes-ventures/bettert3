@@ -1,7 +1,7 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useEffect, useRef, useState } from "react";
-import { MationFrontendRequest } from "@t3tools/contracts";
+import { EnvironmentId, MationFrontendRequest } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { mationEnvironment } from "../state/mation";
@@ -97,7 +97,15 @@ function MationPage() {
       ) {
         void navigate({
           to: "/$environmentId/$threadId",
-          params: { environmentId, threadId: event.data.threadId },
+          params: {
+            environmentId:
+              typeof event.data.environmentId === "string" &&
+              event.data.environmentId.length > 0 &&
+              event.data.environmentId.length <= 256
+                ? EnvironmentId.make(event.data.environmentId)
+                : environmentId,
+            threadId: event.data.threadId,
+          },
         });
         return;
       }
@@ -115,7 +123,8 @@ function MationPage() {
         (result) => {
           if (frame.current?.contentWindow !== source) return;
           if (
-            input.value.path.startsWith("todos") &&
+            (input.value.path.startsWith("todos") ||
+              input.value.path.startsWith("email/reports/")) &&
             input.value.method !== "GET" &&
             result._tag === "Success" &&
             "status" in result.value &&

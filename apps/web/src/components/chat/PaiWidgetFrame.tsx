@@ -1,5 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { ThreadId, type EnvironmentId, type PaiWidgetReference } from "@t3tools/contracts";
+import { ThreadId, EnvironmentId, type PaiWidgetReference } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
@@ -81,7 +81,14 @@ function EmailFrame({
         void navigate({
           to: "/$environmentId/$threadId",
           params: buildThreadRouteParams(
-            scopeThreadRef(environmentId, ThreadId.make(data.threadId)),
+            scopeThreadRef(
+              typeof data.environmentId === "string" &&
+                data.environmentId.length > 0 &&
+                data.environmentId.length <= 256
+                ? EnvironmentId.make(data.environmentId)
+                : environmentId,
+              ThreadId.make(data.threadId),
+            ),
           ),
         });
         return;
@@ -107,6 +114,14 @@ function EmailFrame({
         },
       }).then((result) => {
         if (frame.current?.contentWindow !== source) return;
+        if (
+          data.method === "POST" &&
+          result._tag === "Success" &&
+          "status" in result.value &&
+          result.value.status >= 200 &&
+          result.value.status < 300
+        )
+          window.dispatchEvent(new Event("t3:todos-changed"));
         source.postMessage(
           result._tag === "Success" && "status" in result.value
             ? { type: "pai:response", id: data.id, ...result.value }

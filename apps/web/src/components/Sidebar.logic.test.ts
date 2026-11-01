@@ -34,6 +34,8 @@ import {
   type SidebarListMarker,
   type SidebarSection,
   resolveSidebarDropVerb,
+  resolveSidebarThreadSection,
+  resolveInboxThreadSection,
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import {
@@ -1381,4 +1383,46 @@ describe("pendingSidebarRouteReveal", () => {
     expect(pendingSidebarRouteReveal(reveal, null)).toBeNull();
     expect(pendingSidebarRouteReveal(reveal, "env:a1")).toBe("env:a1");
   });
+});
+
+it("a linked open todo moves parked chats into Waiting without changing their chat state", () => {
+  const thread = makeThreadFixture({ environmentId: localEnvironmentId, runtime: null });
+  const parked = { snoozed: true, settled: false, pinned: true };
+  expect(resolveSidebarThreadSection(parked)).toBe("snoozed");
+  expect(resolveSidebarThreadSection({ ...parked, hasOpenTodo: true })).toBe("active");
+  expect(resolveInboxThreadSection(thread, { hasTimer: true, workingShelfEnabled: false })).toBe(
+    "timer",
+  );
+  expect(
+    resolveInboxThreadSection(
+      { ...thread, hasPendingApprovals: true },
+      { hasTimer: true, workingShelfEnabled: false },
+    ),
+  ).toBe("active");
+  expect(parked).toEqual({ snoozed: true, settled: false, pinned: true });
+});
+
+it("linked todos reveal hidden saved chats only while those todos remain open", () => {
+  const base = makeThreadFixture({
+    environmentId: localEnvironmentId,
+    id: ThreadId.make("converted"),
+  });
+  const threads = [
+    { ...base, source: { ...base.source, automationOrigin: "external" as const } },
+    { ...base, id: ThreadId.make("archived"), archivedAt: "2026-11-01T10:00:00Z" },
+    {
+      ...base,
+      id: ThreadId.make("background"),
+      source: { ...base.source, backgroundWorkflowId: "background" },
+    },
+  ];
+  const options = {
+    environmentId: localEnvironmentId,
+    tasks: [],
+    todoThreadKeys: new Set(threads.map((thread) => `${thread.environmentId}:${thread.id}`)),
+  };
+  expect(filterSidebarV2VisibleThreads(threads, null, options)).toEqual(threads);
+  expect(
+    filterSidebarV2VisibleThreads(threads, null, { ...options, todoThreadKeys: new Set() }),
+  ).toEqual([]);
 });
