@@ -5,6 +5,7 @@ import { MationFrontendRequest } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { mationEnvironment } from "../state/mation";
+import { forwardTodoKeydown } from "../components/TodoCaptureDialog";
 
 export const Route = createFileRoute("/mation")({
   beforeLoad: ({ context }) => {
@@ -40,6 +41,10 @@ function MationPage() {
   useEffect(() => {
     if (!environmentId) return;
     const receive = (event: MessageEvent) => {
+      if (event.source === frame.current?.contentWindow && event.data?.type === "mation:keydown") {
+        forwardTodoKeydown(event.data);
+        return;
+      }
       if (
         event.source === frame.current?.contentWindow &&
         event.data?.type === "mation:open-draft" &&

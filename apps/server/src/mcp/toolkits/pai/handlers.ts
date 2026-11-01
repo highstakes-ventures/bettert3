@@ -21,6 +21,14 @@ const failure = () =>
       "PAI could not complete the request. Check this environment's Mation connection before retrying.",
   });
 export const layer = Access.toLayer(PaiToolkit, {
+  todo_prepare_result: Access.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const source = yield* caller;
+      return yield* (yield* Pai.PaiService)
+        .prepareTodo(input, source)
+        .pipe(Effect.mapError(failure));
+    }),
+  ),
   pai_email_workflow: Access.actsAsCaller(() =>
     Effect.gen(function* () {
       return yield* (yield* Pai.PaiService).workflow.pipe(Effect.mapError(failure));

@@ -35,6 +35,21 @@ function event(overrides: Partial<ShortcutEventLike> = {}): ShortcutEventLike {
   };
 }
 
+it("opens personal todo capture with Cmd+Option+L, including terminal focus", () => {
+  const shortcut = event({ key: "l", code: "KeyL", metaKey: true, altKey: true });
+  assert.equal(
+    resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, {
+      platform: "MacIntel",
+      context: { terminalFocus: true },
+    }),
+    "todo.capture",
+  );
+  assert.notEqual(
+    resolveShortcutCommand(event({ key: "l", metaKey: true }), DEFAULT_RESOLVED_KEYBINDINGS),
+    "todo.capture",
+  );
+});
+
 function modShortcut(
   key: string,
   overrides: Partial<Omit<KeybindingShortcut, "key">> = {},

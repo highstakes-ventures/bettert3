@@ -7,6 +7,7 @@ import { paiEnvironment } from "~/state/pai";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { buildThreadRouteParams } from "~/threadRoutes";
 import { Button } from "~/components/ui/button";
+import { forwardTodoKeydown } from "~/components/TodoCaptureDialog";
 
 /** Mation owns this PAI widget and its workflow. T3 supplies its connection and chat router. */
 export function PaiWidgetFrame(props: {
@@ -59,6 +60,10 @@ function EmailFrame({
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow) return;
       const data = event.data;
+      if (data?.type === "mation:keydown") {
+        forwardTodoKeydown(data);
+        return;
+      }
       if (data?.type === "pai:ready") {
         sendTheme();
         return;

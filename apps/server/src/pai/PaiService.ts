@@ -9,6 +9,7 @@ import {
   type PaiPublishEmailInput,
   type PaiWidgetRequest,
   type OrchestrationV2ThreadShell,
+  type TodoPreparationInput,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -47,6 +48,10 @@ export class PaiService extends Context.Service<
       input: { actionId: string; message: string },
       caller: EmailCaller,
     ) => Effect.Effect<{ completed: boolean }, PaiOperationError>;
+    readonly prepareTodo: (
+      input: TodoPreparationInput,
+      caller: EmailCaller,
+    ) => Effect.Effect<{ prepared: boolean }, PaiOperationError>;
   }
 >()("t3/pai/PaiService") {}
 
@@ -99,6 +104,49 @@ const make = Effect.gen(function* () {
           ),
         );
   return PaiService.of({
+    prepareTodo: Effect.fn("pai.prepareTodo")(function* (
+      input: TodoPreparationInput,
+      caller: EmailCaller,
+    ) {
+      if (caller.activeRunId === null)
+        return yield* new PaiOperationError({
+          operation: "prepare outside an active run",
+          cause: "The preparation run ended.",
+        });
+      yield* mation
+        .assertCaller(input.requestId, { threadId: caller.id, runId: caller.activeRunId })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new PaiOperationError({ operation: "validate the todo preparation run", cause }),
+          ),
+        );
+      const { todoId, requestId, ...result } = input;
+      const body = yield* Schema.encodeEffect(
+        Schema.fromJsonString(
+          Schema.Struct({
+            requestId: Schema.String,
+            result: Schema.Unknown,
+            source: MationRunRef,
+          }),
+        ),
+      )({
+        requestId,
+        result,
+        source: {
+          environmentId: yield* environment.getEnvironmentId,
+          threadId: caller.id,
+          runId: caller.activeRunId,
+        },
+      }).pipe(
+        Effect.mapError(
+          (cause) => new PaiOperationError({ operation: "encode todo preparation", cause }),
+        ),
+      );
+      const response = yield* proxy(`/api/todos/${todoId}/prepare`, "POST", body);
+      yield* decode(Schema.Unknown, response);
+      return { prepared: true };
+    }),
     workflow: proxy("/api/email/workflow", "GET").pipe(
       Effect.flatMap((result) => decode(PaiEmailWorkflow, result)),
     ),

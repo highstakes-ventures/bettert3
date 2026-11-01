@@ -1,4 +1,5 @@
 import { requestWorkflowAction } from "./workflows/workflowActions";
+import { requestTodoCapture } from "./TodoCaptureDialog";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -1186,6 +1187,17 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  actionItems.push({
+    kind: "action",
+    value: "action:todo-capture",
+    title: "Add a personal todo",
+    searchTerms: ["todo", "personal", "capture", "remember"],
+    shortcutCommand: "todo.capture",
+    icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      requestTodoCapture();
+    },
+  });
   if (activeThread) {
     for (const action of ["ticket", "refine"] as const)
       actionItems.push({

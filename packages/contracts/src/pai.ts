@@ -44,3 +44,14 @@ export const PaiCompleteEmailActionInput = Schema.Struct({
   actionId: Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/)),
   message: TrimmedNonEmptyString.check(Schema.isMaxLength(3000)),
 });
+
+export const TodoPreparationInput = Schema.Struct({
+  todoId: Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/)),
+  requestId: Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/)),
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(180)),
+  scope: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(500))).check(
+    Schema.isMaxLength(2),
+  ),
+  returnOn: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/)),
+});
+export type TodoPreparationInput = typeof TodoPreparationInput.Type;

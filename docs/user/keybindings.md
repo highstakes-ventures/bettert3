@@ -1,5 +1,7 @@
 # Keybindings
 
+On web and desktop, press `Cmd+Option+L` on macOS or `Ctrl+Alt+L` elsewhere to capture a personal todo while T3 Code has focus. An agent prepares its short scope and return date in the background. The connected Mation service keeps the list and shows due todos in the Highstakes morning review. Change the shortcut as `todo.capture` in Keybindings settings.
+
 Customize shortcuts in **Settings → Keybindings** on web and desktop. That page
 also lists the command IDs and defaults available in your version.
 

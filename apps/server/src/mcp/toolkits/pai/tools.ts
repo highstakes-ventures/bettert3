@@ -4,6 +4,7 @@ import {
   PaiPublishEmailResult,
   PaiCompleteEmailActionInput,
   PaiEmailWorkflow,
+  TodoPreparationInput,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
@@ -17,6 +18,15 @@ const dependencies = [
   Invocation.McpInvocationContext,
 ];
 export const PaiToolkit = Toolkit.make(
+  Tool.make("todo_prepare_result", {
+    description:
+      "Save the short title, at most two scope sentences and return date for the personal todo named in this preparation request. Only its own active preparation run can save the result. This structures the todo; it does not perform or complete it. Use the todoId and requestId from the request, and returnOn as YYYY-MM-DD in Europe/Amsterdam.",
+    parameters: TodoPreparationInput,
+    success: Schema.Struct({ prepared: Schema.Boolean }),
+    failure: OrchestratorMcpFailure,
+    failureMode: "return",
+    dependencies,
+  }),
   Tool.make("pai_email_workflow", {
     description:
       "Read Mation's current morning email workflow before preparing an overview. Mation owns these instructions; T3 executes the workflow for the mailbox scope in the user's or Mation's request.",
