@@ -1,4 +1,7 @@
+import "../../index.css";
 import { RegistryContext } from "@effect/atom-react";
+import { page } from "vite-plus/test/browser";
+import { TodoCaptureDialog } from "../TodoCaptureDialog";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
@@ -12,6 +15,14 @@ const state = vi.hoisted(() => ({
   notify: vi.fn(),
   allowed: true,
   atom: null as unknown,
+}));
+vi.mock(import("../../state/environments"), () => ({
+  usePrimaryEnvironmentId: (() => "local") as never,
+}));
+vi.mock(import("../../state/server"), () => ({ primaryServerKeybindingsAtom: {} as never }));
+vi.mock(import("@effect/atom-react"), async (original) => ({
+  ...(await original()),
+  useAtomValue: (() => []) as never,
 }));
 vi.mock(import("../../state/mation"), () => ({ mationEnvironment: { request: {} } as never }));
 vi.mock(import("../../state/use-atom-command"), () => ({
@@ -34,7 +45,7 @@ vi.mock(import("../ui/toast"), () => ({
 }));
 import { ConvertChatToTodoButton } from "./ConvertChatToTodoButton";
 
-it("captures chat context and retries one submission without changing the conversation", async () => {
+it("opens the shared capture dialog and saves its note and chat context only after confirmation", async () => {
   state.allowed = true;
   state.request
     .mockReset()
@@ -76,26 +87,31 @@ it("captures chat context and retries one submission without changing the conver
   const onRowClick = vi.fn();
   await using screen = await render(
     <RegistryContext value={registry}>
+      <TodoCaptureDialog />
       <div onClick={onRowClick}>
         <ConvertChatToTodoButton threadRef={ref} />
       </div>
     </RegistryContext>,
   );
   await screen.getByRole("button", { name: "Convert chat to todo" }).click();
-  await vi.waitFor(() =>
-    expect(state.notify).toHaveBeenCalledWith(expect.objectContaining({ type: "error" })),
-  );
-  await expect.element(screen.getByRole("button", { name: "Convert chat to todo" })).toBeEnabled();
-  await screen.getByRole("button", { name: "Convert chat to todo" }).click();
-  await vi.waitFor(() =>
-    expect(state.notify).toHaveBeenCalledWith(expect.objectContaining({ type: "success" })),
-  );
+  await expect.element(page.getByRole("dialog", { name: "Add a personal todo" })).toBeVisible();
+  await expect.element(page.getByRole("heading", { name: "Book dentist" })).toBeVisible();
+  expect(state.request).not.toHaveBeenCalled();
+  const field = page.getByRole("textbox", { name: "What do you want to remember?" });
+  await expect.element(field).toHaveValue("");
+  await field.fill("Call the dentist on Monday");
+  await page.getByRole("button", { name: "Add todo" }).click();
+  await expect.element(page.getByRole("alert")).toBeVisible();
+  await expect.element(field).toHaveValue("Call the dentist on Monday");
+  await page.getByRole("button", { name: "Retry save" }).click();
+  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
   const first = state.request.mock.calls[0]![0];
   const second = state.request.mock.calls[1]![0];
   expect(second).toEqual(first);
   expect(first.environmentId).toBe("remote");
   const body = JSON.parse(first.input.request.body);
   expect(body.sourceChat).toEqual(ref);
+  expect(body.note).toContain("Call the dentist on Monday");
   expect(body.note).toContain("Book dentist");
   expect(body.note).toContain("Book a checkup next week");
   expect(onRowClick).not.toHaveBeenCalled();
@@ -157,6 +173,7 @@ it("waits for a fresh snapshot instead of capturing a retained live conversation
   stack.defer(() => registry.dispose());
   await using screen = await render(
     <RegistryContext value={registry}>
+      <TodoCaptureDialog />
       <ConvertChatToTodoButton
         threadRef={{
           environmentId: EnvironmentId.make("remote"),
@@ -180,6 +197,9 @@ it("waits for a fresh snapshot instead of capturing a retained live conversation
       ],
     },
   });
+  await expect.element(page.getByRole("heading", { name: "Current title" })).toBeVisible();
+  expect(state.request).not.toHaveBeenCalled();
+  await page.getByRole("button", { name: "Add todo" }).click();
   await vi.waitFor(() => expect(state.request).toHaveBeenCalledOnce());
   expect(JSON.parse(state.request.mock.calls[0]![0].input.request.body).note).toContain(
     "New instruction from the closed chat",

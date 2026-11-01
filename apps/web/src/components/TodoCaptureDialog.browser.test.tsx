@@ -3,6 +3,7 @@ import {
   DEFAULT_RESOLVED_KEYBINDINGS,
   compileResolvedKeybindingsConfig,
 } from "@t3tools/shared/keybindings";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
@@ -150,4 +151,45 @@ it("keeps capture and a failed-save retry visible when View todos is clicked dur
   await expect.element(page.getByRole("alert")).toBeVisible();
   await expect.element(page.getByRole("button", { name: "Retry save" })).toBeVisible();
   expect(screen.router?.state.location.pathname).toBe("/");
+});
+
+it("keeps personal and linked drafts separate when captures are reopened", async () => {
+  state.keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
+  state.request
+    .mockReset()
+    .mockResolvedValue({ _tag: "Success", value: { status: 201, body: "{}" } });
+  await using _screen = await render(<TodoCaptureDialog />);
+  await act(async () => requestTodoCapture());
+  const field = page.getByRole("textbox", { name: "What do you want to remember?" });
+  await field.fill("Personal draft");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  const source = {
+    threadRef: { environmentId: EnvironmentId.make("remote"), threadId: ThreadId.make("chat-1") },
+    title: "Review the invoice",
+    context: "Follow up on Review the invoice.\nRecent conversation",
+  };
+  await act(async () => requestTodoCapture(source));
+  await expect.element(page.getByRole("heading", { name: source.title })).toBeVisible();
+  await expect.element(field).toHaveValue("");
+  await field.fill("Ask about the amount");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await act(async () => requestTodoCapture());
+  await expect.element(field).toHaveValue("Personal draft");
+  await expect
+    .element(page.getByRole("region", { name: "Linked conversation" }))
+    .not.toBeInTheDocument();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await act(async () => requestTodoCapture(source));
+  await expect.element(field).toHaveValue("Ask about the amount");
+  expect(state.request).not.toHaveBeenCalled();
+  await page.getByRole("button", { name: "Add todo" }).click();
+  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+  const input = state.request.mock.calls[0]![0];
+  expect(input.environmentId).toBe("remote");
+  expect(JSON.parse(input.input.request.body)).toMatchObject({
+    note: "Ask about the amount\n\n" + source.context,
+    sourceChat: source.threadRef,
+  });
+  await act(async () => requestTodoCapture());
+  await expect.element(field).toHaveValue("Personal draft");
 });

@@ -1,6 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
+import type { ScopedThreadRef } from "@t3tools/contracts";
+import { MessageSquareTextIcon } from "lucide-react";
 import { randomUUID } from "~/lib/utils";
 import { resolveShortcutCommand } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
@@ -18,9 +20,27 @@ import {
   DialogFooter,
 } from "./ui/dialog";
 import { Textarea } from "./ui/textarea";
+import { prepareTodoCaptureNote } from "./TodoCaptureDialog.logic";
 
-export function requestTodoCapture() {
-  window.dispatchEvent(new Event("t3:todo-capture"));
+interface TodoCaptureSource {
+  threadRef: ScopedThreadRef;
+  title: string;
+  context: string;
+}
+
+interface CaptureDraft {
+  source?: TodoCaptureSource;
+  note: string;
+  submissionId: string | null;
+  error: string | null;
+}
+
+function emptyDraft(source?: TodoCaptureSource): CaptureDraft {
+  return { ...(source ? { source } : {}), note: "", submissionId: null, error: null };
+}
+
+export function requestTodoCapture(source?: TodoCaptureSource) {
+  window.dispatchEvent(new CustomEvent("t3:todo-capture", { detail: source }));
 }
 
 // Called only after a host frame verifies the message's source. Resolve against live T3 bindings.
@@ -52,13 +72,36 @@ export function TodoCaptureDialog() {
   const environmentId = usePrimaryEnvironmentId();
   const request = useAtomCommand(mationEnvironment.request, { reportFailure: false });
   const [open, setOpen] = useState(false);
-  const [note, setNote] = useState("");
-  const [submissionId, setSubmissionId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [draftKey, setDraftKey] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, CaptureDraft>>({ "": emptyDraft() });
+  const { source, note, submissionId, error } = drafts[draftKey] ?? emptyDraft();
+  const targetEnvironmentId = source?.threadRef.environmentId ?? environmentId;
+  const canSave = Boolean(note.trim() || source);
   const [busy, setBusy] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
+  function updateDraft(change: Partial<CaptureDraft>) {
+    setDrafts((current) => ({
+      ...current,
+      [draftKey]: { ...(current[draftKey] ?? emptyDraft()), ...change },
+    }));
+  }
   useEffect(() => {
-    const show = () => setOpen(true);
+    const show = (event?: Event) => {
+      if (busy || open) return;
+      const source =
+        event instanceof CustomEvent ? (event.detail as TodoCaptureSource | undefined) : undefined;
+      const key = source ? JSON.stringify(source.threadRef) : "";
+      setDrafts((current) => {
+        const draft = current[key];
+        if (draft?.submissionId || (draft && !source)) return current;
+        return {
+          ...current,
+          [key]: draft && source ? { ...draft, source } : emptyDraft(source),
+        };
+      });
+      setDraftKey(key);
+      setOpen(true);
+    };
     const keydown = (event: Event) => {
       if (!(event instanceof KeyboardEvent)) return;
       if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229)
@@ -84,37 +127,50 @@ export function TodoCaptureDialog() {
       window.removeEventListener("t3:todo-keydown", keydown);
       window.removeEventListener("t3:todo-capture", show);
     };
-  }, [keybindings]);
+  }, [keybindings, busy, open]);
   async function save() {
-    if (!environmentId || !note.trim() || busy) return;
+    if (!targetEnvironmentId || !canSave || busy) return;
+    const prepared = prepareTodoCaptureNote(note, source?.context);
+    if (prepared.note === null) {
+      updateDraft({ error: prepared.error });
+      return;
+    }
     const id = submissionId ?? randomUUID();
-    setSubmissionId(id);
+    updateDraft({ submissionId: id, error: null });
     setBusy(true);
-    setError(null);
     const result = await request({
-      environmentId,
+      environmentId: targetEnvironmentId,
       input: {
         type: "request",
         request: {
           path: "todos",
           method: "POST",
-          body: JSON.stringify({ note: note.trim(), submissionId: id }),
+          body: JSON.stringify({
+            note: prepared.note,
+            submissionId: id,
+            ...(source ? { sourceChat: source.threadRef } : {}),
+          }),
         },
       },
     }).catch(() => null);
     setBusy(false);
     if (!result || result._tag !== "Success" || !("status" in result.value)) {
-      setError("Mation did not confirm the save. Retry the same note.");
+      updateDraft({ error: "Mation did not confirm the save. Retry the same note." });
       return;
     }
     if (result.value.status < 200 || result.value.status >= 300) {
-      if (result.value.status < 500 && result.value.status !== 409) setSubmissionId(null);
-      setError("The todo could not be saved. Check the Mation connection, then retry.");
+      updateDraft({
+        ...(result.value.status < 500 && result.value.status !== 409 ? { submissionId: null } : {}),
+        error: "The todo could not be saved. Check the Mation connection, then retry.",
+      });
       return;
     }
     window.dispatchEvent(new Event("t3:todos-changed"));
-    setNote("");
-    setSubmissionId(null);
+    setDrafts((current) => {
+      const next = { ...current };
+      delete next[draftKey];
+      return next;
+    });
     setOpen(false);
   }
 
@@ -133,16 +189,33 @@ export function TodoCaptureDialog() {
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
+          {source && (
+            <section
+              aria-label="Linked conversation"
+              className="flex items-start gap-3 border-b border-border pb-4"
+            >
+              <MessageSquareTextIcon
+                aria-hidden="true"
+                className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+              />
+              <div className="min-w-0 space-y-1">
+                <h2 className="text-sm leading-snug font-medium wrap-anywhere">{source.title}</h2>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Conversation linked to this todo
+                </p>
+              </div>
+            </section>
+          )}
           <label className="block space-y-2 text-sm">
             What do you want to remember?
             <Textarea
               ref={field}
               value={note}
               maxLength={5000}
+              placeholder={source ? "Add a next step or a reminder, if you'd like…" : undefined}
               disabled={busy || submissionId !== null}
               onChange={(event) => {
-                setNote(event.currentTarget.value);
-                setError(null);
+                updateDraft({ note: event.currentTarget.value, error: null });
               }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -183,7 +256,7 @@ export function TodoCaptureDialog() {
           <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={() => void save()} disabled={busy || !note.trim() || !environmentId}>
+          <Button onClick={() => void save()} disabled={busy || !canSave || !targetEnvironmentId}>
             {busy ? "Saving…" : submissionId ? "Retry save" : "Add todo"}
           </Button>
         </DialogFooter>
