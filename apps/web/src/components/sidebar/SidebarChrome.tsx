@@ -30,6 +30,7 @@ import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
+import { TodoSidebarButton } from "./TodoSidebarButton";
 import { SidebarWorkflowControls } from "../workflows/WorkflowControls";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -221,6 +222,12 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu({
               onClick={handlePullRequestsClick}
             />
           ) : null}
+          <TodoSidebarButton
+            onClick={() => {
+              closeMobileSidebar();
+              void navigate({ to: "/mation", search: { view: "todos" } });
+            }}
+          />
           <SidebarUtilityItem
             icon={<WorkflowIcon />}
             label="Mation"

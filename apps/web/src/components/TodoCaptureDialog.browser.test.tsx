@@ -1,3 +1,4 @@
+import "../index.css";
 import {
   DEFAULT_RESOLVED_KEYBINDINGS,
   compileResolvedKeybindingsConfig,
@@ -25,7 +26,7 @@ vi.mock(import("../state/use-atom-command"), () => ({
   useAtomCommand: (() => state.request) as never,
 }));
 
-import { TodoCaptureDialog, forwardTodoKeydown } from "./TodoCaptureDialog";
+import { TodoCaptureDialog, forwardTodoKeydown, requestTodoCapture } from "./TodoCaptureDialog";
 
 it.each([
   { platform: "MacIntel", modifiers: { metaKey: true, altKey: true } },
@@ -102,4 +103,31 @@ it("resolves embedded keys against remapped and disabled todo bindings", async (
     forwardTodoKeydown({ key: "l", code: "KeyL", metaKey: true, altKey: true });
   });
   expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it("retains an uncertain capture and retries its same submission before refreshing the count", async () => {
+  state.keybindings = DEFAULT_RESOLVED_KEYBINDINGS;
+  state.request
+    .mockReset()
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue({ _tag: "Success", value: { status: 201, body: "{}" } });
+  await using _screen = await render(<TodoCaptureDialog />);
+  const changed = vi.fn();
+  window.addEventListener("t3:todos-changed", changed);
+  try {
+    await act(async () => requestTodoCapture());
+    const field = page.getByRole("textbox", { name: "What do you want to remember?" });
+    await field.fill("Book dentist tomorrow");
+    await page.getByRole("button", { name: "Add todo" }).click();
+    await expect.element(page.getByRole("alert")).toBeVisible();
+    await expect.element(field).toHaveValue("Book dentist tomorrow");
+    expect(changed).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Retry save" }).click();
+    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+    expect(changed).toHaveBeenCalledOnce();
+    const bodies = state.request.mock.calls.map(([input]) => JSON.parse(input.input.request.body));
+    expect(bodies[1]).toEqual(bodies[0]);
+  } finally {
+    window.removeEventListener("t3:todos-changed", changed);
+  }
 });

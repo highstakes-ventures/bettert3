@@ -90,37 +90,33 @@ export function TodoCaptureDialog() {
     setSubmissionId(id);
     setBusy(true);
     setError(null);
-    try {
-      const result = await request({
-        environmentId,
-        input: {
-          type: "request",
-          request: {
-            path: "todos",
-            method: "POST",
-            body: JSON.stringify({ note: note.trim(), submissionId: id }),
-          },
+    const result = await request({
+      environmentId,
+      input: {
+        type: "request",
+        request: {
+          path: "todos",
+          method: "POST",
+          body: JSON.stringify({ note: note.trim(), submissionId: id }),
         },
-      });
-      if (result._tag !== "Success" || !("status" in result.value))
-        throw new Error("Mation did not confirm the save. Retry the same note.");
-      if (result.value.status < 200 || result.value.status >= 300) {
-        if (result.value.status < 500 && result.value.status !== 409) setSubmissionId(null);
-        throw new Error("The todo could not be saved. Check the Mation connection, then retry.");
-      }
-      setNote("");
-      setSubmissionId(null);
-      setOpen(false);
-    } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "The save was not confirmed. Retry the same note.",
-      );
-    } finally {
-      setBusy(false);
+      },
+    }).catch(() => null);
+    setBusy(false);
+    if (!result || result._tag !== "Success" || !("status" in result.value)) {
+      setError("Mation did not confirm the save. Retry the same note.");
+      return;
     }
+    if (result.value.status < 200 || result.value.status >= 300) {
+      if (result.value.status < 500 && result.value.status !== 409) setSubmissionId(null);
+      setError("The todo could not be saved. Check the Mation connection, then retry.");
+      return;
+    }
+    window.dispatchEvent(new Event("t3:todos-changed"));
+    setNote("");
+    setSubmissionId(null);
+    setOpen(false);
   }
+
   return (
     <Dialog
       open={open}
