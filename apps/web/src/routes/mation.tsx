@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { mationEnvironment } from "../state/mation";
 import { forwardTodoKeydown } from "../components/TodoCaptureDialog";
+import { useStableCallback } from "../hooks/useStableCallback";
 
 export const Route = createFileRoute("/mation")({
   validateSearch: (search: Record<string, unknown>): { view?: "todos" } =>
@@ -27,7 +28,7 @@ function MationPage() {
   const { view } = Route.useSearch();
   const navigate = useNavigate();
   const environmentId = usePrimaryEnvironmentId();
-  const request = useAtomCommand(mationEnvironment.request);
+  const request = useStableCallback(useAtomCommand(mationEnvironment.request));
   const frame = useRef<HTMLIFrameElement>(null);
   const [page, setPage] = useState<{
     environmentId: string;
