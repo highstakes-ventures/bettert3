@@ -24,27 +24,27 @@ export function ConvertChatToTodoButton({
     if (busy || !readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope))
       return;
     setBusy(true);
-    try {
-      const snapshot = await loadSnapshot({
-        environmentId: threadRef.environmentId,
-        input: { threadId: threadRef.threadId },
-      }).catch(() => null);
-      if (!snapshot || snapshot._tag !== "Success") {
-        toastManager.add({
-          type: "error",
-          title: "Could not load the conversation",
-          description: "Reconnect and try again.",
+    await loadSnapshot({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId },
+    })
+      .catch(() => null)
+      .then((snapshot) => {
+        if (!snapshot || snapshot._tag !== "Success") {
+          toastManager.add({
+            type: "error",
+            title: "Could not load the conversation",
+            description: "Reconnect and try again.",
+          });
+          return;
+        }
+        requestTodoCapture({
+          threadRef,
+          title: snapshot.value.thread.title,
+          context: chatTodoNote(snapshot.value.thread.title, snapshot.value.messages),
         });
-        return;
-      }
-      requestTodoCapture({
-        threadRef,
-        title: snapshot.value.thread.title,
-        context: chatTodoNote(snapshot.value.thread.title, snapshot.value.messages),
-      });
-    } finally {
-      setBusy(false);
-    }
+      })
+      .finally(() => setBusy(false));
   }
 
   return (

@@ -765,7 +765,7 @@ it.effect("uses the configured account's shadow home and environment", () =>
         [ProviderInstanceId.make("codex")]: {
           driver: ProviderDriverKind.make("codex"),
           config: { shadowHomePath: "/test/shadow", homePath: "/test/shared" },
-          environment: [{ name: "ACCOUNT_MARKER", value: "personal" }],
+          environment: [{ name: "ACCOUNT_MARKER", value: "personal", sensitive: false }],
         },
       },
     },

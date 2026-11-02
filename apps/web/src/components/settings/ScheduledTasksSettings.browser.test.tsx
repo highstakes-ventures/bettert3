@@ -47,7 +47,12 @@ const threadFamilyRead = {
   threads: [{ id: task.threadId, title: "Fix login bug" }],
 };
 
-const state = vi.hoisted(() => ({ connected: true, tasksLoaded: true, secondary: false }));
+const state = vi.hoisted(() => ({
+  connected: true,
+  tasksLoaded: true,
+  secondary: false,
+  owner: "t3" as "t3" | "mation",
+}));
 const secondaryId = EnvironmentId.make("secondary");
 const permissions = new Map<string, Atom.Writable<boolean>>();
 
@@ -55,6 +60,7 @@ function setup() {
   state.connected = true;
   state.tasksLoaded = true;
   state.secondary = false;
+  state.owner = "t3";
   permissions.clear();
   permissions.set(environmentId, Atom.make(true));
   permissions.set(secondaryId, Atom.make(true));
@@ -70,7 +76,9 @@ function environment() {
     environmentId,
     label: "Laptop",
     connection: { phase: state.connected ? "connected" : "disconnected" },
-    serverConfig: state.connected ? { environment: { platform: "linux" } } : null,
+    serverConfig: state.connected
+      ? { environment: { platform: "linux", capabilities: { scheduledTaskOwner: state.owner } } }
+      : null,
   };
 }
 
@@ -173,12 +181,20 @@ describe("ScheduledTasksSettings", () => {
     await expect.element(page.getByLabelText("Runs on")).toHaveTextContent("Laptop");
   });
 
-  it("disables creation without a connected target", async () => {
-    setup();
-    state.connected = false;
-    await using screen = await render(<ScheduledTasksSettings />);
-    await expect.element(screen.getByRole("button", { name: "New task" })).toBeDisabled();
-  });
+  it.each([
+    { connected: false, owner: "t3" as const },
+    { connected: true, owner: "mation" as const },
+  ])(
+    "disables native creation and linked editors for unavailable or managed targets: $owner, $connected",
+    async ({ connected, owner }) => {
+      setup();
+      state.connected = connected;
+      state.owner = owner;
+      await using screen = await render(<ScheduledTasksSettings taskId={task.id} />);
+      await expect.element(screen.getByRole("button", { name: "New task" })).toBeDisabled();
+      await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+    },
+  );
 
   it("keeps a linked task's unsaved edits across a disconnect and reconnect", async () => {
     setup();

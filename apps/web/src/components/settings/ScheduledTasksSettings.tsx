@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
 import { AsyncResult } from "effect/reactivity";
@@ -389,7 +388,13 @@ export function ScheduledTasksSettings(target: {
   }
   if (linkedTask && linkedEnvironmentId !== undefined && openedLinkTaskId !== target.taskId) {
     setOpenedLinkTaskId(target.taskId);
-    if (editor === null) setEditor({ environmentId: linkedEnvironmentId, task: linkedTask });
+    if (
+      editor === null &&
+      linkedTask.schedule.type !== "once" &&
+      environments.find((entry) => entry.environmentId === linkedEnvironmentId)?.serverConfig
+        ?.environment.capabilities.scheduledTaskOwner !== "mation"
+    )
+      setEditor({ environmentId: linkedEnvironmentId, task: linkedTask });
   }
   const navigate = useNavigate({ from: "/settings/scheduled-tasks" });
   const closeEditor = () => {
@@ -656,19 +661,6 @@ function ScheduledTaskEnvironmentSection({
     matchesScheduledTaskScope(scope, environment.environmentId, task.projectId),
   );
   const linkedTask = tasks?.find((task) => task.id === taskId);
-  const openedLink = useRef(false);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens the persistent schedule editor from an external task link after its subscription loads
-  useEffect(() => {
-    if (
-      !openedLink.current &&
-      linkedTask &&
-      environment.serverConfig?.environment.capabilities.scheduledTaskOwner !== "mation" &&
-      linkedTask.schedule.type !== "once"
-    ) {
-      openedLink.current = true;
-      onEdit(environment.environmentId, linkedTask);
-    }
-  }, [environment.environmentId, environment.serverConfig, linkedTask, onEdit]);
   return (
     <SettingsSection
       title={environment.label}

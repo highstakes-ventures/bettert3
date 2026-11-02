@@ -1,4 +1,4 @@
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { act, render, fakeTimers } from "../../../test/render";
 import {
   DEFAULT_SERVER_SETTINGS,
@@ -268,7 +268,7 @@ it("stays in the chat without opening intake when every destination is working o
   await act(async () => requestWorkflowAction("refine"));
   expect(state.navigate).not.toHaveBeenCalled();
   expect(state.unsettle).not.toHaveBeenCalled();
-  expect(document.querySelector('textarea[aria-label="Ticket request"]')).toBeNull();
+  await expect.element(page.getByRole("dialog", { name: "Add a ticket" })).not.toBeInTheDocument();
   expect(toast).toHaveBeenCalledWith(
     expect.objectContaining({ title: "No tickets ready to refine" }),
   );

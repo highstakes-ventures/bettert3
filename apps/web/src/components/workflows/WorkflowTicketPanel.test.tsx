@@ -32,15 +32,19 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => true }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => state.navigate }));
-vi.mock("~/state/server", () => ({
-  serverEnvironment: {
-    workflowLive: (input: { input: { projectId: ProjectId; includeAllProjects?: boolean } }) =>
-      input,
-    workflowDetail: () => "detail",
-    workflowConnection: () => "connection",
-    decideWorkflow: { permissionAtom: () => null },
-  },
-}));
+vi.mock("~/state/server", async () => {
+  const { Atom } = await import("effect/reactivity");
+  return {
+    primaryServerKeybindingsAtom: Atom.make([]),
+    serverEnvironment: {
+      workflowLive: (input: { input: { projectId: ProjectId; includeAllProjects?: boolean } }) =>
+        input,
+      workflowDetail: () => "detail",
+      workflowConnection: () => "connection",
+      decideWorkflow: { permissionAtom: () => null },
+    },
+  };
+});
 vi.mock("~/state/query", () => ({
   useEnvironmentQuery: (
     key: string | { input: { projectId: ProjectId; includeAllProjects?: boolean } },
