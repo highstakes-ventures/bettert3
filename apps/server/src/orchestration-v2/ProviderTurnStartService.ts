@@ -1,3 +1,4 @@
+import { t3AutomaticChatContext } from "@t3tools/provider-core/server/orchestrationInstructions";
 import { isAutomaticThread } from "@t3tools/shared/threadAttention";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
@@ -1122,7 +1123,7 @@ export const layer: Layer.Layer<
         ? yield* projectionStore.getThreadShell(input.threadId)
         : null;
       const automaticNote = isAutomaticThread({ ...automaticSource, ...attentionShell })
-        ? `<t3_automatic_chat>This is an unattended Automatic chat. Joseph does not read this chat. Continue authorized work autonomously. Do not ask open-ended discovery or approach questions here. If a concrete user decision blocks you, prepare the evidence and a recommended approach, then use t3_thread_launch for one normal inbox discussion with the exact decision and a link back to t3-thread://v1/${projection.thread.id}. Reuse a discussion of the same unresolved decision. The discussion must present the prepared recommendation and wait for Joseph, without restarting broad discovery or implementing an unapproved approach. Do not settle, archive, or stop this automation merely to quiet it.</t3_automatic_chat>`
+        ? t3AutomaticChatContext(projection.thread.id)
         : "";
       // Delivered once: this run's provider turn marks the work as told. A
       // restart continuation is prompted by its own text or resumes natively.
