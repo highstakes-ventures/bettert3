@@ -32,6 +32,8 @@ it.each(["new", "reused"] as const)(
     store.setDraftThreadContext(first, { environmentSelection: "manual", runDestination: cloud });
     store.setPrompt(first, "Keep this draft");
     let shell: EnvironmentShellState = {
+      generation: 0,
+      removedAt: new Map(),
       status: "empty",
       snapshot: Option.none(),
       error: Option.none(),
@@ -43,6 +45,8 @@ it.each(["new", "reused"] as const)(
     expect(store.getDraftSession(second)).toMatchObject({ ...remote, runDestination: cloud });
 
     shell = {
+      generation: 0,
+      removedAt: new Map(),
       status: "live",
       snapshot: Option.some({
         schemaVersion: 1,
@@ -64,6 +68,8 @@ it.each(["new", "reused"] as const)(
 it("does not infer deletion from a disconnected environment's old snapshot", () => {
   const remote = scopeProjectRef(EnvironmentId.make("remote"), ProjectId.make("remote-project"));
   const shell: EnvironmentShellState = {
+    generation: 0,
+    removedAt: new Map(),
     status: "cached",
     snapshot: Option.some({
       schemaVersion: 1,

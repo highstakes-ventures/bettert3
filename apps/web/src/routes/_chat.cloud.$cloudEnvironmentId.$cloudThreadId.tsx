@@ -26,6 +26,7 @@ function CloudChatView() {
   const [attempt, setAttempt] = useState(0);
   const accountId = list.error ? undefined : list.data?.accountId;
   const requestKey = `${accountId}:${cloudThreadId}:${attempt}`;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens the remote Cloud binding and cancels stale navigation when its route changes
   useEffect(() => {
     if (!accountId || !permitted) return;
     let cancelled = false;

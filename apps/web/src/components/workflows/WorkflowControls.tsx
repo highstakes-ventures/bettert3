@@ -80,6 +80,7 @@ export function WorkflowActionShortcuts() {
         ? `${params.environmentId}:${params.threadId}`
         : null),
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers workflow keyboard and window-event listeners while controls are mounted
   useEffect(() => {
     const showControls = () => {
       if (!route) {
@@ -104,6 +105,7 @@ export function WorkflowActionShortcuts() {
       window.removeEventListener(WORKFLOW_ACTION_EVENT, showControls);
     };
   }, [keybindings, route, isMobile, setOpenMobile]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers workflow keyboard and window-event listeners while controls are mounted
   useEffect(() => {
     if (!route) takeWorkflowAction();
     return () => {
@@ -224,6 +226,7 @@ function WorkflowControls(
     if (run) void openRun(run);
     else toastManager.add({ type: "info", title: "No tickets ready to refine" });
   };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers workflow keyboard and window-event listeners while controls are mounted
   useEffect(() => {
     const handleAction = () => {
       if (!live.data) return;

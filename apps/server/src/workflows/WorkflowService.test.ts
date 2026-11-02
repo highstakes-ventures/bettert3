@@ -182,22 +182,22 @@ const harness = Effect.gen(function* () {
     ServerSettings.layerTest(),
     Layer.mock(ProjectStore.ProjectStoreV2)({
       get: (id) =>
-        Effect.succeed(
-          Option.some({
-            projectId: id,
-            title: "Project",
-            workspaceRoot: "/fixture",
-            defaultModelSelection: null,
-            defaultThreadEnvMode: null,
-            autoPull: false,
-            faviconPath: null,
-            projectIcon: null,
-            scripts: [],
-            createdAt: "2026-10-20T00:00:00Z",
-            updatedAt: "2026-10-20T00:00:00Z",
-            deletedAt: null,
-          }),
-        ),
+        Effect.succeedSome({
+          projectId: id,
+          title: "Project",
+          workspaceRoot: "/fixture",
+          defaultModelSelection: null,
+          defaultThreadEnvMode: null,
+          autoPull: false,
+          pinnedAt: null,
+          archivedAt: null,
+          faviconPath: null,
+          projectIcon: null,
+          scripts: [],
+          createdAt: "2026-10-20T00:00:00Z",
+          updatedAt: "2026-10-20T00:00:00Z",
+          deletedAt: null,
+        }),
     }),
     Layer.mock(ProjectionStore.ProjectionStoreV2)({
       getThreadShell: (id) =>
@@ -1225,8 +1225,9 @@ it.effect("serializes concurrent claims of one external issue across projects", 
       ...(yield* h.service.list(other)).runs,
     ];
     h.switches.beforeSave = Effect.yieldNow;
-    const results = yield* Effect.all(
-      runs.map((run) =>
+    const results = yield* Effect.forEach(
+      runs,
+      (run) =>
         h.service
           .submitResult(run.threadId!, {
             type: "prepared",
@@ -1235,7 +1236,6 @@ it.effect("serializes concurrent claims of one external issue across projects", 
             ticket: draft,
           })
           .pipe(Effect.result),
-      ),
       { concurrency: "unbounded" },
     );
     expect(results.filter((result) => result._tag === "Success")).toHaveLength(1);

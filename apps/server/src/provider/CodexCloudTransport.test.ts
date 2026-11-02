@@ -1,3 +1,5 @@
+import { ProviderInstanceId } from "@t3tools/contracts";
+import { buildCodexTurnStartParams } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { expect, it, vi, beforeEach } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -138,6 +140,41 @@ effectIt.effect("fails an in-flight request when the Cloud socket disconnects", 
   ),
 );
 
+effectIt.effect.each(["default", "plan"] as const)(
+  "maps real %s turn parameters without leaking local context",
+  (mode) =>
+    Effect.gen(function* () {
+      for (const effort of [undefined, "high"] as const) {
+        const params = yield* buildCodexTurnStartParams({
+          nativeThreadId: "cloud",
+          codexInput: [{ type: "text", text: "Continue." }],
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.4",
+            ...(effort ? { options: [{ id: "reasoningEffort", value: effort }] } : {}),
+          },
+          runtimePolicy: {
+            runtimeMode: "full-access",
+            interactionMode: mode,
+            cwd: "/local",
+            approvalPolicy: "never",
+            sandboxPolicy: { type: "dangerFullAccess" },
+          },
+          hasT3Mcp: true,
+        });
+        const mapped = Transport.cloudRequest({ method: "turn/start", params }, destination);
+        expect(mapped.params?.collaborationMode).toEqual({
+          mode,
+          settings: { model: "gpt-5.4", ...(effort ? { reasoning_effort: effort } : {}) },
+        });
+        expect(mapped.params).not.toHaveProperty("cwd");
+        expect(mapped.params).not.toHaveProperty("additionalContext");
+        expect(mapped.params).not.toHaveProperty("sandboxPolicy");
+        expect(mapped.params).not.toHaveProperty("approvalPolicy");
+      }
+    }),
+);
+
 it("preserves Plan mode without sending local developer instructions", () => {
   const result = Transport.cloudRequest(
     {
@@ -163,17 +200,23 @@ it("preserves Plan mode without sending local developer instructions", () => {
 effectIt.effect("reports disconnection after the turn start reply has arrived", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const ended = yield* Deferred.make<void>();
+      const notifications: string[] = [];
       const client = yield* Transport.open({
         token: "test",
         destination,
-        onTermination: () => Deferred.succeed(ended, undefined).pipe(Effect.asVoid),
       });
+      yield* client.handleUnknownServerNotification((_method, params) =>
+        Effect.sync(() => {
+          notifications.push((params as { text: string }).text);
+        }),
+      );
       expect(yield* client.raw.request("turn/start", { threadId: "cloud", input: [] })).toEqual({
         ok: true,
       });
       wire.disconnect();
-      yield* Deferred.await(ended);
+      const termination = yield* client.awaitTermination.pipe(Effect.result);
+      expect(termination._tag).toBe("Failure");
+      expect(notifications).toEqual(["streamed"]);
     }),
   ),
 );

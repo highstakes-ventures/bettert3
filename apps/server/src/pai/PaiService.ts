@@ -17,6 +17,16 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 
+const encodePreparedTodoResult = Schema.encodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      requestId: Schema.String,
+      result: Schema.Unknown,
+      source: MationRunRef,
+    }),
+  ),
+);
+
 export class PaiOperationError extends Schema.TaggedError<PaiOperationError>()(
   "PaiOperationError",
   { operation: Schema.String, cause: Schema.Defect() },
@@ -122,15 +132,7 @@ const make = Effect.gen(function* () {
           ),
         );
       const { todoId, requestId, ...result } = input;
-      const body = yield* Schema.encodeEffect(
-        Schema.fromJsonString(
-          Schema.Struct({
-            requestId: Schema.String,
-            result: Schema.Unknown,
-            source: MationRunRef,
-          }),
-        ),
-      )({
+      const body = yield* encodePreparedTodoResult({
         requestId,
         result,
         source: {
@@ -143,7 +145,7 @@ const make = Effect.gen(function* () {
           (cause) => new PaiOperationError({ operation: "encode todo preparation", cause }),
         ),
       );
-      const response = yield* proxy(`/api/todos/${todoId}/prepare`, "POST", body);
+      const response = yield* proxy(`/api/todo-preparations/${todoId}/result`, "POST", body);
       yield* decode(Schema.Unknown, response);
       return { prepared: true };
     }),

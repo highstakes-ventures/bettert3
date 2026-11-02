@@ -11,6 +11,7 @@ export function useOpenWorkflowRun(environmentId: EnvironmentId) {
   const navigate = useNavigate();
   const unsettle = useOrchestrationCommand(threadEnvironment.unsettle, "reopen refinement chat");
   const latestOpen = useRef(0);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- cancels pending asynchronous navigation when the workflow controls unmount
   useEffect(
     () => () => {
       latestOpen.current += 1;

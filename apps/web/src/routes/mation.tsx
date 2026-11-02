@@ -9,8 +9,6 @@ import { forwardTodoKeydown } from "../components/TodoCaptureDialog";
 import { useStableCallback } from "../hooks/useStableCallback";
 
 export const Route = createFileRoute("/mation")({
-  validateSearch: (search: Record<string, unknown>): { view?: "todos" } =>
-    search.view === "todos" ? { view: "todos" } : {},
   beforeLoad: ({ context }) => {
     if (
       context.authGateState.status !== "authenticated" &&
@@ -25,53 +23,48 @@ const decodeTodoPage = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ html: Schema.String })),
 );
 function MationPage() {
-  const { view } = Route.useSearch();
   const navigate = useNavigate();
   const environmentId = usePrimaryEnvironmentId();
   const request = useStableCallback(useAtomCommand(mationEnvironment.request));
   const frame = useRef<HTMLIFrameElement>(null);
   const [page, setPage] = useState<{
     environmentId: string;
-    view?: "todos" | undefined;
     html: string;
   } | null>(null);
   const [error, setError] = useState<{
     environmentId: string;
-    view?: "todos" | undefined;
     message: string;
   } | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- owns the authenticated Mation iframe request and its message listener
   useEffect(() => {
     if (!environmentId) return;
     let active = true;
-    const input =
-      view === "todos"
-        ? { type: "request" as const, request: { path: "todos/page", method: "GET" as const } }
-        : { type: "page" as const };
+    const input = { type: "page" as const };
     void request({ environmentId, input }).then((result) => {
       if (!active) return;
       if (result._tag === "Success") {
         if ("html" in result.value) {
-          setPage({ environmentId, view, html: result.value.html });
+          setPage({ environmentId, html: result.value.html });
           return;
         }
         if (result.value.status === 200) {
           const decoded = decodeTodoPage(result.value.body);
           if (decoded._tag === "Some") {
-            setPage({ environmentId, view, html: decoded.value.html });
+            setPage({ environmentId, html: decoded.value.html });
             return;
           }
         }
       }
       setError({
         environmentId,
-        view,
-        message: `${view === "todos" ? "Personal todos" : "Mation"} could not be opened. Check this environment's Mation connection.`,
+        message: "Mation could not be opened. Check this environment's Mation connection.",
       });
     });
     return () => {
       active = false;
     };
-  }, [environmentId, request, view]);
+  }, [environmentId, request]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- owns the authenticated Mation iframe request and its message listener
   useEffect(() => {
     if (!environmentId) return;
     const receive = (event: MessageEvent) => {
@@ -145,20 +138,16 @@ function MationPage() {
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
   }, [environmentId, request, navigate]);
-  if (!environmentId || !page || page.environmentId !== environmentId || page.view !== view)
+  if (!environmentId || !page || page.environmentId !== environmentId)
     return (
       <div className="p-6 text-muted-foreground" role="status">
-        {error?.environmentId === environmentId && error.view === view
-          ? error.message
-          : view === "todos"
-            ? "Opening personal todos..."
-            : "Opening Mation..."}
+        {error?.environmentId === environmentId ? error.message : "Opening Mation..."}
       </div>
     );
   return (
     <iframe
       ref={frame}
-      title={view === "todos" ? "Personal todos" : "Mation automations"}
+      title="Mation automations"
       srcDoc={page.html}
       sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
       className="h-full min-h-0 w-full flex-1 border-0"

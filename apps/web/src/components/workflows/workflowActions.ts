@@ -9,7 +9,7 @@ import { create } from "zustand";
 import { useNowSecond } from "~/hooks/useNowSecond";
 import { readThreadShell, useThreadShells } from "~/state/entities";
 import { showThreadUndoNotice } from "~/hooks/showThreadUndoNotice";
-import * as ThreadUndo from "~/hooks/threadUndo";
+import * as ThreadUndo from "@t3tools/client-runtime/state/thread-undo";
 import { toastManager } from "../ui/toast";
 
 export const WORKFLOW_ACTION_EVENT = "t3:ticket-workflow";

@@ -16,11 +16,11 @@ vi.mock(import("../../state/server"), () => ({
 vi.mock(import("../../state/environments"), () => ({
   usePrimaryEnvironmentId: (() => state.environmentId) as never,
 }));
-vi.mock(import("../../state/mationTodos"), () => ({
-  mationTodoList: (({ environmentId }: { environmentId: string }) =>
+vi.mock(import("../../state/todos"), () => ({
+  todoList: (({ environmentId }: { environmentId: string }) =>
     state.lists.get(environmentId)) as never,
 }));
-vi.mock(import("../../state/mation"), () => ({ mationEnvironment: { request: {} } as never }));
+vi.mock(import("../../state/todo"), () => ({ todoEnvironment: { request: {} } as never }));
 vi.mock(import("../../state/use-atom-command"), () => ({
   useAtomCommand: (() => state.request) as never,
 }));

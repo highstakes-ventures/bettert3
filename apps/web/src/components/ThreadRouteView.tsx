@@ -1,23 +1,17 @@
 import { useRightPanelStore } from "../rightPanelStore";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
+import { Navigate, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { cloudChats } from "../state/cloudChats";
 import { useAtomCommand } from "../state/use-atom-command";
 import ChatView from "./ChatView";
-import { resolveDraftPromotionNavigationTarget, threadHasStarted } from "./ChatView.logic";
-import { waitForDraftHeroTransition } from "./chat/draftHeroTransition";
+import { BackgroundThreadContext } from "./chat/backgroundThread";
 import { SidebarInset } from "./ui/sidebar";
-import {
-  finalizePromotedDraftThreadByRef,
-  markPromotedDraftThreadByRef,
-  useBackgroundDraftSubmissionPending,
-  useComposerDraftStore,
-} from "../composerDraftStore";
+import { useComposerDraftStore } from "../composerDraftStore";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
-import { useEnvironmentThreadRefs, useThreadRefs, useQuietThreadShell } from "../state/entities";
+import { useEnvironmentThreadRefs, useQuietThreadShell } from "../state/entities";
 import { useEnvironmentShellStatus } from "../state/shell";
 import { useEnvironmentThread } from "../state/threads";
 import {
@@ -28,17 +22,24 @@ import {
 } from "../threadRoutes";
 
 /**
- * Plain server threads are unkeyed, so navigating between them reuses one instance as ChatView
- * expects. Rendered by the `_chat` layout rather than by the two leaf routes, since an element
- * only survives a route swap when the same parent renders it.
+ * Unkeyed so navigating between server threads reuses one ChatView. Rendered by the `_chat`
+ * layout, since an element only survives a route swap when the same parent renders it. Draft
+ * promotion runs in the draft store; this only follows the redirect it leaves behind.
+ * `background` keeps the thread mounted, inert and in place under Settings or Usage.
  */
-export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
+export function ThreadRouteView({
+  target,
+  background = false,
+}: {
+  target: ThreadRouteTarget;
+  background?: boolean;
+}) {
   const navigate = useNavigate();
   const draftId = target.kind === "draft" ? target.draftId : null;
   const draftSession = useComposerDraftStore((store) =>
     draftId === null ? null : store.getDraftSession(draftId),
   );
-  const threadRefs = useThreadRefs();
+  const threadRefs = useEnvironmentThreadRefs(draftSession?.environmentId ?? null);
   // Promotion can begin before the server creates the reserved thread.
   const inferredThreadRef = draftSession
     ? (threadRefs.find(
@@ -47,13 +48,14 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
           ref.threadId === draftSession.threadId,
       ) ?? null)
     : null;
-  const serverThreadRef: ScopedThreadRef | null =
+  const contextThreadRef: ScopedThreadRef | null =
     target.kind === "server" ? target.threadRef : inferredThreadRef;
-  const serverThread = useQuietThreadShell(serverThreadRef);
+  const serverThread = useQuietThreadShell(contextThreadRef);
   const ticketWorkflowId = serverThread?.source.ticketWorkflowId;
   const ticketProjectId = serverThread?.projectId;
-  const ticketEnvironmentId = serverThreadRef?.environmentId;
-  const ticketThreadId = serverThreadRef?.threadId;
+  const ticketEnvironmentId = contextThreadRef?.environmentId;
+  const ticketThreadId = contextThreadRef?.threadId;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps the persistent thread panel and Cloud refresh subscription aligned with external route changes
   useEffect(() => {
     if (!ticketWorkflowId || !ticketProjectId || !ticketEnvironmentId || !ticketThreadId) return;
     useRightPanelStore
@@ -68,7 +70,8 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   const cloudDestination = serverThread?.source.runDestination;
   const cloudAccountId = cloudDestination?.accountId;
   const cloudNativeId = cloudDestination?.existingThreadId;
-  const cloudEnvironmentId = serverThreadRef?.environmentId;
+  const cloudEnvironmentId = contextThreadRef?.environmentId;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps the persistent thread panel and Cloud refresh subscription aligned with external route changes
   useEffect(() => {
     if (!cloudEnvironmentId || !cloudAccountId || !cloudNativeId) return;
     const refresh = () => {
@@ -82,43 +85,36 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     return () => clearInterval(timer);
   }, [cloudEnvironmentId, cloudAccountId, cloudNativeId, openCloud]);
 
-  const backgroundSubmissionPending = useBackgroundDraftSubmissionPending(
-    target.kind === "draft" ? serverThreadRef : null,
+  const draftRedirect = useComposerDraftStore((store) =>
+    draftId === null ? null : store.getPromotedDraftRedirect(draftId),
   );
-  const canonicalThreadRef =
-    target.kind === "draft"
-      ? resolveDraftPromotionNavigationTarget({
-          serverThreadRef,
-          serverThread,
-          backgroundSubmissionPending,
-        })
-      : null;
-
+  const serverThreadRef = target.kind === "server" ? target.threadRef : null;
+  const serverThreadShell = useQuietThreadShell(serverThreadRef);
   const shellStatus = useEnvironmentShellStatus(serverThreadRef?.environmentId ?? null);
-  const serverThreadShell = serverThread;
   const environmentThreadRefs = useEnvironmentThreadRefs(serverThreadRef?.environmentId ?? null);
   const bootstrapComplete = isThreadRouteSnapshotAuthoritative(shellStatus);
   const draftThread = useComposerDraftStore((store) =>
     serverThreadRef ? store.getDraftThreadByRef(serverThreadRef) : null,
   );
-  const promotedDraftId = useComposerDraftStore((store) =>
-    target.kind === "server" ? store.getDraftIdByRef(target.threadRef) : null,
+  // Reached from the sidebar before finalize, the thread still has its draft.
+  const serverThreadDraftId = useComposerDraftStore((store) =>
+    serverThreadRef ? store.getDraftIdByRef(serverThreadRef) : null,
   );
-  // The draft record is removed once the promoted thread has started, which
-  // is after the route swap. Latch the key so the element that carried the
-  // draft keeps its identity for as long as this thread stays on screen.
-  const [chatViewKey, setChatViewKey] = useState<{ threadKey: string; key: string } | null>(null);
-  const serverThreadKey = target.kind === "server" ? scopedThreadKey(target.threadRef) : null;
-  const nextChatViewKey =
-    serverThreadKey === null
-      ? null
-      : chatViewKey?.threadKey === serverThreadKey
-        ? chatViewKey
-        : promotedDraftId
-          ? { threadKey: serverThreadKey, key: promotedDraftId }
+  // The ChatView that carried a draft keeps its key through the redirect to its thread, and only
+  // until the route leaves that thread, so later visits reuse the shared unkeyed ChatView.
+  const [handoffKey, setHandoffKey] = useState<{ threadKey: string; key: string } | null>(null);
+  const nextHandoffKey =
+    draftId !== null && draftSession === null && draftRedirect
+      ? handoffKey?.key === draftId
+        ? handoffKey
+        : { threadKey: scopedThreadKey(draftRedirect), key: draftId }
+      : serverThreadRef && handoffKey?.threadKey === scopedThreadKey(serverThreadRef)
+        ? handoffKey
+        : serverThreadRef && serverThreadDraftId
+          ? { threadKey: scopedThreadKey(serverThreadRef), key: serverThreadDraftId }
           : null;
-  if (nextChatViewKey !== chatViewKey) {
-    setChatViewKey(nextChatViewKey);
+  if (nextHandoffKey !== handoffKey) {
+    setHandoffKey(nextHandoffKey);
   }
   const environmentHasDraftThreads = useComposerDraftStore((store) =>
     serverThreadRef ? store.hasDraftThreadsInEnvironment(serverThreadRef.environmentId) : false,
@@ -141,43 +137,9 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     unlistedThreadDetail,
     draftThreadExists: draftThread !== null,
   });
-  const serverThreadStarted = threadHasStarted(serverThreadShell);
   const environmentHasAnyThreads = environmentThreadRefs.length > 0 || environmentHasDraftThreads;
 
-  useEffect(() => {
-    if (!inferredThreadRef || draftSession?.promotedTo) {
-      return;
-    }
-    markPromotedDraftThreadByRef(inferredThreadRef);
-  }, [draftSession?.promotedTo, inferredThreadRef]);
-
-  useEffect(() => {
-    if (!canonicalThreadRef) {
-      return;
-    }
-    let cancelled = false;
-    void waitForDraftHeroTransition().then(() => {
-      if (cancelled) {
-        return;
-      }
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(canonicalThreadRef),
-        replace: true,
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [canonicalThreadRef, navigate]);
-
-  useEffect(() => {
-    if (target.kind !== "draft" || draftSession || canonicalThreadRef) {
-      return;
-    }
-    void navigate({ to: "/", replace: true });
-  }, [canonicalThreadRef, draftSession, navigate, target.kind]);
-
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears pending file drops and navigates the router home once a server thread is confirmed missing
   useEffect(() => {
     if (target.kind !== "server" || !bootstrapComplete) {
       return;
@@ -185,20 +147,14 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     if (renderState === "missing") {
       const { clearPendingFileDropsForThread } = useSidebarPendingFileDropStore.getState();
       clearPendingFileDropsForThread(target.threadRef);
-      if (environmentHasAnyThreads) {
+      if (environmentHasAnyThreads && !background) {
         void navigate({ to: "/", replace: true });
       }
     }
-  }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
-
-  useEffect(() => {
-    if (target.kind !== "server" || !serverThreadStarted || !draftThread) {
-      return;
-    }
-    finalizePromotedDraftThreadByRef(target.threadRef);
-  }, [draftThread, serverThreadStarted, target]);
+  }, [background, bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
 
   let view: React.ReactNode = null;
+  let redirect: React.ReactNode = null;
   if (target.kind === "draft") {
     if (draftSession) {
       view = (
@@ -211,11 +167,30 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
           forceExpandedMobileComposer
         />
       );
+    } else if (draftRedirect) {
+      // Same slot and key as the server route renders, so the swap keeps this instance.
+      view = (
+        <ChatView
+          key={target.draftId}
+          environmentId={draftRedirect.environmentId}
+          threadId={draftRedirect.threadId}
+          routeKind="server"
+        />
+      );
+      redirect = (
+        <Navigate
+          to="/$environmentId/$threadId"
+          params={buildThreadRouteParams(draftRedirect)}
+          replace
+        />
+      );
+    } else {
+      redirect = <Navigate to="/" replace />;
     }
   } else if (renderState === "ready" || (renderState === "loading" && serverThreadShell !== null)) {
     view = (
       <ChatView
-        key={nextChatViewKey?.key}
+        key={nextHandoffKey?.key}
         environmentId={target.threadRef.environmentId}
         threadId={target.threadRef.threadId}
         routeKind="server"
@@ -224,8 +199,12 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   }
 
   return (
-    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh">
-      {view}
+    <SidebarInset
+      className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh"
+      inert={background}
+    >
+      <BackgroundThreadContext value={background}>{view}</BackgroundThreadContext>
+      {background ? null : redirect}
     </SidebarInset>
   );
 }

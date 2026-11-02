@@ -7,7 +7,7 @@ import { randomUUID } from "~/lib/utils";
 import { resolveShortcutCommand } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { usePrimaryEnvironmentId } from "~/state/environments";
-import { mationEnvironment } from "~/state/mation";
+import { todoEnvironment } from "~/state/todo";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "./ui/button";
 import {
@@ -70,7 +70,7 @@ export function forwardTodoKeydown(data: Record<string, unknown>) {
 export function TodoCaptureDialog() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const environmentId = usePrimaryEnvironmentId();
-  const request = useAtomCommand(mationEnvironment.request, { reportFailure: false });
+  const request = useAtomCommand(todoEnvironment.request, { reportFailure: false });
   const [open, setOpen] = useState(false);
   const [draftKey, setDraftKey] = useState("");
   const [drafts, setDrafts] = useState<Record<string, CaptureDraft>>({ "": emptyDraft() });
@@ -85,6 +85,7 @@ export function TodoCaptureDialog() {
       [draftKey]: { ...(current[draftKey] ?? emptyDraft()), ...change },
     }));
   }
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the todo capture event and shortcut listeners
   useEffect(() => {
     const show = (event?: Event) => {
       if (busy || open) return;
@@ -155,13 +156,13 @@ export function TodoCaptureDialog() {
     }).catch(() => null);
     setBusy(false);
     if (!result || result._tag !== "Success" || !("status" in result.value)) {
-      updateDraft({ error: "Mation did not confirm the save. Retry the same note." });
+      updateDraft({ error: "Todo did not confirm the save. Retry the same note." });
       return;
     }
     if (result.value.status < 200 || result.value.status >= 300) {
       updateDraft({
         ...(result.value.status < 500 && result.value.status !== 409 ? { submissionId: null } : {}),
-        error: "The todo could not be saved. Check the Mation connection, then retry.",
+        error: "The todo could not be saved. Check the Todo connection, then retry.",
       });
       return;
     }
@@ -238,8 +239,7 @@ export function TodoCaptureDialog() {
               disabled={busy}
               render={
                 <Link
-                  to="/mation"
-                  search={{ view: "todos" }}
+                  to="/todo"
                   onClick={(event) => {
                     if (busy) {
                       event.preventDefault();

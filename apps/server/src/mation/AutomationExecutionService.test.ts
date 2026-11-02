@@ -13,7 +13,7 @@ import { isAutomaticThread } from "@t3tools/shared/threadAttention";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
+
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
 import { FetchHttpClient } from "effect/http";
@@ -44,7 +44,7 @@ it.effect(
         Layer.mock(Events.EventStoreV2)({}),
         Layer.mock(Threads.ThreadManagementService)({ getThreadShell: () => Effect.succeed(null) }),
         Layer.mock(Receipts.CommandReceiptStoreV2)({
-          getByCommandId: () => Effect.succeed(Option.none()),
+          getByCommandId: () => Effect.succeedNone,
         }),
         Layer.mock(Launch.ThreadLaunchService)({
           launch: (input) => {
@@ -211,7 +211,7 @@ it.effect(
           },
         }),
         Layer.mock(Receipts.CommandReceiptStoreV2)({
-          getByCommandId: () => Effect.succeed(Option.none()),
+          getByCommandId: () => Effect.succeedNone,
         }),
         Layer.mock(Projects.ProjectService)({}),
         Layer.mock(Providers.ProviderRegistry)({}),

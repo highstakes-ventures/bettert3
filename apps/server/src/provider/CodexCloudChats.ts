@@ -1,7 +1,6 @@
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import { ProviderInstanceId, type CodexCloudDestination } from "@t3tools/contracts";
 import type * as CodexClient from "effect-codex-app-server/client";
-import type * as CodexError from "effect-codex-app-server/errors";
 import type * as Scope from "effect/Scope";
 import * as CodexCloudTransport from "./CodexCloudTransport.ts";
 import { NodeWS } from "@effect/platform-node/NodeSocket";
@@ -254,7 +253,6 @@ export class CodexCloudChats extends Context.Service<
     readonly openClient: (
       destination: CodexCloudDestination,
       instanceId: ProviderInstanceId,
-      onTermination?: (error: CodexError.CodexAppServerError) => Effect.Effect<void>,
     ) => Effect.Effect<CodexClient.CodexAppServerClient["Service"], CloudChatError, Scope.Scope>;
     readonly interrupt: (input: {
       readonly accountId: string;
@@ -471,11 +469,11 @@ const make = Effect.gen(function* () {
   };
   const summaries = new Map<string, Summary>();
   return CodexCloudChats.of({
-    destinations: (instanceId) => authenticate(null, instanceId).pipe(Effect.flatMap(catalog)),
+    destinations: Effect.fn("CodexCloudChats.destinations")((instanceId) =>
+      authenticate(null, instanceId).pipe(Effect.flatMap(catalog)),
+    ),
     openClient: Effect.fn("CodexCloudChats.openClient")(function* (
-      ...[destination, instanceId, onTermination]: Parameters<
-        CodexCloudChats["Service"]["openClient"]
-      >
+      ...[destination, instanceId]: Parameters<CodexCloudChats["Service"]["openClient"]>
     ) {
       const auth = yield* authenticate(destination.accountId, instanceId);
       let verified = destination;
@@ -512,10 +510,9 @@ const make = Effect.gen(function* () {
       return yield* CodexCloudTransport.open({
         token: auth.token,
         destination: verified,
-        onTermination,
       }).pipe(Effect.mapError(() => new CloudChatError({ reason: "connection" })));
     }),
-    interrupt: (input) =>
+    interrupt: Effect.fn("CodexCloudChats.interrupt")((input) =>
       withCloud(input.accountId, (request) =>
         Effect.gen(function* () {
           const page = yield* turns(request, input.threadId, 25, undefined, "desc", "notLoaded");
@@ -525,7 +522,8 @@ const make = Effect.gen(function* () {
             yield* request("turn/interrupt", { threadId: input.threadId, turnId: input.turnId });
         }),
       ),
-    snapshot: (input, knownCompletedTurns = new Set()) =>
+    ),
+    snapshot: Effect.fn("CodexCloudChats.snapshot")((input, knownCompletedTurns = new Set()) =>
       withCloud(input.accountId, (request, accountId, instanceId) =>
         Effect.gen(function* () {
           const response = yield* request("thread/read", {
@@ -571,7 +569,8 @@ const make = Effect.gen(function* () {
           };
         }),
       ),
-    list: () =>
+    ),
+    list: Effect.fn("CodexCloudChats.list")(() =>
       withCloud(null, (request, accountId) =>
         Effect.gen(function* () {
           if (cachedAccount !== accountId) {
@@ -741,7 +740,8 @@ const make = Effect.gen(function* () {
           return { accountId, chats, hasMore: page.nextCursor !== null };
         }),
       ),
-    read: (input) =>
+    ),
+    read: Effect.fn("CodexCloudChats.read")((input) =>
       withCloud(input.accountId, (request) =>
         Effect.gen(function* () {
           const page: TurnsPage = yield* turns(request, input.threadId, 10, input.cursor, "desc");
@@ -775,6 +775,7 @@ const make = Effect.gen(function* () {
           };
         }),
       ),
+    ),
   });
 });
 

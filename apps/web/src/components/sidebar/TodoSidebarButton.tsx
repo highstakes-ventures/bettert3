@@ -3,7 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { ListTodoIcon } from "lucide-react";
 import { shortcutLabelForCommand } from "../../keybindings";
 import { usePrimaryEnvironmentId } from "../../state/environments";
-import { mationTodoList } from "../../state/mationTodos";
+import { todoList } from "../../state/todos";
 import { useEnvironmentQuery } from "../../state/query";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { Kbd } from "../ui/kbd";
@@ -13,9 +13,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 export function TodoSidebarButton({ onClick }: { onClick: () => void }) {
   const environmentId = usePrimaryEnvironmentId();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const list = useEnvironmentQuery(
-    environmentId ? mationTodoList({ environmentId, input: {} }) : null,
-  );
+  const list = useEnvironmentQuery(environmentId ? todoList({ environmentId, input: {} }) : null);
   const count = list.data
     ? list.data.items.filter((item) => item.completedAt === null).length
     : null;

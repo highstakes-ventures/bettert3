@@ -342,38 +342,40 @@ const make = Effect.gen(function* () {
       }),
       labels: page(Node),
     });
-    const load = <S extends Schema.Top>(name: "teams" | "projects", fields: string, schema: S) =>
-      Effect.gen(function* () {
-        const nodes: Array<S["Type"]> = [];
-        let after: string | null = null;
-        do {
-          const result: {
-            readonly [key: string]: {
-              readonly nodes: ReadonlyArray<S["Type"]>;
-              readonly pageInfo: typeof pageInfo.Type;
-            };
-          } = yield* request(
-            // Nested labels and teams multiply Linear's query
-            // complexity. Small parent pages stay below its 10,000-point cap.
-            `query($after:String){${name}(first:10,after:$after){nodes{${fields}} ${pageFields}}}`,
-            { after },
-            Schema.Record(Schema.String, page(schema)),
-            suppliedKey,
-          );
-          const data = result[name];
-          if (
-            !data ||
-            (data.pageInfo.hasNextPage &&
-              (!data.pageInfo.endCursor || data.pageInfo.endCursor === after))
-          )
-            return yield* new WorkflowError({
-              message: "Could not paginate the Linear workspace.",
-            });
-          nodes.push(...data.nodes);
-          after = data.pageInfo.hasNextPage ? data.pageInfo.endCursor : null;
-        } while (after !== null);
-        return nodes;
-      });
+    const load = Effect.fn("load")(
+      <S extends Schema.Top>(name: "teams" | "projects", fields: string, schema: S) =>
+        Effect.gen(function* () {
+          const nodes: Array<S["Type"]> = [];
+          let after: string | null = null;
+          do {
+            const result: {
+              readonly [key: string]: {
+                readonly nodes: ReadonlyArray<S["Type"]>;
+                readonly pageInfo: typeof pageInfo.Type;
+              };
+            } = yield* request(
+              // Nested labels and teams multiply Linear's query
+              // complexity. Small parent pages stay below its 10,000-point cap.
+              `query($after:String){${name}(first:10,after:$after){nodes{${fields}} ${pageFields}}}`,
+              { after },
+              Schema.Record(Schema.String, page(schema)),
+              suppliedKey,
+            );
+            const data = result[name];
+            if (
+              !data ||
+              (data.pageInfo.hasNextPage &&
+                (!data.pageInfo.endCursor || data.pageInfo.endCursor === after))
+            )
+              return yield* new WorkflowError({
+                message: "Could not paginate the Linear workspace.",
+              });
+            nodes.push(...data.nodes);
+            after = data.pageInfo.hasNextPage ? data.pageInfo.endCursor : null;
+          } while (after !== null);
+          return nodes;
+        }),
+    );
     const teams = yield* load(
       "teams",
       "id name states { nodes { id name type } } labels(first:100) { nodes { id name } pageInfo { hasNextPage endCursor } }",
@@ -548,9 +550,10 @@ const make = Effect.gen(function* () {
   });
   return LinearClient.of({
     connected: key.pipe(Effect.map(Option.isSome)),
-    connection: (options) =>
+    connection: Effect.fn("LinearClient.connection")((options) =>
       options?.cached ? Effect.suspend(() => cachedConnection) : connection(),
-    connect: (credential) =>
+    ),
+    connect: Effect.fn("LinearClient.connect")((credential) =>
       connection(credential).pipe(
         Effect.tap(() =>
           secrets
@@ -564,6 +567,7 @@ const make = Effect.gen(function* () {
         ),
         Effect.tap(() => invalidateConnection),
       ),
+    ),
     disconnect: secrets.remove(SECRET).pipe(
       Effect.mapError(
         (cause) => new WorkflowError({ message: "Could not remove the Linear connection.", cause }),
@@ -572,7 +576,7 @@ const make = Effect.gen(function* () {
     ),
     read,
     save,
-    search: (teamId, query) =>
+    search: Effect.fn("LinearClient.search")((teamId, query) =>
       request(
         `query($filter:IssueFilter!){issues(first:${WORKFLOW_SEARCH_LIMIT},filter:$filter){nodes{${referenceFields} description team{id}} pageInfo{hasNextPage}}}`,
         {
@@ -624,12 +628,14 @@ const make = Effect.gen(function* () {
           ),
         ),
       ),
-    decide: (id, stateId, projectId) =>
+    ),
+    decide: Effect.fn("LinearClient.decide")((id, stateId, projectId) =>
       mutate(
         "mutation($id:String!,$input:IssueUpdateInput!){issueUpdate(id:$id,input:$input){success}}",
         { id, input: { stateId, ...(projectId === undefined ? {} : { projectId }) } },
         "issueUpdate",
       ).pipe(Effect.andThen(read(id))),
+    ),
   });
 });
 

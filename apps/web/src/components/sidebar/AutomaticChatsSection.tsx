@@ -49,15 +49,23 @@ const AUTOMATIC_PAGE_COUNT = 25;
 
 type RunTiming = { completedMs: number; activeStartedAt: string | null };
 
-function AutomaticOriginIcon({ origin }: { origin: ThreadShell["source"]["automationOrigin"] }) {
+type AutomaticOrigin = ThreadShell["source"]["automationOrigin"] | "sge";
+
+function AutomaticOriginIcon({ origin }: { origin: AutomaticOrigin }) {
   const label =
-    origin === "t3"
-      ? "Started by T3"
-      : origin === "external"
-        ? "Triggered externally"
-        : "Origin unknown";
+    origin === "sge"
+      ? "Triggered by SGE"
+      : origin === "t3"
+        ? "Started by T3"
+        : origin === "external"
+          ? "Triggered externally"
+          : "Origin unknown";
   const Icon =
-    origin === "t3" ? WorkflowIcon : origin === "external" ? WebhookIcon : CircleHelpIcon;
+    origin === "t3"
+      ? WorkflowIcon
+      : origin === "external" || origin === "sge"
+        ? WebhookIcon
+        : CircleHelpIcon;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -150,7 +158,7 @@ function AutomaticRowContent({
   title: string;
   projectName: string | null;
   projectDescription?: string | null;
-  origin: ThreadShell["source"]["automationOrigin"];
+  origin: AutomaticOrigin;
   executionIcon: ReactNode;
   location: string;
   elapsed: RunTiming | null;
@@ -273,6 +281,7 @@ function localAutomaticState(
       : {
           approval: "Approval needed",
           input: "Input needed",
+          request: "Subagent needs input",
           working: "Running",
           failed: "Failed",
           limited: "Usage limit",
@@ -367,11 +376,16 @@ function LocalAutomaticRow({
           updatedAt={thread.updatedAt}
           elapsed={elapsed}
           origin={
-            source.automationOrigin !== undefined
-              ? source.automationOrigin
-              : source.runDestination?.origin === "automatic"
-                ? "external"
-                : undefined
+            source.automationOrigin === "external" &&
+            /^sge-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+              thread.id,
+            )
+              ? "sge"
+              : source.automationOrigin !== undefined
+                ? source.automationOrigin
+                : source.runDestination?.origin === "automatic"
+                  ? "external"
+                  : undefined
           }
           location={location}
           executionIcon={
@@ -609,6 +623,7 @@ export function AutomaticChatsSection({
   const unopened = unopenedLocalRows.length + cloudOnlyRows.filter(isUnopened).length;
   const markAllRead = () => {
     if (!expanded || !environmentId) return;
+    // oxlint-disable-next-line react/purity -- Mark-read records the click time.
     const visitedAt = new Date().toISOString();
     for (const thread of unopenedLocalRows) {
       if (readEnvironmentSupportsVisitedTracking(thread.environmentId)) {
@@ -633,6 +648,7 @@ export function AutomaticChatsSection({
     ? `${query.error ?? ""}:${data !== null}:${visibleRows.map((chat) => chat.id).join(":")}:${visibleLocalRows.map((thread) => thread.id).join(":")}`
     : "collapsed";
   const layoutPass = { layoutKey, onLayoutChange };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- notifies the external list-motion controller after the Automatic section changes layout
   useLayoutEffect(() => {
     layoutPass.onLayoutChange();
   }, [layoutPass]);

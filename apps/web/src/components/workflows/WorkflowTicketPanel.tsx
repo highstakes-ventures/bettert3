@@ -103,6 +103,7 @@ function Ticket({
 }) {
   const [target, setTarget] = useState(detail.ticket?.project?.id ?? "");
   const [delayDuration, setDelayDuration] = useState<WorkflowDelayDuration>("1-week");
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- records directly opened refinement routes in the session navigation registry
   useEffect(() => {
     // Also remember refinement chats opened directly from the sidebar.
     if (detail.run.phase === "review") {

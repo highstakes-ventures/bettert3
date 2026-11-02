@@ -23,7 +23,10 @@ const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const CollaborationMode = Schema.Struct({
   mode: Schema.Literals(["plan", "default"]),
-  settings: Schema.Struct({ model: Schema.String, reasoning_effort: Schema.String }),
+  settings: Schema.Struct({
+    model: Schema.String,
+    reasoning_effort: Schema.optionalKey(Schema.String),
+  }),
 });
 const decodeCollaborationMode = Schema.decodeUnknownSync(CollaborationMode);
 
@@ -78,9 +81,6 @@ export function cloudRequest(message: unknown, destination: CodexCloudDestinatio
 export const open = Effect.fn("CodexCloudTransport.open")(function* (input: {
   readonly token: string;
   readonly destination: CodexCloudDestination;
-  readonly onTermination?:
-    | ((error: CodexError.CodexAppServerError) => Effect.Effect<void>)
-    | undefined;
 }) {
   const incoming = yield* Queue.unbounded<Uint8Array, Cause.Done<void>>();
   const encoder = new TextEncoder();
@@ -154,5 +154,5 @@ export const open = Effect.fn("CodexCloudTransport.open")(function* (input: {
       ),
     stderr: () => Sink.drain,
   });
-  return yield* CodexClient.make(stdio, { onTermination: input.onTermination });
+  return yield* CodexClient.make(stdio);
 });

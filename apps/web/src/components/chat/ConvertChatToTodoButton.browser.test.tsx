@@ -24,7 +24,7 @@ vi.mock(import("@effect/atom-react"), async (original) => ({
   ...(await original()),
   useAtomValue: (() => []) as never,
 }));
-vi.mock(import("../../state/mation"), () => ({ mationEnvironment: { request: {} } as never }));
+vi.mock(import("../../state/todo"), () => ({ todoEnvironment: { request: {} } as never }));
 vi.mock(import("../../state/use-atom-command"), () => ({
   useAtomCommand: ((command: unknown) =>
     command === "fresh-snapshot" ? state.snapshot : state.request) as never,

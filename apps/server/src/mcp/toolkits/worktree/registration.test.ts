@@ -1,3 +1,9 @@
+import * as DocumentText from "../../../provider/DocumentText.ts";
+import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
+import * as PeerLinkRequests from "../../../peer/PeerLinkRequests.ts";
+import * as PeerLinks from "../../../peer/PeerLinks.ts";
+import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
+import * as RemoteDelegation from "../../../peer/RemoteDelegation.ts";
 import { PaiService } from "../../../pai/PaiService.ts";
 import * as Context from "effect/Context";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -41,6 +47,13 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(DocumentText.DocumentText)({}),
+  Layer.mock(PeerForwarding.PeerForwarding)({}),
+  Layer.mock(PeerLinkRequests.PeerLinkRequests)({}),
+  Layer.mock(PeerLinks.PeerLinks)({}),
+  Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({}),
+  Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+
   Layer.mock(PaiService)({}),
   Layer.mock(MationExecution.AutomationExecutionService)({}),
   Layer.mock(WorkflowService.WorkflowService)({}),

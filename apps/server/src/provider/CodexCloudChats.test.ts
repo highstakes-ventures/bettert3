@@ -598,10 +598,9 @@ it.effect("shares the replacement when concurrent reads lose the same connection
       const service = yield* CodexCloudChats.CodexCloudChats;
       let reads = 0;
       wire.response = () => (++reads <= 2 ? "disconnect" : page);
-      const results = yield* Effect.all(
-        [threadId, "other-chat"].map((threadId) =>
-          service.read({ threadId, accountId: "account-a" }),
-        ),
+      const results = yield* Effect.forEach(
+        [threadId, "other-chat"],
+        (threadId) => service.read({ threadId, accountId: "account-a" }),
         { concurrency: 2 },
       );
       expect(results.map((result) => result.messages.at(-1)?.text)).toEqual([

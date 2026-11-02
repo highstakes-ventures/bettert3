@@ -39,6 +39,7 @@ function EmailFrame({
   const [page, setPage] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [height, setHeight] = useState(240);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the authenticated iframe document and synchronizes its external message channel
   useEffect(() => {
     let active = true;
     void request({ environmentId, input: { type: "page" } }).then((result) => {
@@ -50,6 +51,7 @@ function EmailFrame({
       active = false;
     };
   }, [environmentId, request]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the authenticated iframe document and synchronizes its external message channel
   useEffect(() => {
     const sendTheme = () =>
       frame.current?.contentWindow?.postMessage(

@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { useCallback, useRef } from "react";
+import { useRef } from "react";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 
 const ExpandedSidebarShelf = Schema.NullOr(
@@ -14,24 +14,18 @@ export function useSidebarShelves(isMobile: boolean) {
     ExpandedSidebarShelf,
   );
   const collapseOnLeave = useRef<SidebarShelf | null>(null);
-  const toggleShelf = useCallback(
-    (shelf: SidebarShelf) => {
-      collapseOnLeave.current = null;
-      setExpandedShelf((value) => (value === shelf ? null : shelf));
-    },
-    [setExpandedShelf],
-  );
-  const onThreadOpen = useCallback(() => {
+  const toggleShelf = (shelf: SidebarShelf) => {
+    collapseOnLeave.current = null;
+    setExpandedShelf((value) => (value === shelf ? null : shelf));
+  };
+  const onThreadOpen = () => {
     if (!isMobile) collapseOnLeave.current = expandedShelf;
-  }, [expandedShelf, isMobile]);
-  const onMouseLeave = useCallback(
-    (event: { buttons: number }) => {
-      if (isMobile || event.buttons !== 0 || collapseOnLeave.current === null) return;
-      const shelf = collapseOnLeave.current;
-      collapseOnLeave.current = null;
-      setExpandedShelf((value) => (value === shelf ? null : value));
-    },
-    [isMobile, setExpandedShelf],
-  );
+  };
+  const onMouseLeave = (event: { buttons: number }) => {
+    if (isMobile || event.buttons !== 0 || collapseOnLeave.current === null) return;
+    const shelf = collapseOnLeave.current;
+    collapseOnLeave.current = null;
+    setExpandedShelf((value) => (value === shelf ? null : value));
+  };
   return { expandedShelf, toggleShelf, onThreadOpen, onMouseLeave };
 }

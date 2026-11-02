@@ -36,7 +36,7 @@ export const layer = Layer.effect(
             message:
               "Mation could not change this automation. Open Mation to review its configuration or migration requirements.",
           });
-        return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(
+        return yield* Schema.decodeEffect(Schema.fromJsonString(schema))(
           new TextDecoder().decode(result.body),
         );
       },
@@ -64,21 +64,50 @@ export const layer = Layer.effect(
           Stream.repeat(Schedule.spaced("5 seconds")),
           Stream.retry(Schedule.spaced("5 seconds")),
         ),
-      upsert: (input) => call("upsert", input, ScheduledTaskMutationResult),
-      setEnabled: (input) => call("enabled", input, ScheduledTaskMutationResult),
-      delete: (input) => call("delete", input, ScheduledTaskDeleteResult),
-      deleteForThread: (threadId) =>
-        call("deletethread", { threadId }, Schema.Struct({})).pipe(Effect.asVoid),
-      runNow: (input) =>
+      upsert: Effect.fn("ScheduledTasks.ScheduledTaskService.upsert")((input) =>
+        call("upsert", input, ScheduledTaskMutationResult),
+      ),
+      setEnabled: Effect.fn("ScheduledTasks.ScheduledTaskService.setEnabled")((input) =>
+        call("enabled", input, ScheduledTaskMutationResult),
+      ),
+      delete: Effect.fn("ScheduledTasks.ScheduledTaskService.delete")((input) =>
+        call("delete", input, ScheduledTaskDeleteResult),
+      ),
+      deleteForThread: Effect.fn("ScheduledTasks.ScheduledTaskService.deleteForThread")(
+        (threadId) => call("deletethread", { threadId }, Schema.Struct({})).pipe(Effect.asVoid),
+      ),
+      moveThreadTasks: Effect.fn("ScheduledTasks.ScheduledTaskService.moveThreadTasks")((input) =>
+        list().pipe(
+          Effect.flatMap(({ tasks }) =>
+            tasks.some(
+              (task) =>
+                task.threadId !== null &&
+                input.threadIds.includes(task.threadId) &&
+                task.projectId !== input.projectId,
+            )
+              ? Effect.fail(
+                  new ScheduledTaskError({
+                    message:
+                      "Move this thread automation to its new project in Mation before promoting the chat.",
+                  }),
+                )
+              : Effect.void,
+          ),
+        ),
+      ),
+      runNow: Effect.fn("ScheduledTasks.ScheduledTaskService.runNow")((input) =>
         call(
           "run",
           input,
           Schema.Struct({ task: ScheduledTask, threadId: Schema.NullOr(ThreadId) }),
         ),
+      ),
       rotateWebhookToken: unsupported,
       listWebhookDeliveries: unsupported,
       getWebhookDelivery: unsupported,
-      triggerWebhook: () => Effect.succeed({ _tag: "not_found" as const }),
+      triggerWebhook: Effect.fn("ScheduledTasks.ScheduledTaskService.triggerWebhook")(() =>
+        Effect.succeed({ _tag: "not_found" as const }),
+      ),
     });
   }),
 );

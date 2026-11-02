@@ -1,0 +1,156 @@
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { useAtomCommand } from "../state/use-atom-command";
+import { useEffect, useRef, useState } from "react";
+import { EnvironmentId, TodoFrontendRequest } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import { todoEnvironment } from "../state/todo";
+import { forwardTodoKeydown } from "../components/TodoCaptureDialog";
+import { useStableCallback } from "../hooks/useStableCallback";
+
+export const Route = createFileRoute("/todo")({
+  beforeLoad: ({ context }) => {
+    if (
+      context.authGateState.status !== "authenticated" &&
+      context.authGateState.status !== "hosted-static"
+    )
+      throw redirect({ to: "/pair", replace: true });
+  },
+  component: TodoPage,
+});
+const decodeRequest = Schema.decodeUnknownOption(TodoFrontendRequest);
+const decodeTodoPage = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ html: Schema.String })),
+);
+function TodoPage() {
+  const navigate = useNavigate();
+  const environmentId = usePrimaryEnvironmentId();
+  const request = useStableCallback(useAtomCommand(todoEnvironment.request));
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [page, setPage] = useState<{
+    environmentId: string;
+    html: string;
+  } | null>(null);
+  const [error, setError] = useState<{
+    environmentId: string;
+    message: string;
+  } | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- owns the authenticated Todo iframe request and its message listener
+  useEffect(() => {
+    if (!environmentId) return;
+    let active = true;
+    const input = { type: "page" as const };
+    void request({ environmentId, input }).then((result) => {
+      if (!active) return;
+      if (result._tag === "Success") {
+        if ("html" in result.value) {
+          setPage({ environmentId, html: result.value.html });
+          return;
+        }
+        if (result.value.status === 200) {
+          const decoded = decodeTodoPage(result.value.body);
+          if (decoded._tag === "Some") {
+            setPage({ environmentId, html: decoded.value.html });
+            return;
+          }
+        }
+      }
+      setError({
+        environmentId,
+        message: "Personal todos could not be opened. Check this environment's Todo connection.",
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [environmentId, request]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- owns the authenticated Todo iframe request and its message listener
+  useEffect(() => {
+    if (!environmentId) return;
+    const receive = (event: MessageEvent) => {
+      if (event.source === frame.current?.contentWindow && event.data?.type === "todo:keydown") {
+        forwardTodoKeydown(event.data);
+        return;
+      }
+      if (
+        event.source === frame.current?.contentWindow &&
+        event.data?.type === "todo:open-draft" &&
+        typeof event.data.prompt === "string" &&
+        event.data.prompt.length > 0 &&
+        event.data.prompt.length <= 8000
+      ) {
+        void navigate({ to: "/new", search: { prompt: event.data.prompt } });
+        return;
+      }
+      if (
+        event.source === frame.current?.contentWindow &&
+        event.data?.type === "todo:open-thread" &&
+        typeof event.data.threadId === "string" &&
+        event.data.threadId.length > 0 &&
+        event.data.threadId.length <= 512
+      ) {
+        void navigate({
+          to: "/$environmentId/$threadId",
+          params: {
+            environmentId:
+              typeof event.data.environmentId === "string" &&
+              event.data.environmentId.length > 0 &&
+              event.data.environmentId.length <= 256
+                ? EnvironmentId.make(event.data.environmentId)
+                : environmentId,
+            threadId: event.data.threadId,
+          },
+        });
+        return;
+      }
+      if (
+        event.source !== frame.current?.contentWindow ||
+        event.data?.type !== "todo:request" ||
+        typeof event.data.id !== "string"
+      )
+        return;
+      const source = event.source as Window;
+      const id = event.data.id;
+      const input = decodeRequest(event.data);
+      if (input._tag === "None") return;
+      void request({ environmentId, input: { type: "request", request: input.value } }).then(
+        (result) => {
+          if (frame.current?.contentWindow !== source) return;
+          if (
+            (input.value.path.startsWith("todos") ||
+              input.value.path.startsWith("email/reports/")) &&
+            input.value.method !== "GET" &&
+            result._tag === "Success" &&
+            "status" in result.value &&
+            result.value.status >= 200 &&
+            result.value.status < 300
+          )
+            window.dispatchEvent(new Event("t3:todos-changed"));
+          source.postMessage(
+            result._tag === "Success" && "status" in result.value
+              ? { type: "todo:response", id, ...result.value }
+              : { type: "todo:response", id, error: true },
+            "*",
+          );
+        },
+      );
+    };
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, [environmentId, request, navigate]);
+  if (!environmentId || !page || page.environmentId !== environmentId)
+    return (
+      <div className="p-6 text-muted-foreground" role="status">
+        {error?.environmentId === environmentId ? error.message : "Opening personal todos..."}
+      </div>
+    );
+  return (
+    <iframe
+      ref={frame}
+      title="Personal todos"
+      srcDoc={page.html}
+      sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+      className="h-full min-h-0 w-full flex-1 border-0"
+    />
+  );
+}

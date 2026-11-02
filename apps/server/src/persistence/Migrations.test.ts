@@ -1,8 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Migrator from "effect/sql/Migrator";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
@@ -66,7 +69,7 @@ describe("runMigrations", () => {
       const exit = yield* Effect.exit(runMigrations());
 
       assert.isTrue(Exit.isFailure(exit));
-      assert.include(String(exit), "55_OrchestrationV2 (recorded: FutureMainMigration)");
+      assert.include(String(exit), "not a supported upgrade history");
       assert.deepStrictEqual(yield* history, before);
       assert.strictEqual(yield* v2TableCount, 0);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -85,9 +88,7 @@ describe("runMigrations", () => {
       const exit = yield* Effect.exit(runMigrations());
 
       assert.isTrue(Exit.isFailure(exit));
-      for (const [id, name] of v2Migrations) {
-        assert.include(String(exit), `${id}_${name} (recorded: nothing)`);
-      }
+      assert.include(String(exit), "not a supported upgrade history");
       assert.deepStrictEqual(yield* history, before);
       assert.strictEqual(yield* v2TableCount, 0);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -167,6 +168,41 @@ describe("runMigrations", () => {
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
+  it.effect.each(["future", "older-name", "gap", "legacy-older-name", "custom-name"] as const)(
+    "rejects unsupported %s history without changing schema, timestamps or data",
+    (variant) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        if (variant === "legacy-older-name") yield* legacyInstall();
+        else if (variant === "custom-name") yield* runMigrations();
+        else yield* runMigrations({ toMigrationInclusive: 76 });
+        if (variant === "future")
+          yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (77, 'UnknownFutureMigration')`;
+        if (variant === "older-name" || variant === "legacy-older-name")
+          yield* sql`UPDATE effect_sql_migrations SET name = 'UnknownOlderMigration' WHERE migration_id = 30`;
+        if (variant === "gap")
+          yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 30`;
+        if (variant === "custom-name")
+          yield* sql`UPDATE bettert3_sql_migrations SET name = 'UnknownCustomMigration' WHERE migration_id = 1`;
+        yield* sql`CREATE TABLE preservation_sentinel (value TEXT NOT NULL)`;
+        yield* sql`INSERT INTO preservation_sentinel VALUES ('preserve me')`;
+        const readState = Effect.gen(function* () {
+          const schema =
+            yield* sql`SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name`;
+          const upstream = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
+          const custom =
+            variant === "custom-name"
+              ? yield* sql`SELECT * FROM bettert3_sql_migrations ORDER BY migration_id`
+              : [];
+          const sentinel = yield* sql`SELECT * FROM preservation_sentinel`;
+          return { schema, upstream, custom, sentinel };
+        });
+        const before = yield* readState;
+        assert.isTrue(Exit.isFailure(yield* Effect.exit(runMigrations())));
+        assert.deepStrictEqual(yield* readState, before);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
   it.effect("rejects an unknown legacy entry before creating a custom ledger", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -219,7 +255,7 @@ describe("runMigrations", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect.each([30, 54])("still starts with a site-local migration at id %s", (id) =>
+  it.effect.each([30, 54])("rejects an unverified site-local migration at id %s", (id) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runMigrations({ toMigrationInclusive: 54 });
@@ -227,12 +263,14 @@ describe("runMigrations", () => {
         UPDATE effect_sql_migrations SET name = 'SiteLocalMigration' WHERE migration_id = ${id}
       `;
 
-      assert.deepStrictEqual(yield* runMigrations(), v2Migrations);
-      assert.isAbove(yield* v2TableCount, 0);
+      const before = yield* history;
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(runMigrations())));
+      assert.deepStrictEqual(yield* history, before);
+      assert.strictEqual(yield* v2TableCount, 0);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect("only checks V2 migrations within the requested limit", () =>
+  it.effect("rejects unknown histories even for a limited V2 run", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runMigrations({ toMigrationInclusive: 55 });
@@ -242,19 +280,17 @@ describe("runMigrations", () => {
       `;
       const before = yield* history;
 
-      assert.deepStrictEqual(yield* runMigrations({ toMigrationInclusive: 55 }), []);
+      assert.isTrue(
+        Exit.isFailure(yield* Effect.exit(runMigrations({ toMigrationInclusive: 55 }))),
+      );
       const exit = yield* Effect.exit(runMigrations({ toMigrationInclusive: 56 }));
       assert.isTrue(Exit.isFailure(exit));
-      assert.include(
-        String(exit),
-        "56_RemoveRedundantProjectionIndexes (recorded: SiteLocalMigration)",
-      );
-      assert.notInclude(String(exit), "57_ScheduledTaskWebhooks");
+      assert.include(String(exit), "not a supported upgrade history");
       assert.deepStrictEqual(yield* history, before);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
-  it.effect("still starts after a newer build recorded a later V2 migration", () =>
+  it.effect("rejects a database written by an unknown newer build", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runMigrations();
@@ -263,7 +299,26 @@ describe("runMigrations", () => {
         VALUES (${newerMigrationId}, 'NewerV2Migration')
       `;
 
-      assert.deepStrictEqual(yield* runMigrations(), []);
+      const before = yield* history;
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(runMigrations())));
+      assert.deepStrictEqual(yield* history, before);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 });
+
+// The npm launcher reads the highest migration id from these file names.
+it.effect("registers every migration file", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dir = path.join(import.meta.dirname, "Migrations");
+    const files = (yield* fs.readDirectory(dir)).flatMap((name) => {
+      const match = /^(\d+)_(\w+)\.ts$/.exec(name);
+      return match ? [[Number(match[1]), match[2]] as const] : [];
+    });
+    assert.deepStrictEqual(
+      files.toSorted(([a], [b]) => a - b),
+      migrationManifest,
+    );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);

@@ -21,6 +21,8 @@ import * as Schema from "effect/Schema";
 import * as ExecutionRequests from "../orchestration-v2/ExecutionRequestService.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 
+const decodeFrontendResponse = Schema.decodeEffect(Schema.fromJsonString(MationFrontendResponse));
+
 export class MationOperationError extends Schema.TaggedError<MationOperationError>()(
   "MationOperationError",
   { operation: Schema.Literals(["read", "start", "publish", "proxy"]), cause: Schema.Defect() },
@@ -217,9 +219,9 @@ const make = Effect.gen(function* () {
     );
     const body = new TextDecoder().decode(result.body);
     if (result.status !== 200) return { status: result.status, body };
-    return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(MationFrontendResponse))(
-      body,
-    ).pipe(Effect.mapError((cause) => new MationOperationError({ operation: "proxy", cause })));
+    return yield* decodeFrontendResponse(body).pipe(
+      Effect.mapError((cause) => new MationOperationError({ operation: "proxy", cause })),
+    );
   });
   return AutomationExecutionService.of({
     frontend,

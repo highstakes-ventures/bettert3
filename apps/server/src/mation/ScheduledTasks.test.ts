@@ -1,3 +1,4 @@
+import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -140,4 +141,65 @@ it.effect(
       );
     });
   },
+);
+
+it.effect.each([null, "other-thread", "moving-thread"])(
+  "keeps Mation-owned tasks unchanged when promoting a chat bound to %s",
+  (boundThread) =>
+    Effect.gen(function* () {
+      const calls: string[] = [];
+      const tasks = [
+        {
+          id: "task",
+          title: "Daily",
+          prompt: "Review",
+          enabled: true,
+          schedule: { type: "interval", everyMs: 60_000 },
+          projectId: "old-project",
+          threadId: boundThread,
+          workspaceStrategy: { type: "root" },
+          modelSelection: { instanceId: "codex", model: "model" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdBy: "user",
+          creationSource: "mcp",
+          createdAt: "2026-11-02T10:00:00Z",
+          updatedAt: "2026-11-02T10:00:00Z",
+          nextRunAt: null,
+          lastRunAt: null,
+          lastRunStatus: "never",
+          lastRunError: null,
+          runCount: 0,
+        },
+      ];
+      const result = yield* Effect.gen(function* () {
+        const service = yield* Scheduled.ScheduledTaskService;
+        return yield* service
+          .moveThreadTasks({
+            threadIds: [ThreadId.make("moving-thread")],
+            projectId: ProjectId.make("new-project"),
+          })
+          .pipe(Effect.result);
+      }).pipe(
+        Effect.provide(
+          Adapter.layer.pipe(
+            Layer.provide(
+              Layer.mock(Execution.AutomationExecutionService)({
+                proxy: (path) => {
+                  calls.push(path);
+                  return Effect.succeed({
+                    status: 200,
+                    body: new TextEncoder().encode(JSON.stringify({ tasks })),
+                    contentType: "application/json",
+                  });
+                },
+              }),
+            ),
+          ),
+        ),
+      );
+      assert.equal(result._tag, boundThread === "moving-thread" ? "Failure" : "Success");
+      assert.deepEqual(calls, ["/api/t3/tasks"]);
+      assert.equal(tasks[0]!.projectId, "old-project");
+    }),
 );

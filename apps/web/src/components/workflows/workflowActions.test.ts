@@ -120,7 +120,7 @@ it("blocks a stale duplicate after saving but accepts a newer review revision", 
 it("allows a saved delay to expire and be refined again in the same page session", async () => {
   const delayed = {
     ...run("current"),
-    delayedAt: new Date().toISOString(),
+    delayedAt: "2026-10-22T12:00:00Z",
     updatedAt: "2026-10-22T12:00:00Z",
   };
   const options = {

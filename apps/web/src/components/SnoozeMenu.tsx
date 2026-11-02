@@ -1,4 +1,5 @@
-import { useMemo, type ComponentProps, type ReactNode } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { type ComponentProps, type ReactNode } from "react";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import { matchesKeybindingShortcut, parseKeybindingShortcut } from "@t3tools/shared/keybindings";
 import { formatShortcutLabel } from "../keybindings";
@@ -11,6 +12,7 @@ export function SnoozeMenu({
   onOpenChange,
   onSnooze,
   timestampFormat,
+  environmentId,
   anchor,
   children,
 }: {
@@ -18,14 +20,16 @@ export function SnoozeMenu({
   onOpenChange: (open: boolean) => void;
   onSnooze: (preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   timestampFormat: TimestampFormat;
+  environmentId: EnvironmentId | null;
   anchor?: ComponentProps<typeof MenuPopup>["anchor"];
   children?: ReactNode;
 }) {
-  // Resolve relative times each time the menu opens.
-  const presets = useMemo(
-    () => (open ? resolveSnoozePresets(new Date(), timestampFormat) : []),
-    [open, timestampFormat],
-  );
+  // oxlint-disable-next-line react/purity -- Relative snooze choices use the time when this menu opens.
+  const nowMs = Date.now();
+  const presets =
+    open && environmentId
+      ? resolveSnoozePresets(new Date(nowMs), timestampFormat, environmentId)
+      : [];
   const choices = presets.map((preset, index) => ({
     preset,
     shortcut: parseKeybindingShortcut(`mod+${index + 1}`)!,

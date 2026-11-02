@@ -28,7 +28,7 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
+
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -140,7 +140,7 @@ const make = Effect.gen(function* () {
   const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const storageError = (cause: unknown) =>
     new WorkflowError({ message: "Could not persist the workflow.", cause });
-  const all = (projectId?: ProjectId) =>
+  const all = Effect.fn("all")((projectId?: ProjectId) =>
     Effect.gen(function* () {
       const rows = yield* (
         projectId === undefined
@@ -152,16 +152,18 @@ const make = Effect.gen(function* () {
       return yield* Effect.forEach(rows, (row) =>
         decodeRecord(row.run_json).pipe(Effect.mapError(storageError)),
       );
-    });
-  const load = (id: string) =>
+    }),
+  );
+  const load = Effect.fn("load")((id: string) =>
     Effect.gen(function* () {
       const rows = yield* sql<{
         run_json: string;
       }>`SELECT run_json FROM workflow_runs WHERE id = ${id}`.pipe(Effect.mapError(storageError));
       if (!rows[0]) return yield* new WorkflowError({ message: "This workflow was not found." });
       return yield* decodeRecord(rows[0].run_json).pipe(Effect.mapError(storageError));
-    });
-  const save = (record: Record) =>
+    }),
+  );
+  const save = Effect.fn("save")((record: Record) =>
     Effect.gen(function* () {
       // Clients use updatedAt to invalidate ticket details after every saved change.
       const updatedAt = DateTime.formatIso(
@@ -176,26 +178,19 @@ const make = Effect.gen(function* () {
       );
       yield* changed;
       return value;
-    });
-  const configuration = (projectId: ProjectId) =>
-    Effect.gen(function* () {
-      const rows = yield* sql<{
-        configuration_json: string;
-      }>`SELECT configuration_json FROM workflow_configurations WHERE project_id = ${projectId}`.pipe(
-        Effect.mapError(storageError),
-      );
-      return rows[0]
-        ? yield* decodeConfiguration(rows[0].configuration_json).pipe(Effect.mapError(storageError))
-        : null;
-    });
+    }),
+  );
+  const configuration = Effect.fn("configuration")(function* (projectId: ProjectId) {
+    const rows = yield* sql<{
+      configuration_json: string;
+    }>`SELECT configuration_json FROM workflow_configurations WHERE project_id = ${projectId}`;
+    return rows[0] ? yield* decodeConfiguration(rows[0].configuration_json) : null;
+  }, Effect.mapError(storageError));
   const requireConfiguration = (projectId: ProjectId) =>
     configuration(projectId).pipe(
-      Effect.flatMap((value) =>
-        value === null
-          ? Effect.fail(
-              new WorkflowError({ message: "Set up this project's ticket workflow first." }),
-            )
-          : Effect.succeed(value),
+      Effect.filterOrFail(
+        (value) => value !== null,
+        () => new WorkflowError({ message: "Set up this project's ticket workflow first." }),
       ),
     );
   const requireProject = (id: ProjectId) =>
@@ -204,9 +199,10 @@ const make = Effect.gen(function* () {
         (cause) => new WorkflowError({ message: "Could not read the workflow project.", cause }),
       ),
       Effect.flatMap((value) =>
-        Option.isNone(value)
-          ? Effect.fail(new WorkflowError({ message: "The workflow's project no longer exists." }))
-          : Effect.succeed(value.value),
+        Effect.fromOption(
+          value,
+          () => new WorkflowError({ message: "The workflow's project no longer exists." }),
+        ),
       ),
     );
   const summary = (record: Record): WorkflowRun => ({
@@ -226,7 +222,7 @@ const make = Effect.gen(function* () {
     ...(record.delayedAt === undefined ? {} : { delayedAt: record.delayedAt }),
     ...(record.delayedUntil === undefined ? {} : { delayedUntil: record.delayedUntil }),
   });
-  const implementationSlots = () =>
+  const implementationSlots = Effect.fn("implementationSlots")(() =>
     Effect.gen(function* () {
       const current = yield* settings.getSettings.pipe(
         Effect.mapError(
@@ -264,23 +260,28 @@ const make = Effect.gen(function* () {
           used++;
       }
       return { used, limit: current.ticketImplementationSlots };
-    });
-  const list = (projectId: ProjectId, includeDelayed = false, includeAllProjects = false) =>
-    Effect.gen(function* () {
-      yield* requireProject(projectId);
-      const records = yield* all(includeAllProjects ? undefined : projectId);
-      const runs = records.map(summary);
-      const waiting = Tickets.orderRefinementQueue(
-        runs,
-        DateTime.toEpochMillis(yield* DateTime.now),
-      );
-      return {
-        configuration: yield* configuration(projectId),
-        connected: yield* linear.connected,
-        implementationSlots: yield* implementationSlots(),
-        runs: includeDelayed ? runs : [...waiting, ...runs.filter((run) => run.phase !== "review")],
-      } satisfies WorkflowListResult;
-    });
+    }),
+  );
+  const list = Effect.fn("list")(
+    (projectId: ProjectId, includeDelayed = false, includeAllProjects = false) =>
+      Effect.gen(function* () {
+        yield* requireProject(projectId);
+        const records = yield* all(includeAllProjects ? undefined : projectId);
+        const runs = records.map(summary);
+        const waiting = Tickets.orderRefinementQueue(
+          runs,
+          DateTime.toEpochMillis(yield* DateTime.now),
+        );
+        return {
+          configuration: yield* configuration(projectId),
+          connected: yield* linear.connected,
+          implementationSlots: yield* implementationSlots(),
+          runs: includeDelayed
+            ? runs
+            : [...waiting, ...runs.filter((run) => run.phase !== "review")],
+        } satisfies WorkflowListResult;
+      }),
+  );
   const ticketRecord = (record: Record, ticket: WorkflowTicket): Record => ({
     ...record,
     ticket,
@@ -288,7 +289,7 @@ const make = Effect.gen(function* () {
     priority: ticket.priority,
     blockerIds: ticket.blockedBy.map((issue) => issue.id),
   });
-  const questions = (record: Record, ticket: WorkflowTicket) =>
+  const questions = Effect.fn("questions")((record: Record, ticket: WorkflowTicket) =>
     Effect.gen(function* () {
       const seen = new Set([ticket.id]);
       const dependencies: WorkflowTicket[] = [];
@@ -317,8 +318,9 @@ const make = Effect.gen(function* () {
         record.dependencyEvidence,
         dependencies,
       );
-    });
-  const read = (id: string) =>
+    }),
+  );
+  const read = Effect.fn("read")((id: string) =>
     Effect.gen(function* () {
       const record = yield* load(id);
       const ticket =
@@ -335,61 +337,64 @@ const make = Effect.gen(function* () {
         dependencyEvidence: record.dependencyEvidence,
         questions: ticket ? yield* questions(record, ticket) : [],
       } satisfies WorkflowDetail;
-    });
-  const create = (input: {
-    id: string;
-    projectId: ProjectId;
-    kind: typeof WorkflowRun.Type.kind;
-    request: string;
-    title: string;
-  }) =>
-    Effect.gen(function* () {
-      const existing = yield* sql<{
-        run_json: string;
-      }>`SELECT run_json FROM workflow_runs WHERE id = ${input.id}`.pipe(
-        Effect.mapError(storageError),
-      );
-      if (existing[0]) {
-        const record = yield* decodeRecord(existing[0].run_json).pipe(
+    }),
+  );
+  const create = Effect.fn("create")(
+    (input: {
+      id: string;
+      projectId: ProjectId;
+      kind: typeof WorkflowRun.Type.kind;
+      request: string;
+      title: string;
+    }) =>
+      Effect.gen(function* () {
+        const existing = yield* sql<{
+          run_json: string;
+        }>`SELECT run_json FROM workflow_runs WHERE id = ${input.id}`.pipe(
           Effect.mapError(storageError),
         );
-        if (
-          record.projectId !== input.projectId ||
-          record.request !== input.request ||
-          record.kind !== input.kind
-        )
-          return yield* new WorkflowError({
-            message: "This request identifier already belongs to different work.",
-          });
-        return record;
-      }
-      const timestamp = yield* now;
-      return yield* save({
-        id: input.id,
-        projectId: input.projectId,
-        kind: input.kind,
-        phase: "queued",
-        request: input.request,
-        title: input.title,
-        priority: 0,
-        blockerIds: [],
-        threadId: ThreadId.make(yield* uuid),
-        implementationThreadId: null,
-        issueId: input.kind === "tickets" ? yield* uuid : null,
-        error: null,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        ticket: null,
-        dependencyEvidence: [],
-        approvalKey: null,
-        originalApprovalKey: null,
-        pendingResult: null,
-        findingIds: [],
-        implementationCommit: null,
-        baseCommit: null,
-        implementationLaunched: false,
-      });
-    });
+        if (existing[0]) {
+          const record = yield* decodeRecord(existing[0].run_json).pipe(
+            Effect.mapError(storageError),
+          );
+          if (
+            record.projectId !== input.projectId ||
+            record.request !== input.request ||
+            record.kind !== input.kind
+          )
+            return yield* new WorkflowError({
+              message: "This request identifier already belongs to different work.",
+            });
+          return record;
+        }
+        const timestamp = yield* now;
+        return yield* save({
+          id: input.id,
+          projectId: input.projectId,
+          kind: input.kind,
+          phase: "queued",
+          request: input.request,
+          title: input.title,
+          priority: 0,
+          blockerIds: [],
+          threadId: ThreadId.make(yield* uuid),
+          implementationThreadId: null,
+          issueId: input.kind === "tickets" ? yield* uuid : null,
+          error: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          ticket: null,
+          dependencyEvidence: [],
+          approvalKey: null,
+          originalApprovalKey: null,
+          pendingResult: null,
+          findingIds: [],
+          implementationCommit: null,
+          baseCommit: null,
+          implementationLaunched: false,
+        });
+      }),
+  );
   const validateTarget = (
     config: WorkflowConfiguration,
     target: string | null,
@@ -476,7 +481,7 @@ const make = Effect.gen(function* () {
             }),
         ),
       );
-  const base = (config: WorkflowConfiguration) =>
+  const base = Effect.fn("base")((config: WorkflowConfiguration) =>
     Effect.gen(function* () {
       const project = yield* requireProject(config.projectId);
       const fetched = yield* git(project.workspaceRoot, [
@@ -498,7 +503,8 @@ const make = Effect.gen(function* () {
           message: "The workflow base branch does not resolve to a commit.",
         });
       return { cwd: project.workspaceRoot, commit: resolved.stdout.trim() };
-    });
+    }),
+  );
   const isAncestor = (cwd: string, commit: string, target: string) =>
     git(cwd, ["merge-base", "--is-ancestor", commit, target]).pipe(
       Effect.map((result) => result.code === 0),
@@ -514,352 +520,356 @@ const make = Effect.gen(function* () {
           : Effect.fail(new WorkflowError({ message: "This task does not belong to a workflow." }));
       }),
     );
-  const finishResult = (
-    record: Record,
-    config: WorkflowConfiguration,
-  ): Effect.Effect<Record, WorkflowError> =>
-    Effect.gen(function* () {
-      const result = record.pendingResult;
-      if (result === null) return record;
-      if (result.type === "scan") {
-        for (const finding of result.findings) {
-          const id = record.findingIds.find((entry) => entry.key === finding.key)?.id;
-          if (id === undefined)
-            return yield* new WorkflowError({
-              message: "The scanner result has no persisted finding identity.",
-            });
-          yield* create({
-            id,
-            projectId: record.projectId,
-            kind: "tickets",
-            request: finding.request,
-            title: finding.request.slice(0, 100),
-          });
-        }
-        return yield* save({ ...record, phase: "done", pendingResult: null, error: null });
-      }
-      if (result.type === "implementation")
-        return yield* save({
-          ...record,
-          implementationCommit: result.commit,
-          pendingResult: null,
-          error: "Waiting for the implementation commit to reach the base branch.",
-        });
-      const issueId = result.existingIssueId ?? record.issueId!;
-      return yield* issueLocks.withLock(
-        issueId,
-        Effect.gen(function* () {
-          yield* validateTicket(config, result.ticket);
-          const others = yield* all();
-          const existing = others.find(
-            (run) => run.id !== record.id && run.issueId === issueId && run.phase !== "rejected",
-          );
-          if (existing && existing.projectId !== record.projectId)
-            return yield* new WorkflowError({
-              message:
-                "This issue belongs to another BetterT3 project. Continue its existing workflow.",
-            });
-          if (existing && existing.phase !== "review")
-            return yield* new WorkflowError({
-              message:
-                "This issue already has approved or active work. Prepare a distinct follow-up instead.",
-            });
-          if (result.existingIssueId) {
-            const issue = yield* linear.read(issueId);
-            if (
-              issue.teamId !== config.linearTeamId ||
-              ["completed", "canceled"].includes(issue.stateType)
-            )
+  const finishResult = Effect.fn("WorkflowService.finishResult")(
+    (record: Record, config: WorkflowConfiguration): Effect.Effect<Record, WorkflowError> =>
+      Effect.gen(function* () {
+        const result = record.pendingResult;
+        if (result === null) return record;
+        if (result.type === "scan") {
+          for (const finding of result.findings) {
+            const id = record.findingIds.find((entry) => entry.key === finding.key)?.id;
+            if (id === undefined)
               return yield* new WorkflowError({
-                message: "Only open issues in this workflow's Linear team can be merged.",
+                message: "The scanner result has no persisted finding identity.",
               });
-            if (
-              result.expectedUpdatedAt === undefined ||
-              issue.updatedAt !== result.expectedUpdatedAt
-            )
+            yield* create({
+              id,
+              projectId: record.projectId,
+              kind: "tickets",
+              request: finding.request,
+              title: finding.request.slice(0, 100),
+            });
+          }
+          return yield* save({ ...record, phase: "done", pendingResult: null, error: null });
+        }
+        if (result.type === "implementation")
+          return yield* save({
+            ...record,
+            implementationCommit: result.commit,
+            pendingResult: null,
+            error: "Waiting for the implementation commit to reach the base branch.",
+          });
+        const issueId = result.existingIssueId ?? record.issueId!;
+        return yield* issueLocks.withLock(
+          issueId,
+          Effect.gen(function* () {
+            yield* validateTicket(config, result.ticket);
+            const others = yield* all();
+            const existing = others.find(
+              (run) => run.id !== record.id && run.issueId === issueId && run.phase !== "rejected",
+            );
+            if (existing && existing.projectId !== record.projectId)
               return yield* new WorkflowError({
                 message:
-                  "The existing ticket changed. Read it and submit a corrected result with its current revision.",
+                  "This issue belongs to another BetterT3 project. Continue its existing workflow.",
               });
-          }
-          for (const id of result.ticket.blockedBy) {
-            const dependency = yield* linear.read(id);
-            if (dependency.id === issueId)
-              return yield* new WorkflowError({ message: "A ticket cannot depend on itself." });
-          }
-          const ticket = yield* linear.save({
-            id: issueId,
-            teamId: config.linearTeamId,
-            draft: result.ticket,
-            create: result.existingIssueId === undefined,
-            ...(result.expectedUpdatedAt === undefined
-              ? {}
-              : { expectedUpdatedAt: result.expectedUpdatedAt }),
-          });
-          if (existing) {
-            yield* save({
-              ...ticketRecord(existing, ticket),
-              dependencyEvidence: result.ticket.dependencyEvidence,
+            if (existing && existing.phase !== "review")
+              return yield* new WorkflowError({
+                message:
+                  "This issue already has approved or active work. Prepare a distinct follow-up instead.",
+              });
+            if (result.existingIssueId) {
+              const issue = yield* linear.read(issueId);
+              if (
+                issue.teamId !== config.linearTeamId ||
+                ["completed", "canceled"].includes(issue.stateType)
+              )
+                return yield* new WorkflowError({
+                  message: "Only open issues in this workflow's Linear team can be merged.",
+                });
+              if (
+                result.expectedUpdatedAt === undefined ||
+                issue.updatedAt !== result.expectedUpdatedAt
+              )
+                return yield* new WorkflowError({
+                  message:
+                    "The existing ticket changed. Read it and submit a corrected result with its current revision.",
+                });
+            }
+            for (const id of result.ticket.blockedBy) {
+              const dependency = yield* linear.read(id);
+              if (dependency.id === issueId)
+                return yield* new WorkflowError({ message: "A ticket cannot depend on itself." });
+            }
+            const ticket = yield* linear.save({
+              id: issueId,
+              teamId: config.linearTeamId,
+              draft: result.ticket,
+              create: result.existingIssueId === undefined,
+              ...(result.expectedUpdatedAt === undefined
+                ? {}
+                : { expectedUpdatedAt: result.expectedUpdatedAt }),
             });
+            if (existing) {
+              yield* save({
+                ...ticketRecord(existing, ticket),
+                dependencyEvidence: result.ticket.dependencyEvidence,
+              });
+              return yield* save({
+                ...record,
+                phase: "done",
+                issueId: null,
+                pendingResult: null,
+                error: null,
+              });
+            }
             return yield* save({
-              ...record,
-              phase: "done",
-              issueId: null,
+              ...ticketRecord(record, ticket),
+              issueId,
+              phase: "review",
+              dependencyEvidence: result.ticket.dependencyEvidence,
               pendingResult: null,
               error: null,
             });
-          }
-          return yield* save({
-            ...ticketRecord(record, ticket),
-            issueId,
-            phase: "review",
-            dependencyEvidence: result.ticket.dependencyEvidence,
-            pendingResult: null,
-            error: null,
+          }),
+        );
+      }),
+  );
+  const applyDecision = Effect.fn("applyDecision")(
+    (record: Record, config: WorkflowConfiguration) =>
+      Effect.gen(function* () {
+        const connection = yield* linear.connection();
+        const team = connection.teams.find((value) => value.id === config.linearTeamId);
+        const rejecting = record.phase === "rejecting";
+        const stateId = rejecting ? team?.canceledStateId : team?.refinedStateId;
+        if (!stateId)
+          return yield* new WorkflowError({
+            message: rejecting
+              ? "This Linear team needs a canceled state before rejecting tickets."
+              : "Add a Refined state to this Linear team before approving tickets.",
           });
-        }),
-      );
-    });
-  const applyDecision = (record: Record, config: WorkflowConfiguration) =>
-    Effect.gen(function* () {
-      const connection = yield* linear.connection();
-      const team = connection.teams.find((value) => value.id === config.linearTeamId);
-      const rejecting = record.phase === "rejecting";
-      const stateId = rejecting ? team?.canceledStateId : team?.refinedStateId;
-      if (!stateId)
-        return yield* new WorkflowError({
-          message: rejecting
-            ? "This Linear team needs a canceled state before rejecting tickets."
-            : "Add a Refined state to this Linear team before approving tickets.",
-        });
-      const ticket = yield* linear.read(record.issueId!);
-      if (ticket.teamId !== config.linearTeamId)
-        return yield* new WorkflowError({
-          message: "The ticket moved to another Linear team. No decision was applied.",
-        });
-      if (!rejecting) {
-        const routingError = !Tickets.ticketType(ticket.labels)
-          ? "Choose exactly one ticket type in chat before approval."
-          : yield* validateTicket(
-              config,
-              {
-                targetProjectId: record.ticket?.project?.id ?? null,
-                labelIds: ticket.labels.map((label) => label.id),
-              },
-              connection,
-            ).pipe(
-              Effect.match({
-                onSuccess: () => null,
-                onFailure: (error) => error.message,
-              }),
-            );
-        if (routingError !== null)
-          return yield* save({
-            ...ticketRecord(record, ticket),
-            phase: "review",
-            approvalKey: null,
-            error: routingError,
-          });
-      }
-      // Recovery accepts the original snapshot or the desired result after a lost response.
-      if (
-        !rejecting &&
-        record.approvalKey !== Tickets.ticketApprovalKey(ticket) &&
-        record.originalApprovalKey !== Tickets.ticketApprovalKey(ticket)
-      ) {
-        return yield* save({
-          ...ticketRecord(record, ticket),
-          phase: "review",
-          approvalKey: null,
-          error: "The ticket changed after approval. Review it again.",
-        });
-      }
-      const updated = yield* linear.decide(
-        ticket.id,
-        stateId,
-        rejecting ? undefined : (record.ticket?.project?.id ?? null),
-      );
-      if (
-        !rejecting &&
-        (!Tickets.ticketType(updated.labels) ||
-          Tickets.ticketApprovalKey(updated) !== record.approvalKey)
-      )
-        return yield* save({
-          ...ticketRecord(record, updated),
-          phase: "review",
-          approvalKey: null,
-          error: "The ticket changed during approval. Review it again.",
-        });
-      return yield* save({
-        ...ticketRecord(record, updated),
-        phase: rejecting ? "rejected" : "approved",
-        approvalKey: rejecting ? null : record.approvalKey,
-        error: null,
-      });
-    });
-  const advance = (record: Record): Effect.Effect<void, WorkflowError> =>
-    Effect.gen(function* () {
-      const config = yield* requireConfiguration(record.projectId);
-      if (record.pendingResult !== null) {
-        yield* finishResult(record, config);
-        return;
-      }
-      if (
-        record.phase === "preparing" ||
-        (record.phase === "implementing" &&
-          record.implementationLaunched &&
-          !record.implementationCommit)
-      ) {
-        const threadId =
-          record.phase === "preparing" ? record.threadId : record.implementationThreadId;
-        const shell = threadId
-          ? yield* projections
-              .getThreadShell(threadId)
-              .pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new WorkflowError({ message: "Could not read the workflow task.", cause }),
-                ),
-              )
-          : null;
-        const error =
-          shell && shell.latestRunId !== null && shell.activeRunId === null
-            ? "The task ended without a workflow result. Continue its chat to finish this stage."
-            : null;
-        if (record.error !== error) yield* save({ ...record, error });
-        return;
-      }
-      if (record.phase === "queued") {
-        const start = (goal: string) => launchTask(record, config, goal);
-        if (record.kind === "tickets")
-          yield* Tickets.prepare(
-            `${record.request}\n\nUse t3_workflow_read first for this workflow's configuration, available target projects and labels. Intake project: ${config.intakeProjectId ?? "none"}.`,
-            start,
-          );
-        else if (record.kind === "performance") yield* Performance.start(start);
-        else yield* Refactor.start(start);
-        yield* save({ ...record, phase: "preparing", error: null });
-        return;
-      }
-      if (record.phase === "approving" || record.phase === "rejecting") {
-        yield* applyDecision(record, config);
-        return;
-      }
-      if (
-        record.phase === "approved" ||
-        (record.phase === "implementing" && !record.implementationLaunched)
-      ) {
-        if (record.phase === "approved") {
-          const slots = yield* implementationSlots();
-          if (slots.used >= slots.limit) {
-            if (record.error !== "Waiting for a ticket implementation slot.")
-              yield* save({ ...record, error: "Waiting for a ticket implementation slot." });
-            return;
-          }
-        }
         const ticket = yield* linear.read(record.issueId!);
         if (ticket.teamId !== config.linearTeamId)
           return yield* new WorkflowError({
-            message: "The ticket moved to another Linear team. Implementation remains waiting.",
+            message: "The ticket moved to another Linear team. No decision was applied.",
           });
-        if (ticket.stateType === "canceled") {
-          yield* save({ ...ticketRecord(record, ticket), phase: "rejected", error: null });
-          return;
+        if (!rejecting) {
+          const routingError = !Tickets.ticketType(ticket.labels)
+            ? "Choose exactly one ticket type in chat before approval."
+            : yield* validateTicket(
+                config,
+                {
+                  targetProjectId: record.ticket?.project?.id ?? null,
+                  labelIds: ticket.labels.map((label) => label.id),
+                },
+                connection,
+              ).pipe(
+                Effect.match({
+                  onSuccess: () => null,
+                  onFailure: (error) => error.message,
+                }),
+              );
+          if (routingError !== null)
+            return yield* save({
+              ...ticketRecord(record, ticket),
+              phase: "review",
+              approvalKey: null,
+              error: routingError,
+            });
         }
-        if (Tickets.ticketApprovalKey(ticket) !== record.approvalKey) {
-          yield* save({
+        // Recovery accepts the original snapshot or the desired result after a lost response.
+        if (
+          !rejecting &&
+          record.approvalKey !== Tickets.ticketApprovalKey(ticket) &&
+          record.originalApprovalKey !== Tickets.ticketApprovalKey(ticket)
+        ) {
+          return yield* save({
             ...ticketRecord(record, ticket),
             phase: "review",
             approvalKey: null,
             error: "The ticket changed after approval. Review it again.",
           });
-          return;
         }
-        const connection = yield* linear.connection();
-        if (
-          ticket.stateId !==
-          connection.teams.find((team) => team.id === config.linearTeamId)?.refinedStateId
-        )
-          return yield* new WorkflowError({
-            message:
-              "The ticket is no longer in Refined. Review its state in Linear before implementation can start.",
-          });
-        const unresolved = ticket.blockedBy.filter(
-          (dependency) => dependency.stateType !== "completed",
+        const updated = yield* linear.decide(
+          ticket.id,
+          stateId,
+          rejecting ? undefined : (record.ticket?.project?.id ?? null),
         );
-        if (unresolved.length) {
-          const error = `Waiting for ${unresolved.map((dependency) => dependency.identifier).join(", ")} to complete.`;
-          if (record.error !== error) yield* save({ ...ticketRecord(record, ticket), error });
+        if (
+          !rejecting &&
+          (!Tickets.ticketType(updated.labels) ||
+            Tickets.ticketApprovalKey(updated) !== record.approvalKey)
+        )
+          return yield* save({
+            ...ticketRecord(record, updated),
+            phase: "review",
+            approvalKey: null,
+            error: "The ticket changed during approval. Review it again.",
+          });
+        return yield* save({
+          ...ticketRecord(record, updated),
+          phase: rejecting ? "rejected" : "approved",
+          approvalKey: rejecting ? null : record.approvalKey,
+          error: null,
+        });
+      }),
+  );
+  const advance = Effect.fn("WorkflowService.advance")(
+    (record: Record): Effect.Effect<void, WorkflowError> =>
+      Effect.gen(function* () {
+        const config = yield* requireConfiguration(record.projectId);
+        if (record.pendingResult !== null) {
+          yield* finishResult(record, config);
           return;
         }
-        const baseline = yield* base(config);
-        const records = yield* all(record.projectId);
-        for (const dependency of ticket.blockedBy) {
-          const evidence = record.dependencyEvidence.find(
-            (value) => value.issueId === dependency.id,
-          );
-          const managed = records.find(
-            (value) => value.issueId === dependency.id && value.phase !== "rejected",
-          );
-          const commit =
-            managed?.implementationCommit ?? (evidence?.kind === "code" ? evidence.commit : null);
-          if (managed || evidence?.kind !== "external") {
-            if (!commit || !(yield* isAncestor(baseline.cwd, commit, baseline.commit)))
-              return yield* new WorkflowError({
-                message: `${dependency.identifier} needs a verified commit on the base branch before implementation can start.`,
-              });
-          }
+        if (
+          record.phase === "preparing" ||
+          (record.phase === "implementing" &&
+            record.implementationLaunched &&
+            !record.implementationCommit)
+        ) {
+          const threadId =
+            record.phase === "preparing" ? record.threadId : record.implementationThreadId;
+          const shell = threadId
+            ? yield* projections
+                .getThreadShell(threadId)
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new WorkflowError({ message: "Could not read the workflow task.", cause }),
+                  ),
+                )
+            : null;
+          const error =
+            shell && shell.latestRunId !== null && shell.activeRunId === null
+              ? "The task ended without a workflow result. Continue its chat to finish this stage."
+              : null;
+          if (record.error !== error) yield* save({ ...record, error });
+          return;
         }
-        // Project locks do not protect shared capacity. Reserve durably before
-        // dispatch so another project or a restart cannot reuse the same slot.
-        const next = yield* admission.withPermit(
-          Effect.gen(function* () {
+        if (record.phase === "queued") {
+          const start = (goal: string) => launchTask(record, config, goal);
+          if (record.kind === "tickets")
+            yield* Tickets.prepare(
+              `${record.request}\n\nUse t3_workflow_read first for this workflow's configuration, available target projects and labels. Intake project: ${config.intakeProjectId ?? "none"}.`,
+              start,
+            );
+          else if (record.kind === "performance") yield* Performance.start(start);
+          else yield* Refactor.start(start);
+          yield* save({ ...record, phase: "preparing", error: null });
+          return;
+        }
+        if (record.phase === "approving" || record.phase === "rejecting") {
+          yield* applyDecision(record, config);
+          return;
+        }
+        if (
+          record.phase === "approved" ||
+          (record.phase === "implementing" && !record.implementationLaunched)
+        ) {
+          if (record.phase === "approved") {
             const slots = yield* implementationSlots();
-            if (record.phase === "approved" && slots.used >= slots.limit) {
+            if (slots.used >= slots.limit) {
               if (record.error !== "Waiting for a ticket implementation slot.")
                 yield* save({ ...record, error: "Waiting for a ticket implementation slot." });
-              return null;
+              return;
             }
-            return yield* save({
-              ...ticketRecord(record, ticket),
-              phase: "implementing",
-              baseCommit: baseline.commit,
-              implementationThreadId: record.implementationThreadId ?? ThreadId.make(yield* uuid),
-              error: null,
+          }
+          const ticket = yield* linear.read(record.issueId!);
+          if (ticket.teamId !== config.linearTeamId)
+            return yield* new WorkflowError({
+              message: "The ticket moved to another Linear team. Implementation remains waiting.",
             });
-          }),
-        );
-        if (next === null) return;
-        yield* Tickets.implement(ticket, (goal) => launchTask(next, config, goal, true));
-        yield* save({ ...next, implementationLaunched: true });
-        return;
-      }
-      if (record.phase === "implementing" && record.implementationCommit) {
-        const baseline = yield* base(config);
-        if (!(yield* isAncestor(baseline.cwd, record.implementationCommit, baseline.commit)))
+          if (ticket.stateType === "canceled") {
+            yield* save({ ...ticketRecord(record, ticket), phase: "rejected", error: null });
+            return;
+          }
+          if (Tickets.ticketApprovalKey(ticket) !== record.approvalKey) {
+            yield* save({
+              ...ticketRecord(record, ticket),
+              phase: "review",
+              approvalKey: null,
+              error: "The ticket changed after approval. Review it again.",
+            });
+            return;
+          }
+          const connection = yield* linear.connection();
+          if (
+            ticket.stateId !==
+            connection.teams.find((team) => team.id === config.linearTeamId)?.refinedStateId
+          )
+            return yield* new WorkflowError({
+              message:
+                "The ticket is no longer in Refined. Review its state in Linear before implementation can start.",
+            });
+          const unresolved = ticket.blockedBy.filter(
+            (dependency) => dependency.stateType !== "completed",
+          );
+          if (unresolved.length) {
+            const error = `Waiting for ${unresolved.map((dependency) => dependency.identifier).join(", ")} to complete.`;
+            if (record.error !== error) yield* save({ ...ticketRecord(record, ticket), error });
+            return;
+          }
+          const baseline = yield* base(config);
+          const records = yield* all(record.projectId);
+          for (const dependency of ticket.blockedBy) {
+            const evidence = record.dependencyEvidence.find(
+              (value) => value.issueId === dependency.id,
+            );
+            const managed = records.find(
+              (value) => value.issueId === dependency.id && value.phase !== "rejected",
+            );
+            const commit =
+              managed?.implementationCommit ?? (evidence?.kind === "code" ? evidence.commit : null);
+            if (managed || evidence?.kind !== "external") {
+              if (!commit || !(yield* isAncestor(baseline.cwd, commit, baseline.commit)))
+                return yield* new WorkflowError({
+                  message: `${dependency.identifier} needs a verified commit on the base branch before implementation can start.`,
+                });
+            }
+          }
+          // Project locks do not protect shared capacity. Reserve durably before
+          // dispatch so another project or a restart cannot reuse the same slot.
+          const next = yield* admission.withPermit(
+            Effect.gen(function* () {
+              const slots = yield* implementationSlots();
+              if (record.phase === "approved" && slots.used >= slots.limit) {
+                if (record.error !== "Waiting for a ticket implementation slot.")
+                  yield* save({ ...record, error: "Waiting for a ticket implementation slot." });
+                return null;
+              }
+              return yield* save({
+                ...ticketRecord(record, ticket),
+                phase: "implementing",
+                baseCommit: baseline.commit,
+                implementationThreadId: record.implementationThreadId ?? ThreadId.make(yield* uuid),
+                error: null,
+              });
+            }),
+          );
+          if (next === null) return;
+          yield* Tickets.implement(ticket, (goal) => launchTask(next, config, goal, true));
+          yield* save({ ...next, implementationLaunched: true });
           return;
-        const connection = yield* linear.connection();
-        const stateId = connection.teams.find(
-          (team) => team.id === config.linearTeamId,
-        )?.completedStateId;
-        if (!stateId)
-          return yield* new WorkflowError({
-            message: "The implementation landed, but the Linear team has no completed state.",
-          });
-        const current = yield* linear.read(record.issueId!);
-        if (
-          current.teamId !== config.linearTeamId ||
-          current.stateType === "canceled" ||
-          Tickets.ticketApprovalKey(current) !== record.approvalKey
-        )
-          return yield* new WorkflowError({
-            message: "The implemented ticket changed in Linear. Review it there before closing it.",
-          });
-        const ticket = yield* linear.decide(record.issueId!, stateId);
-        yield* save({ ...ticketRecord(record, ticket), phase: "done", error: null });
-      }
-    });
-  const resumeRecord = (id: string) =>
+        }
+        if (record.phase === "implementing" && record.implementationCommit) {
+          const baseline = yield* base(config);
+          if (!(yield* isAncestor(baseline.cwd, record.implementationCommit, baseline.commit)))
+            return;
+          const connection = yield* linear.connection();
+          const stateId = connection.teams.find(
+            (team) => team.id === config.linearTeamId,
+          )?.completedStateId;
+          if (!stateId)
+            return yield* new WorkflowError({
+              message: "The implementation landed, but the Linear team has no completed state.",
+            });
+          const current = yield* linear.read(record.issueId!);
+          if (
+            current.teamId !== config.linearTeamId ||
+            current.stateType === "canceled" ||
+            Tickets.ticketApprovalKey(current) !== record.approvalKey
+          )
+            return yield* new WorkflowError({
+              message:
+                "The implemented ticket changed in Linear. Review it there before closing it.",
+            });
+          const ticket = yield* linear.decide(record.issueId!, stateId);
+          yield* save({ ...ticketRecord(record, ticket), phase: "done", error: null });
+        }
+      }),
+  );
+  const resumeRecord = Effect.fn("resumeRecord")((id: string) =>
     Effect.gen(function* () {
       const initial = yield* load(id);
       yield* locks.withLock(
@@ -879,8 +889,9 @@ const make = Effect.gen(function* () {
           );
         }),
       );
-    });
-  const resume = () =>
+    }),
+  );
+  const resume = Effect.fn("resume")(() =>
     Effect.gen(function* () {
       if (!(yield* linear.connected)) return;
       const current = yield* DateTime.now;
@@ -924,7 +935,8 @@ const make = Effect.gen(function* () {
         yield* resumeRecord(record.id);
       // Chat activity can change without a workflow transition.
       yield* changed;
-    });
+    }),
+  );
   yield* scheduler.register(
     "workflows",
     Effect.gen(function* () {
@@ -937,8 +949,10 @@ const make = Effect.gen(function* () {
   return WorkflowService.of({
     list,
     resume,
-    connection: () => linear.connection({ cached: true }),
-    connect: (key) => linear.connect(key).pipe(Effect.tap(() => changed)),
+    connection: Effect.fn("WorkflowService.connection")(() => linear.connection({ cached: true })),
+    connect: Effect.fn("WorkflowService.connect")((key) =>
+      linear.connect(key).pipe(Effect.tap(() => changed)),
+    ),
     disconnect: linear.disconnect.pipe(Effect.andThen(changed)),
     subscribe: (projectId, includeDelayed, includeAllProjects) =>
       Stream.unwrap(
@@ -954,7 +968,7 @@ const make = Effect.gen(function* () {
           );
         }),
       ),
-    configure: (input) =>
+    configure: Effect.fn("WorkflowService.configure")((input) =>
       locks.withLock(
         input.projectId,
         Effect.gen(function* () {
@@ -985,7 +999,8 @@ const make = Effect.gen(function* () {
           return yield* list(input.projectId);
         }),
       ),
-    intake: (input) =>
+    ),
+    intake: Effect.fn("WorkflowService.intake")((input) =>
       locks.withLock(
         input.projectId,
         Effect.gen(function* () {
@@ -1004,8 +1019,9 @@ const make = Effect.gen(function* () {
           );
         }),
       ),
+    ),
     read,
-    decide: (input) =>
+    decide: Effect.fn("WorkflowService.decide")((input) =>
       Effect.gen(function* () {
         const initial = yield* load(input.runId);
         return yield* locks.withLock(
@@ -1076,7 +1092,8 @@ const make = Effect.gen(function* () {
           }),
         );
       }),
-    agentRead: (threadId) =>
+    ),
+    agentRead: Effect.fn("WorkflowService.agentRead")((threadId) =>
       Effect.gen(function* () {
         const record = yield* callerRecord(threadId);
         return {
@@ -1085,7 +1102,8 @@ const make = Effect.gen(function* () {
           connection: yield* linear.connection({ cached: true }),
         };
       }),
-    agentRefresh: (threadId) =>
+    ),
+    agentRefresh: Effect.fn("WorkflowService.agentRefresh")((threadId) =>
       Effect.gen(function* () {
         const initial = yield* callerRecord(threadId);
         return yield* locks.withLock(
@@ -1108,12 +1126,14 @@ const make = Effect.gen(function* () {
           }),
         );
       }),
-    agentSearch: (threadId, query) =>
+    ),
+    agentSearch: Effect.fn("WorkflowService.agentSearch")((threadId, query) =>
       callerRecord(threadId).pipe(
         Effect.flatMap((record) => requireConfiguration(record.projectId)),
         Effect.flatMap((config) => linear.search(config.linearTeamId, query)),
       ),
-    agentReadTicket: (threadId, issueId) =>
+    ),
+    agentReadTicket: Effect.fn("WorkflowService.agentReadTicket")((threadId, issueId) =>
       Effect.gen(function* () {
         const record = yield* callerRecord(threadId);
         const config = yield* requireConfiguration(record.projectId);
@@ -1124,7 +1144,8 @@ const make = Effect.gen(function* () {
           });
         return ticket;
       }),
-    agentUpdate: (threadId, input) =>
+    ),
+    agentUpdate: Effect.fn("WorkflowService.agentUpdate")((threadId, input) =>
       Effect.gen(function* () {
         const draft = input.ticket;
         const initial = yield* callerRecord(threadId);
@@ -1163,7 +1184,8 @@ const make = Effect.gen(function* () {
           }),
         );
       }),
-    submitResult: (threadId, result) =>
+    ),
+    submitResult: Effect.fn("WorkflowService.submitResult")((threadId, result) =>
       Effect.gen(function* () {
         const initial = yield* callerRecord(threadId);
         return yield* locks.withLock(
@@ -1223,6 +1245,7 @@ const make = Effect.gen(function* () {
           }),
         );
       }),
+    ),
   });
 });
 
