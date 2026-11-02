@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { ConvertChatToTodoButton } from "../chat/ConvertChatToTodoButton";
-import { todoThreadKeysAtom } from "../../state/mationTodos";
+import { todoThreadKeysAtom } from "../../state/todos";
 import { SnoozeMenu } from "../SnoozeMenu";
 import { ThreadExecutionIcon } from "../ThreadExecutionIcon";
 import { ThreadAutomationsIndicator } from "../chat/ThreadAutomationsPanel";

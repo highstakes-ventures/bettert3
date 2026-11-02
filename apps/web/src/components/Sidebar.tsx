@@ -1,4 +1,4 @@
-import { todoThreadKeysAtom } from "../state/mationTodos";
+import { todoThreadKeysAtom } from "../state/todos";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { useEnvironmentScope } from "../state/session";
 import { SnoozeMenu } from "./SnoozeMenu";

@@ -1,5 +1,5 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { requestEnvironmentMation } from "@t3tools/client-runtime/state/mation";
+import { requestEnvironmentTodo } from "@t3tools/client-runtime/state/todo";
 import { createEnvironmentQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Data from "effect/Data";
@@ -23,7 +23,7 @@ const TodoList = Schema.Struct({
 });
 const decodeList = Schema.decodeUnknownEffect(Schema.fromJsonString(TodoList));
 
-class MationTodoUnavailable extends Data.TaggedError("MationTodoUnavailable")<{
+class TodoUnavailable extends Data.TaggedError("TodoUnavailable")<{
   readonly message: string;
 }> {}
 
@@ -45,17 +45,15 @@ const changes = Atom.make((get) => {
   return version;
 });
 
-export const mationTodoList = createEnvironmentQueryAtomFamily(connectionAtomRuntime, {
-  label: "mation-todos",
-  execute: Effect.fn("web.mation.todos")(function* (_input: Record<string, never>) {
-    const reply = yield* requestEnvironmentMation({
+export const todoList = createEnvironmentQueryAtomFamily(connectionAtomRuntime, {
+  label: "todos",
+  execute: Effect.fn("web.todo.todos")(function* (_input: Record<string, never>) {
+    const reply = yield* requestEnvironmentTodo({
       type: "request",
       request: { path: "todos", method: "GET" },
     });
     if (!("status" in reply) || reply.status !== 200)
-      return yield* Effect.fail(
-        new MationTodoUnavailable({ message: "Could not load personal todos." }),
-      );
+      return yield* Effect.fail(new TodoUnavailable({ message: "Could not load personal todos." }));
     return yield* decodeList(reply.body);
   }),
   refreshIntervalMs: 30_000,
@@ -65,9 +63,7 @@ export const mationTodoList = createEnvironmentQueryAtomFamily(connectionAtomRun
 export const todoThreadKeysAtom = Atom.make((get): ReadonlySet<string> => {
   const keys = new Set<string>();
   for (const environmentId of get(environmentSummaries.environmentIdsAtom)) {
-    const list = Option.getOrNull(
-      AsyncResult.value(get(mationTodoList({ environmentId, input: {} }))),
-    );
+    const list = Option.getOrNull(AsyncResult.value(get(todoList({ environmentId, input: {} }))));
     for (const todo of list?.items ?? []) {
       if (todo.completedAt === null && todo.sourceChat) keys.add(scopedThreadKey(todo.sourceChat));
     }

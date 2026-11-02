@@ -5,7 +5,6 @@ import { act, render } from "../test/render";
 
 const state = vi.hoisted(() => ({
   environmentId: "home",
-  view: "todos" as "todos" | undefined,
   run: vi.fn(),
   navigate: vi.fn(),
 }));
@@ -13,7 +12,6 @@ vi.mock("@tanstack/react-router", async (original) => ({
   ...(await original<typeof import("@tanstack/react-router")>()),
   createFileRoute: () => (options: object) => ({
     options,
-    useSearch: () => ({ view: state.view }),
   }),
   redirect: vi.fn(),
   useNavigate: () => state.navigate,
@@ -32,7 +30,6 @@ type PageReply = ReturnType<typeof AsyncResult.success<{ status: number; body: s
 
 function setup() {
   state.environmentId = "home";
-  state.view = "todos";
   const pending: Array<(reply: PageReply) => void> = [];
   state.run
     .mockReset()
@@ -62,47 +59,35 @@ function setup() {
 it("displays the pending todo page after unrelated rerenders without restarting its load", async () => {
   using test = setup();
   await using screen = await render(test.view());
-  await expect.element(screen.getByRole("status")).toHaveTextContent("Opening personal todos");
+  await expect.element(screen.getByRole("status")).toHaveTextContent("Opening Mation...");
   await screen.rerender(test.view());
   await screen.rerender(test.view());
   await test.reply(0, "<p>Personal todos</p>");
   await expect
-    .element(screen.getByTitle("Personal todos"))
+    .element(screen.getByTitle("Mation automations"))
     .toHaveAttribute("srcdoc", "<p>Personal todos</p>");
   expect(state.run).toHaveBeenCalledTimes(1);
 });
 
-it.each(["environment", "view"] as const)(
-  "ignores an obsolete page after changing the %s",
-  async (change) => {
-    using test = setup();
-    await using screen = await render(test.view());
-    if (change === "environment") state.environmentId = "remote";
-    else state.view = undefined;
-    await screen.rerender(test.view());
-    await test.reply(1, "<p>Current page</p>");
-    await expect
-      .element(screen.getByTitle(state.view === "todos" ? "Personal todos" : "Mation automations"))
-      .toHaveAttribute("srcdoc", "<p>Current page</p>");
-    await test.reply(0, "<p>Obsolete page</p>");
-    await expect
-      .element(screen.getByTitle(state.view === "todos" ? "Personal todos" : "Mation automations"))
-      .toHaveAttribute("srcdoc", "<p>Current page</p>");
-    expect(state.run).toHaveBeenLastCalledWith(test.registry, {
-      environmentId: state.environmentId,
-      input:
-        state.view === "todos"
-          ? { type: "request", request: { path: "todos/page", method: "GET" } }
-          : { type: "page" },
-    });
-    expect(state.run).toHaveBeenCalledTimes(2);
-  },
-);
+it("ignores an obsolete Mation page after changing the environment", async () => {
+  using test = setup();
+  await using screen = await render(test.view());
+  state.environmentId = "remote";
+  await screen.rerender(test.view());
+  await test.reply(1, "<p>Current page</p>");
+  await test.reply(0, "<p>Obsolete page</p>");
+  await expect
+    .element(screen.getByTitle("Mation automations"))
+    .toHaveAttribute("srcdoc", "<p>Current page</p>");
+  expect(state.run).toHaveBeenCalledTimes(2);
+});
 
 it("shows a failed load without starting another request", async () => {
   using test = setup();
   await using screen = await render(test.view());
   await test.fail();
-  await expect.element(screen.getByRole("status")).toHaveTextContent("could not be opened");
+  await expect
+    .element(screen.getByRole("status"))
+    .toHaveTextContent("Mation could not be opened. Check this environment's Mation connection.");
   expect(state.run).toHaveBeenCalledTimes(1);
 });

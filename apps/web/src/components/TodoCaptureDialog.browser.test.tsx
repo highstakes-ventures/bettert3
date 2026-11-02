@@ -22,7 +22,7 @@ vi.mock(import("../state/server"), () => ({ primaryServerKeybindingsAtom: {} as 
 vi.mock(import("../state/environments"), () => ({
   usePrimaryEnvironmentId: (() => "env") as never,
 }));
-vi.mock(import("../state/mation"), () => ({ mationEnvironment: { request: {} } as never }));
+vi.mock(import("../state/todo"), () => ({ todoEnvironment: { request: {} } as never }));
 vi.mock(import("../state/use-atom-command"), () => ({
   useAtomCommand: (() => state.request) as never,
 }));

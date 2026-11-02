@@ -1,3 +1,4 @@
+import { TodoFrontendPage, TodoFrontendRequest, TodoFrontendResponse } from "./todo.ts";
 import {
   ExecutionCapabilities,
   ExecutionLookup,
@@ -891,6 +892,23 @@ export class ExecutionHttpApi extends HttpApi.make("executions").add(
   EnvironmentExecutionsHttpApi,
 ) {}
 
+class EnvironmentTodoHttpApi extends HttpApiGroup.make("todo")
+  .add(
+    HttpApiEndpoint.get("page", "/api/todo/page", {
+      headers: OptionalBearerHeaders,
+      success: TodoFrontendPage,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("frontendRequest", "/api/todo/request", {
+      headers: OptionalBearerHeaders,
+      payload: TodoFrontendRequest,
+      success: TodoFrontendResponse,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 class EnvironmentMationHttpApi extends HttpApiGroup.make("mation")
   .add(
     HttpApiEndpoint.get("page", "/api/mation/page", {
@@ -960,4 +978,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentConnectHttpApi)
   .add(EnvironmentWebhooksHttpApi)
   .add(EnvironmentMationHttpApi)
+  .add(EnvironmentTodoHttpApi)
   .add(EnvironmentPaiHttpApi) {}

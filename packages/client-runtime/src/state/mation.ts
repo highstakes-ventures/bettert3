@@ -48,7 +48,7 @@ export const fetchEnvironmentMation = Effect.fn("clientRuntime.state.fetchEnviro
   },
 );
 
-export const requestEnvironmentMation = Effect.fn("clientRuntime.state.mation.request")(function* (
+const requestEnvironmentMation = Effect.fn("clientRuntime.state.mation.request")(function* (
   input: MationInput,
 ) {
   const supervisor = yield* Supervisor.EnvironmentSupervisor;

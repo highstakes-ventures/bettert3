@@ -143,7 +143,7 @@ const make = Effect.gen(function* () {
           (cause) => new PaiOperationError({ operation: "encode todo preparation", cause }),
         ),
       );
-      const response = yield* proxy(`/api/todos/${todoId}/prepare`, "POST", body);
+      const response = yield* proxy(`/api/todo-preparations/${todoId}/result`, "POST", body);
       yield* decode(Schema.Unknown, response);
       return { prepared: true };
     }),

@@ -1,3 +1,4 @@
+import * as TodoService from "../todo/TodoService.ts";
 import * as ExecutionRequestService from "./ExecutionRequestService.ts";
 import * as PaiService from "../pai/PaiService.ts";
 import * as Effect from "effect/Effect";
@@ -422,6 +423,7 @@ export const layerProduction = Layer.mergeAll(
   layerThreadLifecycleProvided,
   layerExecutionRequestsProvided,
   layerMationProvided,
+  TodoService.layer,
   PaiService.layer.pipe(Layer.provide(layerMationProvided)),
   layerScheduledTaskProvided,
   layerWorkflowsProvided,

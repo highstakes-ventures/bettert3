@@ -47,7 +47,7 @@ it.effect("preparation validates the calling run before forwarding a server-owne
         proxy: (path, method, body) =>
           Effect.sync(() => {
             calls.push("save");
-            expect(path).toBe(`/api/todos/${input.todoId}/prepare`);
+            expect(path).toBe(`/api/todo-preparations/${input.todoId}/result`);
             expect(method).toBe("POST");
             payload = JSON.parse(new TextDecoder().decode(body));
             return {
