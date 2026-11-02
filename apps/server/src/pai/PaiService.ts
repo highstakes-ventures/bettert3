@@ -3,10 +3,10 @@ import {
   PaiPublishEmailResult,
   PaiWidgetPage,
   PaiEmailItem,
+  PaiPublishEmailInput,
   PaiEmailWorkflow,
   MationRunRef,
   MationExecutionTarget,
-  type PaiPublishEmailInput,
   type PaiWidgetRequest,
   type OrchestrationV2ThreadShell,
   type TodoPreparationInput,
@@ -71,6 +71,7 @@ const encodeReport = Schema.encodeEffect(
       source: MationRunRef,
       target: MationExecutionTarget,
       items: Schema.Array(PaiEmailItem),
+      calendar: PaiPublishEmailInput.fields.calendar,
     }),
   ),
 );
@@ -191,7 +192,12 @@ const make = Effect.gen(function* () {
         runtimeMode: caller.runtimeMode,
         interactionMode: caller.interactionMode,
       };
-      const body = yield* encodeReport({ source, target, items: input.items }).pipe(
+      const body = yield* encodeReport({
+        source,
+        target,
+        items: input.items,
+        calendar: input.calendar,
+      }).pipe(
         Effect.mapError(
           (cause) => new PaiOperationError({ operation: "encode its report", cause }),
         ),

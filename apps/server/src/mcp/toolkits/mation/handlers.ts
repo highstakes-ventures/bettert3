@@ -15,7 +15,7 @@ export const layer = Access.toLayer(MationToolkit, {
           message: "The reporting run is no longer active.",
         });
       return yield* (yield* Pai.PaiService)
-        .publish({ items: input.items }, caller, input.requestId)
+        .publish({ items: input.items, calendar: input.calendar }, caller, input.requestId)
         .pipe(
           Effect.mapError(
             () =>

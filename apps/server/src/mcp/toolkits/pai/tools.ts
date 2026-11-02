@@ -38,7 +38,7 @@ export const PaiToolkit = Toolkit.make(
   }),
   Tool.make("pai_publish_email_items", {
     description:
-      "Publish this run's morning email overview to Mation. Mation supplies the inline widget and owns its email state and PAI, Personal and Ignore actions. Read the connected mailboxes and provide concise summaries. Publication leaves messages in Inbox and unread. T3 supplies the authenticated run identity; do not invent a source run. An identical publication can be retried, while a different report for the same run is rejected.",
+      "Publish this run's morning overview to Mation. Mation supplies the fixed calendar, todo and email components. Read the connected mailboxes and provide concise summaries. Include optional calendar data when reviewing the agenda: date as YYYY-MM-DD, timeZone, readAt as an ISO timestamp, sources with read/unavailable status, and events with the provider's real htmlLink. All-day start/end are dates with an exclusive end; timed start/end are ISO timestamps with offsets. Report unread calendars as unavailable, never empty. Exclude cancelled and declined events. Publication leaves messages in Inbox and unread. T3 supplies the authenticated run identity; do not invent a source run. An identical publication can be retried, while a different report for the same run is rejected.",
     parameters: PaiPublishEmailInput,
     success: PaiPublishEmailResult,
     failure: OrchestratorMcpFailure,

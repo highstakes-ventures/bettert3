@@ -21,6 +21,42 @@ export const PaiEmailItem = Schema.Struct({
 });
 export const PaiPublishEmailInput = Schema.Struct({
   items: Schema.Array(PaiEmailItem).check(Schema.isMaxLength(200)),
+  calendar: Schema.optional(
+    Schema.Struct({
+      date: TrimmedNonEmptyString,
+      timeZone: TrimmedNonEmptyString,
+      readAt: TrimmedNonEmptyString,
+      sources: Schema.Array(
+        Schema.Struct({
+          account: TrimmedNonEmptyString.check(Schema.isMaxLength(320)),
+          calendarId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(1000))),
+          calendarName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+          status: Schema.Literals(["read", "unavailable"]),
+          error: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(1000))),
+        }),
+      ).check(Schema.isMaxLength(100)),
+      events: Schema.Array(
+        Schema.Struct({
+          account: TrimmedNonEmptyString.check(Schema.isMaxLength(320)),
+          calendarId: TrimmedNonEmptyString.check(Schema.isMaxLength(1000)),
+          eventId: TrimmedNonEmptyString.check(Schema.isMaxLength(1000)),
+          title: Schema.String.check(Schema.isMaxLength(1000)),
+          start: TrimmedNonEmptyString,
+          end: TrimmedNonEmptyString,
+          htmlLink: TrimmedNonEmptyString.check(
+            Schema.isPattern(
+              /^https:\/\/(?:calendar\.google\.com(?:[/?#]|$)|www\.google\.com\/calendar\/)/,
+            ),
+          ),
+          location: Schema.optional(Schema.String.check(Schema.isMaxLength(1000))),
+          status: Schema.optional(Schema.Literals(["confirmed", "tentative"])),
+          responseStatus: Schema.optional(
+            Schema.Literals(["accepted", "tentative", "needsAction"]),
+          ),
+        }),
+      ).check(Schema.isMaxLength(200)),
+    }),
+  ),
 });
 export type PaiPublishEmailInput = typeof PaiPublishEmailInput.Type;
 export const PaiWidgetReference = Schema.Struct({

@@ -1,4 +1,4 @@
-import { PaiEmailItem } from "./pai.ts";
+import { PaiEmailItem, PaiPublishEmailInput } from "./pai.ts";
 import * as Schema from "effect/Schema";
 import {
   EnvironmentId,
@@ -76,6 +76,7 @@ export const MationEmailItem = PaiEmailItem;
 export const MationPublishEmailInput = Schema.Struct({
   requestId: MationRequestId,
   items: Schema.Array(MationEmailItem).check(Schema.isMaxLength(200)),
+  calendar: PaiPublishEmailInput.fields.calendar,
 });
 export type MationPublishEmailInput = typeof MationPublishEmailInput.Type;
 

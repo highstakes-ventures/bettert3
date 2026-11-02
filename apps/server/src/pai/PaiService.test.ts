@@ -15,6 +15,84 @@ import * as Auth from "../auth/EnvironmentAuth.ts";
 import * as AuthHttp from "../auth/http.ts";
 import * as Pai from "./PaiService.ts";
 import { layer } from "./http.ts";
+import { PaiPublishEmailInput, MationPublishEmailInput } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+
+const decodePublication = Schema.decodeEffect(PaiPublishEmailInput);
+const decodeLegacyPublication = Schema.decodeEffect(MationPublishEmailInput);
+
+it.effect(
+  "calendar data crosses both publication contracts with provider links and authenticated run identity intact",
+  () =>
+    Effect.gen(function* () {
+      const calendar = {
+        date: "2026-11-03",
+        timeZone: "Europe/Amsterdam",
+        readAt: "2026-11-03T07:00:00Z",
+        sources: [{ account: "joseph@recuut.com", calendarId: "primary", status: "read" as const }],
+        events: [
+          {
+            account: "joseph@recuut.com",
+            calendarId: "primary",
+            eventId: "instance-id",
+            title: "Productoverleg",
+            start: "2026-11-03T08:00:00Z",
+            end: "2026-11-03T09:00:00Z",
+            htmlLink: "https://www.google.com/calendar/event?eid=provider-instance",
+          },
+        ],
+      };
+      const input = yield* decodePublication({ items: [], calendar });
+      const legacy = yield* decodeLegacyPublication({
+        requestId: "00000000-0000-4000-8000-000000000001",
+        ...input,
+      });
+      expect(legacy.calendar).toEqual(calendar);
+      const caller = {
+        id: ThreadId.make("morning"),
+        activeRunId: RunId.make("current-run"),
+        projectId: ProjectId.make("project"),
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+        runtimeMode: "auto" as const,
+        interactionMode: "default" as const,
+      };
+      let published: Record<string, unknown> | undefined;
+      const dependencies = Layer.mergeAll(
+        Layer.mock(Mation.AutomationExecutionService)({
+          proxy: (_path, _method, body) =>
+            Effect.sync(() => {
+              published = JSON.parse(new TextDecoder().decode(body));
+              return {
+                status: 200,
+                body: new TextEncoder().encode(
+                  JSON.stringify({ published: 0, paiWidget: { reportId: "a".repeat(64) } }),
+                ),
+                contentType: "application/json",
+              };
+            }),
+        }),
+        Layer.mock(Environment.ServerEnvironmentIdentity)({
+          getEnvironmentId: Effect.succeed(EnvironmentId.make("environment")),
+        }),
+      );
+      yield* Effect.gen(function* () {
+        const service = yield* Pai.PaiService;
+        const untrusted = {
+          ...input,
+          source: { environmentId: "forged-environment" },
+          target: { projectId: "forged-project" },
+        };
+        yield* service.publish(untrusted, caller);
+      }).pipe(Effect.provide(Pai.layer.pipe(Layer.provide(dependencies))));
+      expect(published?.calendar).toEqual(calendar);
+      expect(published?.source).toEqual({
+        environmentId: "environment",
+        threadId: "morning",
+        runId: "current-run",
+      });
+      expect(published?.target).toMatchObject({ projectId: "project" });
+    }),
+);
 
 class PaiTestApi extends HttpApi.make("environment").add(EnvironmentHttpApi.groups.pai) {}
 
