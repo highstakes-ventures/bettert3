@@ -2,9 +2,36 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
+import ProjectSections from "./BetterT3Migrations/001_ProjectSections.ts";
+import Workflows from "./BetterT3Migrations/002_Workflows.ts";
+import WorkflowThreadLookup from "./BetterT3Migrations/003_WorkflowThreadLookup.ts";
+import EmailReviewLookup from "./BetterT3Migrations/004_EmailReviewLookup.ts";
+import DropUnusedV1Projections from "./Migrations/063_DropUnusedV1Projections.ts";
+import CanonicalizeThreadPullRequestLinks from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
+import CodexUsageNativeTurnIndex from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
+import RepairClientSettlementTimestamps from "./Migrations/066_RepairClientSettlementTimestamps.ts";
+import WebhookDedupe from "./Migrations/067_WebhookDedupe.ts";
+
+const legacyInstall = Effect.fn("test.legacyInstall")(function* (through = 71) {
+  yield* runMigrations({ toMigrationInclusive: 62 });
+  yield* Migrator.make({})({
+    loader: Migrator.fromRecord({
+      "63_ProjectSections": ProjectSections,
+      "64_Workflows": Workflows,
+      "65_WorkflowThreadLookup": WorkflowThreadLookup,
+      "66_DropUnusedV1Projections": DropUnusedV1Projections,
+      "67_CanonicalizeThreadPullRequestLinks": CanonicalizeThreadPullRequestLinks,
+      "68_CodexUsageNativeTurnIndex": CodexUsageNativeTurnIndex,
+      "69_RepairClientSettlementTimestamps": RepairClientSettlementTimestamps,
+      "70_WebhookDedupe": WebhookDedupe,
+      "71_EmailReviewLookup": EmailReviewLookup,
+    }).pipe(Effect.map((entries) => entries.filter(([id]) => id <= through))),
+  });
+});
 
 const v2Migrations = migrationManifest.filter(([id]) => id >= 55);
 const newerMigrationId = Math.max(...migrationManifest.map(([id]) => id)) + 1;
@@ -67,24 +94,45 @@ describe("runMigrations", () => {
   );
 
   it.effect(
-    "keeps BetterT3 workflow data and migration identities while applying upstream updates",
+    "keeps BetterT3 workflow data while separating custom and upstream migration histories",
     () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-        yield* runMigrations({ toMigrationInclusive: 65 });
+        yield* legacyInstall();
         const configuration = '{"linearProjectId":"existing-project"}';
         const run = '{"threadId":"existing-thread","phase":"refinement"}';
         yield* sql`INSERT INTO workflow_configurations (project_id, configuration_json) VALUES ('existing-project', ${configuration})`;
         yield* sql`INSERT INTO workflow_runs (id, project_id, run_json) VALUES ('existing-run', 'existing-project', ${run})`;
-        const expected = migrationManifest.filter(([id]) => id > 65);
-        assert.deepStrictEqual(yield* runMigrations(), expected);
+        yield* sql`UPDATE effect_sql_migrations SET created_at = '2026-10-15 12:00:00' WHERE migration_id >= 63`;
+        const expected = migrationManifest.filter(([id]) => id > 67);
+        const applied = yield* runMigrations();
         assert.deepStrictEqual(
-          (yield* history).filter(([id]) => id >= 63 && id <= 65),
+          (yield* history).filter(([id]) => id >= 63 && id <= 67),
           [
-            [63, "ProjectSections"],
-            [64, "Workflows"],
-            [65, "WorkflowThreadLookup"],
+            [63, "DropUnusedV1Projections"],
+            [64, "CanonicalizeThreadPullRequestLinks"],
+            [65, "CodexUsageNativeTurnIndex"],
+            [66, "RepairClientSettlementTimestamps"],
+            [67, "WebhookDedupe"],
           ],
+        );
+        assert.deepStrictEqual(applied, expected);
+        assert.deepStrictEqual(
+          yield* sql`SELECT migration_id, name FROM bettert3_sql_migrations ORDER BY migration_id`,
+          [
+            { migration_id: 1, name: "ProjectSections" },
+            { migration_id: 2, name: "Workflows" },
+            { migration_id: 3, name: "WorkflowThreadLookup" },
+            { migration_id: 4, name: "EmailReviewLookup" },
+          ],
+        );
+        assert.deepStrictEqual(
+          yield* sql`SELECT DISTINCT created_at FROM bettert3_sql_migrations`,
+          [{ created_at: "2026-10-15 12:00:00" }],
+        );
+        assert.deepStrictEqual(
+          yield* sql`SELECT DISTINCT created_at FROM effect_sql_migrations WHERE migration_id >= 63 AND migration_id <= 67`,
+          [{ created_at: "2026-10-15 12:00:00" }],
         );
         assert.deepStrictEqual(yield* sql`SELECT configuration_json FROM workflow_configurations`, [
           { configuration_json: configuration },
@@ -96,6 +144,70 @@ describe("runMigrations", () => {
         );
         assert.deepStrictEqual(yield* runMigrations(), []);
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect.each([63, 64, 65, 66, 67, 68, 69, 70, 71])(
+    "upgrades the supported BetterT3 history ending at %s without replaying applied schema",
+    (through) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* legacyInstall(through);
+        yield* runMigrations();
+        assert.deepStrictEqual(yield* history, migrationManifest);
+        assert.deepStrictEqual(
+          yield* sql`SELECT migration_id, name FROM bettert3_sql_migrations ORDER BY migration_id`,
+          [
+            { migration_id: 1, name: "ProjectSections" },
+            { migration_id: 2, name: "Workflows" },
+            { migration_id: 3, name: "WorkflowThreadLookup" },
+            { migration_id: 4, name: "EmailReviewLookup" },
+          ],
+        );
+        assert.deepStrictEqual(yield* runMigrations(), []);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("rejects an unknown legacy entry before creating a custom ledger", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* legacyInstall();
+      yield* sql`UPDATE effect_sql_migrations SET name = 'UnknownMigration' WHERE migration_id = 68`;
+      const before = yield* history;
+      const exit = yield* Effect.exit(runMigrations());
+      assert.isTrue(Exit.isFailure(exit));
+      assert.include(String(exit), "not a supported upgrade history");
+      assert.deepStrictEqual(yield* history, before);
+      assert.deepStrictEqual(
+        yield* sql`SELECT name FROM sqlite_schema WHERE name = 'bettert3_sql_migrations'`,
+        [],
+      );
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("rolls back a failed history transfer and retries without losing applied entries", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* legacyInstall();
+      yield* sql`CREATE TABLE bettert3_sql_migrations (
+        migration_id INTEGER PRIMARY KEY NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT current_timestamp,
+        name VARCHAR(255) NOT NULL
+      )`;
+      yield* sql`CREATE TRIGGER reject_history_transfer BEFORE INSERT ON bettert3_sql_migrations
+        WHEN NEW.migration_id = 3 BEGIN SELECT RAISE(ABORT, 'injected transfer failure'); END`;
+      const before = yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`;
+      const exit = yield* Effect.exit(runMigrations());
+      assert.isTrue(Exit.isFailure(exit));
+      assert.deepStrictEqual(
+        yield* sql`SELECT * FROM effect_sql_migrations ORDER BY migration_id`,
+        before,
+      );
+      assert.deepStrictEqual(yield* sql`SELECT * FROM bettert3_sql_migrations`, []);
+      yield* sql`DROP TRIGGER reject_history_transfer`;
+      yield* runMigrations();
+      assert.deepStrictEqual(yield* history, migrationManifest);
+      assert.deepStrictEqual(yield* runMigrations(), []);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
   it.effect("upgrades a database at exactly 54", () =>

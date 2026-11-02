@@ -1,9 +1,10 @@
-import EmailReviewLookup from "./Migrations/071_EmailReviewLookup.ts";
 import type { SqlError } from "effect/sql/SqlError";
 import * as Migrator from "effect/sql/Migrator";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
+import { reconcileBetterT3MigrationHistory } from "./reconcileBetterT3MigrationHistory.ts";
+import { BETTERT3_MIGRATIONS_TABLE, betterT3MigrationLoader } from "./BetterT3Migrations.ts";
 
 import Migration0001 from "./Migrations/001_OrchestrationEvents.ts";
 import Migration0002 from "./Migrations/002_OrchestrationCommandReceipts.ts";
@@ -67,15 +68,11 @@ import Migration0059 from "./Migrations/059_McpAppModelContext.ts";
 import Migration0060 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 import Migration0061 from "./Migrations/061_PullRequestReviewGuides.ts";
 import Migration0062 from "./Migrations/062_ThreadFailureLookupIndex.ts";
-import UpstreamMigration0063 from "./Migrations/063_DropUnusedV1Projections.ts";
-import UpstreamMigration0064 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
-import UpstreamMigration0065 from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
-import UpstreamMigration0066 from "./Migrations/066_RepairClientSettlementTimestamps.ts";
-import UpstreamMigration0067 from "./Migrations/067_WebhookDedupe.ts";
-
-import Migration0063 from "./Migrations/063_ProjectSections.ts";
-import Migration0064 from "./Migrations/064_Workflows.ts";
-import Migration0065 from "./Migrations/065_WorkflowThreadLookup.ts";
+import Migration0063 from "./Migrations/063_DropUnusedV1Projections.ts";
+import Migration0064 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
+import Migration0065 from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
+import Migration0066 from "./Migrations/066_RepairClientSettlementTimestamps.ts";
+import Migration0067 from "./Migrations/067_WebhookDedupe.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -141,16 +138,11 @@ const migrationEntries = [
   [60, "ThreadSnapshotWindowIndexes", Migration0060],
   [61, "PullRequestReviewGuides", Migration0061],
   [62, "ThreadFailureLookupIndex", Migration0062],
-  // BetterT3 already applied IDs 63-65. Keep their identities and append upstream migrations.
-  [63, "ProjectSections", Migration0063],
-  [64, "Workflows", Migration0064],
-  [65, "WorkflowThreadLookup", Migration0065],
-  [66, "DropUnusedV1Projections", UpstreamMigration0063],
-  [67, "CanonicalizeThreadPullRequestLinks", UpstreamMigration0064],
-  [68, "CodexUsageNativeTurnIndex", UpstreamMigration0065],
-  [69, "RepairClientSettlementTimestamps", UpstreamMigration0066],
-  [70, "WebhookDedupe", UpstreamMigration0067],
-  [71, "EmailReviewLookup", EmailReviewLookup],
+  [63, "DropUnusedV1Projections", Migration0063],
+  [64, "CanonicalizeThreadPullRequestLinks", Migration0064],
+  [65, "CodexUsageNativeTurnIndex", Migration0065],
+  [66, "RepairClientSettlementTimestamps", Migration0066],
+  [67, "WebhookDedupe", Migration0067],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -219,6 +211,7 @@ export const runMigrations: (
 > = Effect.fn("runMigrations")(function* ({ toMigrationInclusive }: RunMigrationsOptions = {}) {
   const includesV2 =
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
+  if (includesV2) yield* reconcileBetterT3MigrationHistory(migrationManifest);
   const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
   if (includesV2) {
     yield* assertV2MigrationsCanRun(toMigrationInclusive);
@@ -227,6 +220,17 @@ export const runMigrations: (
     ...previewMigrations,
     ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),
   ];
+  if (toMigrationInclusive === undefined) {
+    const customMigrations = yield* run({
+      loader: betterT3MigrationLoader,
+      table: BETTERT3_MIGRATIONS_TABLE,
+    });
+    if (customMigrations.length > 0) {
+      yield* Effect.log("BetterT3 migrations ran successfully").pipe(
+        Effect.annotateLogs({ migrations: customMigrations.map(([id, name]) => `${id}_${name}`) }),
+      );
+    }
+  }
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
   yield* migrations.length === 0
     ? Effect.logDebug("Database schema is current")
