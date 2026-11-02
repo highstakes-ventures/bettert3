@@ -1,3 +1,4 @@
+import * as WorkflowRuntimePolicy from "../workflows/WorkflowRuntimePolicy.ts";
 import { assert, it } from "@effect/vitest";
 import {
   type ModelSelection,
@@ -78,7 +79,8 @@ const providerInstanceFor = (instanceId: ProviderInstanceId) =>
     },
   }) as ProviderInstance;
 
-const layerTest = RuntimePolicy.layerFromProjectStore.pipe(
+const layerTest = WorkflowRuntimePolicy.layer.pipe(
+  Layer.provide(RuntimePolicy.layerFromProjectStore),
   Layer.provide(
     Layer.mock(ProjectionStore.ProjectionStoreV2)({
       getThreadShell: (id) =>

@@ -21,6 +21,7 @@ import * as ProjectStore from "./ProjectStore.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
+import * as WorkflowRuntimePolicy from "../workflows/WorkflowRuntimePolicy.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
@@ -33,7 +34,8 @@ const adapter = {
   openSession: () => Effect.die("This test does not start provider processes."),
 } satisfies ProviderAdapter.ProviderAdapterV2["Service"];
 const database = Sqlite.layerMemory;
-const runtimeLayer = RuntimePolicy.layerFromProjectStore.pipe(
+const runtimeLayer = WorkflowRuntimePolicy.layer.pipe(
+  Layer.provide(RuntimePolicy.layerFromProjectStore),
   Layer.provide(Layer.merge(ProjectionStore.layer, ProjectStore.layer)),
   Layer.provide(database),
   Layer.provide(

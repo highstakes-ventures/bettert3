@@ -14,8 +14,6 @@ import * as Schema from "effect/Schema";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProjectStore from "./ProjectStore.ts";
-import * as ProjectionStore from "./ProjectionStore.ts";
-import * as WorkflowThreadPolicy from "../workflows/WorkflowThreadPolicy.ts";
 
 export class RuntimePolicyResolveError extends Schema.TaggedError<RuntimePolicyResolveError>()(
   "RuntimePolicyResolveError",
@@ -88,48 +86,15 @@ function providerRuntimeMode(
 export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
   never,
-  | ProjectStore.ProjectStoreV2
-  | ProviderInstanceRegistry.ProviderInstanceRegistry
-  | ProjectionStore.ProjectionStoreV2
+  ProjectStore.ProjectStoreV2 | ProviderInstanceRegistry.ProviderInstanceRegistry
 > = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
     const projects = yield* ProjectStore.ProjectStoreV2;
     const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
-    const projections = yield* ProjectionStore.ProjectionStoreV2;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         const instance = yield* providerInstances.getInstance(input.modelSelection.instanceId);
-        const refinement = yield* Effect.gen(function* () {
-          const shell = yield* projections.getThreadShell(input.thread.id);
-          if (shell === null && input.thread.lineage.parentThreadId === null)
-            return yield* new WorkflowThreadPolicy.WorkflowThreadPolicyError({
-              threadId: input.thread.id,
-            });
-          // A delegated child's first dispatch resolves policy before its creation commits.
-          return yield* WorkflowThreadPolicy.resolve(
-            shell ?? input.thread,
-            projections.getThreadShell,
-          );
-        }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new RuntimePolicyResolveError({
-                projectId: input.thread.projectId,
-                providerInstanceId: input.modelSelection.instanceId,
-                cause,
-              }),
-          ),
-        );
-        if (
-          refinement &&
-          (input.thread.runDestination !== undefined ||
-            (instance?.driverKind !== "codex" && instance?.driverKind !== "claude"))
-        ) {
-          return yield* new RefinementProviderUnsupportedError({
-            providerInstanceId: input.modelSelection.instanceId,
-          });
-        }
         if (input.thread.runDestination && instance?.driverKind !== "codex") {
           return yield* new RuntimePolicyResolveError({
             projectId: input.thread.projectId,
@@ -172,14 +137,6 @@ export const layerFromProjectStore: Layer.Layer<
           interactionMode: input.thread.interactionMode,
           cwd,
           ...(input.thread.runDestination ? { runDestination: input.thread.runDestination } : {}),
-          ...(refinement
-            ? {
-                ticketRefinement: true,
-                interactionMode: "plan",
-                approvalPolicy: "never",
-                sandboxPolicy: { type: "readOnly" },
-              }
-            : {}),
         });
       }),
     });

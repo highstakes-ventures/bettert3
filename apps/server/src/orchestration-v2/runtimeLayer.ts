@@ -1,3 +1,4 @@
+import * as WorkflowRuntimePolicy from "../workflows/WorkflowRuntimePolicy.ts";
 import * as ExecutionRequestService from "./ExecutionRequestService.ts";
 import * as PaiService from "../pai/PaiService.ts";
 import * as Effect from "effect/Effect";
@@ -70,7 +71,8 @@ export const layerEventInfrastructure = Layer.mergeAll(
   OrchestrationCommandReceipts.layer,
 );
 
-const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
+const layerRuntimePolicyProvided = WorkflowRuntimePolicy.layer.pipe(
+  Layer.provide(RuntimePolicy.layerFromProjectStore),
   Layer.provide(ProjectStore.layer),
   Layer.provide(ProjectionStore.layer),
 );
