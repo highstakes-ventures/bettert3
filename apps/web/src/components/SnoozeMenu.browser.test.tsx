@@ -134,6 +134,45 @@ describe("snooze menu keyboard choices", () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(context.composer));
   });
 
+  it("refreshes the displayed and selected wake time when an idle menu opens again", async () => {
+    using _context = setup();
+    const clock = vi.mocked(Date.now);
+    const onOpenChange = vi.fn();
+    const menu = (open: boolean) => (
+      <SnoozeMenu
+        environmentId={EnvironmentId.make("test")}
+        open={open}
+        onOpenChange={onOpenChange}
+        onSnooze={snooze}
+        timestampFormat="24-hour"
+      />
+    );
+    // This menu has no routing behavior.
+    await using screen = await render(menu(false), { router: false });
+
+    clock.mockReturnValue(new Date(2026, 3, 8, 14, 12).getTime());
+    await screen.rerender(menu(true));
+    await vi.waitFor(() => {
+      const popup = document.querySelector("[data-snooze-menu]");
+      expect(popup?.textContent).toContain("15:12");
+      expect(popup?.contains(document.activeElement)).toBe(true);
+    });
+    await press("1", { metaKey: true });
+    expect(snooze.mock.calls[0]![0].snoozedUntil).toBe(new Date(2026, 3, 8, 15, 12).toISOString());
+
+    await screen.rerender(menu(false));
+    clock.mockReturnValue(new Date(2026, 3, 8, 20, 30).getTime());
+    await screen.rerender(menu(true));
+    await vi.waitFor(() => {
+      const popup = document.querySelector("[data-snooze-menu]");
+      expect(popup?.textContent).toContain("21:30");
+      expect(popup?.contains(document.activeElement)).toBe(true);
+    });
+    await press("1", { metaKey: true });
+    expect(snooze).toHaveBeenCalledTimes(2);
+    expect(snooze.mock.calls[1]![0].snoozedUntil).toBe(new Date(2026, 3, 8, 21, 30).toISOString());
+  });
+
   it("does not capture numbers when the menu is closed", async () => {
     using _context = setup();
 

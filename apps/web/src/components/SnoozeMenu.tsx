@@ -24,11 +24,10 @@ export function SnoozeMenu({
   anchor?: ComponentProps<typeof MenuPopup>["anchor"];
   children?: ReactNode;
 }) {
-  // oxlint-disable-next-line react/purity -- Relative snooze choices use the time when this menu opens.
-  const nowMs = Date.now();
   const presets =
     open && environmentId
-      ? resolveSnoozePresets(new Date(nowMs), timestampFormat, environmentId)
+      ? // oxlint-disable-next-line react/purity -- Keep the clock inside the open-dependent expression so the compiler cannot cache it at mount.
+        resolveSnoozePresets(new Date(Date.now()), timestampFormat, environmentId)
       : [];
   const choices = presets.map((preset, index) => ({
     preset,
