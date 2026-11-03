@@ -14,11 +14,10 @@ const caller = Effect.gen(function* () {
     });
   return caller;
 });
-const failure = () =>
+const failure = (error: Pai.PaiOperationError) =>
   new OrchestratorMcpFailure({
     code: "orchestration_error",
-    message:
-      "PAI could not complete the request. Check this environment's Mation connection before retrying.",
+    message: error.message,
   });
 export const layer = Access.toLayer(PaiToolkit, {
   todo_prepare_result: Access.actsAsCaller((input) =>

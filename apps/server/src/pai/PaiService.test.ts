@@ -194,10 +194,15 @@ it.effect(
                   branch: null,
                 })
               : Effect.fail(new Mation.MationConflictError({ requestId: "wrong-chat" })),
-          proxy: (_path, _method, body) =>
+          proxy: (path, method, body) =>
             Effect.sync(() => {
               publications++;
-              expect(JSON.parse(new TextDecoder().decode(body)).source).toEqual(ref);
+              expect(path).toBe("/api/email/actions/00000000-0000-4000-8000-000000000001/complete");
+              expect(method).toBe("POST");
+              expect(JSON.parse(new TextDecoder().decode(body))).toEqual({
+                source: ref,
+                message: "Draft prepared",
+              });
               return {
                 status: 200,
                 body: new TextEncoder().encode(JSON.stringify({ completed: true })),
@@ -215,13 +220,21 @@ it.effect(
           { actionId: "00000000-0000-4000-8000-000000000001", message: "Draft prepared" },
           caller,
         );
-        const denied = yield* service
-          .complete(
-            { actionId: "00000000-0000-4000-8000-000000000001", message: "Wrong chat" },
-            { ...caller, id: ThreadId.make("other-chat") },
-          )
-          .pipe(Effect.exit);
-        expect(denied._tag).toBe("Failure");
+        for (const deniedCaller of [
+          { ...caller, id: ThreadId.make("other-chat") },
+          { ...caller, projectId: ProjectId.make("other-project") },
+          { ...caller, activeRunId: null },
+        ]) {
+          const denied = yield* service
+            .complete(
+              { actionId: "00000000-0000-4000-8000-000000000001", message: "Untrusted result" },
+              deniedCaller,
+            )
+            .pipe(Effect.flip);
+          expect(denied.message).toContain(
+            deniedCaller.activeRunId === null ? "active T3 run" : "original T3 source",
+          );
+        }
       }).pipe(Effect.provide(Pai.layer.pipe(Layer.provide(dependencies))));
       expect(publications).toBe(1);
     }),

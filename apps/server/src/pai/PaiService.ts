@@ -26,13 +26,72 @@ const encodePreparedTodoResult = Schema.encodeEffect(
     }),
   ),
 );
+const decodeCompletionRejection = Schema.decodeOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      error: Schema.Literals([
+        "This action already recorded a different result.",
+        "Only this action's T3 run can record its result.",
+        "Only the action's T3 run can confirm its result.",
+      ]),
+    }),
+  ),
+);
 
 export class PaiOperationError extends Schema.TaggedError<PaiOperationError>()(
   "PaiOperationError",
-  { operation: Schema.String, cause: Schema.Defect() },
+  {
+    operation: Schema.String,
+    reason: Schema.optional(
+      Schema.Literals([
+        "transport",
+        "http",
+        "result_conflict",
+        "source_rejected",
+        "inactive_caller",
+        "invalid_response",
+      ]),
+    ),
+    httpStatus: Schema.optional(Schema.Number),
+    cause: Schema.Defect(),
+  },
 ) {
   override get message() {
-    return `PAI could not ${this.operation}. Check this environment's Mation connection.`;
+    const status = this.httpStatus === undefined ? "" : ` HTTP ${this.httpStatus}.`;
+    switch (this.reason) {
+      case "transport":
+        return "PAI could not exchange the request with Mation. The result is unconfirmed. Check this environment's Mation connection before retrying.";
+      case "http":
+        return `Mation rejected the PAI request.${status}`;
+      case "result_conflict":
+        return `Mation rejected the PAI completion.${status} This action already recorded a different result. Do not retry with a changed message. The saved result cannot be replaced.`;
+      case "source_rejected":
+        return `PAI could not validate the action's original T3 source.${status} Complete the action only from its own T3 chat.`;
+      case "inactive_caller":
+        return "PAI completion requires an active T3 run in the action's own chat.";
+      case "invalid_response":
+        return `Mation returned an invalid PAI response.${status} The result is unconfirmed.`;
+      default:
+        return `PAI could not ${this.operation}.`;
+    }
+  }
+
+  static fromHttpResponse(result: { status: number; body: string }) {
+    const rejection = decodeCompletionRejection(result.body);
+    const error = rejection._tag === "Some" ? rejection.value.error : undefined;
+    const reason =
+      result.status === 409 && error === "This action already recorded a different result."
+        ? "result_conflict"
+        : (result.status === 409 && error === "Only this action's T3 run can record its result.") ||
+            (result.status === 403 && error === "Only the action's T3 run can confirm its result.")
+          ? "source_rejected"
+          : "http";
+    return new PaiOperationError({
+      operation: "complete the request",
+      reason,
+      httpStatus: result.status,
+      cause: `PAI returned HTTP ${result.status}.`,
+    });
   }
 }
 
@@ -96,22 +155,24 @@ const make = Effect.gen(function* () {
       )
       .pipe(
         Effect.mapError(
-          (cause) => new PaiOperationError({ operation: "connect to Mation", cause }),
+          (cause) =>
+            new PaiOperationError({ operation: "connect to Mation", reason: "transport", cause }),
         ),
       );
     return { status: response.status, body: new TextDecoder().decode(response.body) };
   });
   const decode = <A, I>(schema: Schema.Codec<A, I>, result: { status: number; body: string }) =>
     result.status < 200 || result.status >= 300
-      ? Effect.fail(
-          new PaiOperationError({
-            operation: "complete the request",
-            cause: `PAI returned HTTP ${result.status}.`,
-          }),
-        )
+      ? Effect.fail(PaiOperationError.fromHttpResponse(result))
       : Schema.decodeEffect(Schema.fromJsonString(schema))(result.body).pipe(
           Effect.mapError(
-            (cause) => new PaiOperationError({ operation: "read its response", cause }),
+            (cause) =>
+              new PaiOperationError({
+                operation: "read its response",
+                reason: "invalid_response",
+                httpStatus: result.status,
+                cause,
+              }),
           ),
         );
   return PaiService.of({
@@ -212,6 +273,7 @@ const make = Effect.gen(function* () {
       if (caller.activeRunId === null)
         return yield* new PaiOperationError({
           operation: "complete outside an active run",
+          reason: "inactive_caller",
           cause: "The action run ended.",
         });
       // A reply supplying missing context can be a later run in this dedicated action chat.
@@ -219,7 +281,14 @@ const make = Effect.gen(function* () {
         .get(input.actionId, { projectId: caller.projectId, threadId: caller.id })
         .pipe(
           Effect.mapError(
-            (cause) => new PaiOperationError({ operation: "validate the action chat", cause }),
+            (cause) =>
+              new PaiOperationError({
+                operation: "validate the action chat",
+                ...(cause._tag === "MationConflictError" || cause._tag === "MationNotFoundError"
+                  ? { reason: "source_rejected" as const }
+                  : {}),
+                cause,
+              }),
           ),
         );
       const source = execution.ref;
