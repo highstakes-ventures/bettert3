@@ -24,7 +24,12 @@ import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as UsageService from "../usage/UsageService.ts";
 import type { RunUsage } from "../usage/runUsage.ts";
-import type { ExecutionCost, OrchestrationV2Run, NodeId } from "@t3tools/contracts";
+import type {
+  ExecutionCost,
+  OrchestrationV2Run,
+  OrchestrationV2Subagent,
+  ProviderTurnId,
+} from "@t3tools/contracts";
 
 export class ExecutionOperationError extends Schema.TaggedError<ExecutionOperationError>()(
   "ExecutionOperationError",
@@ -90,40 +95,67 @@ const make = Effect.gen(function* () {
     const collect = Effect.fn("executionRequest.collectUsage")(function* (
       id: ThreadId,
       runIds: ReadonlySet<RunId>,
-      delegatedTaskId?: NodeId,
+      task?: OrchestrationV2Subagent,
+      parentTurns?: ReadonlySet<ProviderTurnId>,
     ): Effect.fn.Return<void, ExecutionOperationError> {
-      if (visited.has(id)) {
+      const key = task
+        ? `task:${task.threadId}:${task.id}`
+        : `runs:${id}:${[...runIds].sort().join(",")}`;
+      if (visited.has(key)) {
         complete = false;
         return;
       }
-      visited.add(id);
-      const ids = delegatedTaskId
-        ? new Set(
-            (yield* threads
-              .getThreadRecords(id, ["runs"])
-              .pipe(
-                Effect.mapError(
-                  (cause) => new ExecutionOperationError({ operation: "read", cause }),
-                ),
-              )).runs
-              .filter((candidate) => candidate.delegatedTaskId === delegatedTaskId)
-              .map((candidate) => candidate.id),
-          )
-        : runIds;
+      visited.add(key);
       const records = yield* threads
-        .getThreadRecords(id, ["runs", "attempts", "providerTurns", "subagents", "nodes"], {
-          runIds: [...ids],
-        })
+        .getThreadRecords(
+          id,
+          [
+            "runs",
+            "attempts",
+            "providerTurns",
+            "providerThreads",
+            "subagents",
+            "nodes",
+            "contextTransfers",
+          ],
+          task ? undefined : { runIds: [...runIds] },
+        )
         .pipe(
           Effect.mapError((cause) => new ExecutionOperationError({ operation: "read", cause })),
         );
-      const selectedRuns = records.runs.filter((candidate) =>
-        delegatedTaskId ? candidate.delegatedTaskId === delegatedTaskId : runIds.has(candidate.id),
-      );
-      if (!selectedRuns.length) {
+      if (
+        task &&
+        (records.thread.lineage.parentThreadId !== task.threadId ||
+          records.thread.lineage.relationshipToParent !== "subagent")
+      ) {
         complete = false;
         return;
       }
+      const spawnedHere =
+        task &&
+        records.thread.forkedFrom?.type === "node" &&
+        records.thread.forkedFrom.nodeId === task.id;
+      const initialRunIds = new Set(
+        task && spawnedHere
+          ? records.contextTransfers
+              .filter(
+                (transfer) =>
+                  transfer.type === "subagent_spawn" &&
+                  transfer.sourceThreadId === task.threadId &&
+                  transfer.targetThreadId === id &&
+                  transfer.sourcePoint.threadId === task.threadId &&
+                  transfer.sourcePoint.runId === task.runId &&
+                  transfer.status === "consumed" &&
+                  transfer.targetRunId !== null,
+              )
+              .map((transfer) => transfer.targetRunId!)
+          : [],
+      );
+      const selectedRuns = records.runs.filter((candidate) =>
+        task
+          ? candidate.delegatedTaskId === task.id || initialRunIds.has(candidate.id)
+          : runIds.has(candidate.id),
+      );
       const selectedIds = new Set(selectedRuns.map((candidate) => candidate.id));
       const attempts = records.attempts.filter((attempt) => selectedIds.has(attempt.runId));
       const attemptById = new Map(attempts.map((attempt) => [attempt.id, attempt]));
@@ -132,41 +164,88 @@ const make = Effect.gen(function* () {
           .filter((node) => node.runId && selectedIds.has(node.runId))
           .map((node) => [node.id, node]),
       );
-      const subagents = records.subagents.filter(
+      let turns = records.providerTurns.filter(
+        (turn) =>
+          (turn.runAttemptId && attemptById.has(turn.runAttemptId)) || nodes.has(turn.nodeId),
+      );
+      let subagents = records.subagents.filter(
         (child) => child.runId && selectedIds.has(child.runId),
       );
+      if (task?.origin === "provider_native") {
+        const providerThread = records.providerThreads.find(
+          (thread) => thread.id === task.providerThreadId && thread.appThreadId === id,
+        );
+        if (
+          !spawnedHere ||
+          !providerThread ||
+          !providerThread.forkedFrom?.providerTurnId ||
+          !parentTurns?.has(providerThread.forkedFrom.providerTurnId) ||
+          task.startedAt === null
+        ) {
+          complete = false;
+          return;
+        }
+        const from = DateTime.toEpochMillis(task.startedAt);
+        const until = task.completedAt === null ? null : DateTime.toEpochMillis(task.completedAt);
+        turns = records.providerTurns.filter(
+          (turn) =>
+            turn.providerThreadId === providerThread.id &&
+            turn.runAttemptId === null &&
+            turn.startedAt !== null &&
+            DateTime.toEpochMillis(turn.startedAt) >= from &&
+            (until === null ||
+              (turn.completedAt !== null && DateTime.toEpochMillis(turn.completedAt) <= until)),
+        );
+        if (!turns.length) complete = false;
+        const turnIds = new Set(turns.map((turn) => turn.id));
+        const roots = new Set(turns.map((turn) => turn.nodeId));
+        const ownedNodes = new Set(
+          records.nodes
+            .filter(
+              (node) =>
+                roots.has(node.rootNodeId) ||
+                (node.providerTurnId && turnIds.has(node.providerTurnId)),
+            )
+            .map((node) => node.id),
+        );
+        subagents = records.subagents.filter(
+          (child) => roots.has(child.parentNodeId) || ownedNodes.has(child.parentNodeId),
+        );
+      } else {
+        if (!selectedRuns.length) {
+          complete = false;
+          return;
+        }
+        for (const candidate of selectedRuns) {
+          if (
+            !["completed", "interrupted", "failed", "cancelled", "rolled_back"].includes(
+              candidate.status,
+            )
+          )
+            complete = false;
+          if (
+            !attempts.some((attempt) => attempt.runId === candidate.id) &&
+            candidate.startedAt !== null
+          )
+            complete = false;
+        }
+        for (const attempt of attempts) {
+          if (!turns.some((turn) => turn.runAttemptId === attempt.id)) complete = false;
+        }
+      }
       const nativeThreads = new Map(
         subagents
           .filter((child) => child.origin === "provider_native" && child.providerThreadId)
           .map((child) => [child.providerThreadId!, child]),
       );
-      const turns = records.providerTurns.filter(
-        (turn) =>
-          (turn.runAttemptId && attemptById.has(turn.runAttemptId)) || nodes.has(turn.nodeId),
-      );
-      for (const candidate of selectedRuns) {
-        if (
-          !["completed", "interrupted", "failed", "cancelled", "rolled_back"].includes(
-            candidate.status,
-          )
-        )
-          complete = false;
-        if (
-          !attempts.some((attempt) => attempt.runId === candidate.id) &&
-          candidate.startedAt !== null
-        )
-          complete = false;
-      }
-      for (const attempt of attempts) {
-        if (!turns.some((turn) => turn.runAttemptId === attempt.id)) complete = false;
-      }
       for (const turn of turns) {
         const attempt = turn.runAttemptId ? attemptById.get(turn.runAttemptId) : undefined;
         const node = nodes.get(turn.nodeId);
         const owner = selectedRuns.find(
           (candidate) => candidate.id === (attempt?.runId ?? node?.runId),
         );
-        const native = nativeThreads.get(turn.providerThreadId);
+        const native =
+          task?.origin === "provider_native" ? task : nativeThreads.get(turn.providerThreadId);
         const selection = native
           ? (native.modelSelection ??
             (native.model
@@ -181,9 +260,10 @@ const make = Effect.gen(function* () {
         if (turn.status === "running" || turn.status === "pending") complete = false;
         if (turn.turnTokenUsage?.hasSubagents && !subagents.length) complete = false;
       }
+      const turnIds = new Set(turns.map((turn) => turn.id));
       for (const child of subagents) {
-        if (child.origin === "app_owned" && child.childThreadId && !child.remoteChild) {
-          yield* collect(child.childThreadId, new Set(), child.id).pipe(
+        if (child.childThreadId && !child.remoteChild) {
+          yield* collect(child.childThreadId, new Set(), child, turnIds).pipe(
             Effect.catchTags({
               ExecutionOperationError: () =>
                 Effect.sync(() => {
@@ -191,9 +271,6 @@ const make = Effect.gen(function* () {
                 }),
             }),
           );
-        } else if (child.origin === "provider_native") {
-          if (!turns.some((turn) => turn.providerThreadId === child.providerThreadId))
-            complete = false;
         } else complete = false;
         if (!["completed", "failed", "cancelled", "interrupted"].includes(child.status))
           complete = false;

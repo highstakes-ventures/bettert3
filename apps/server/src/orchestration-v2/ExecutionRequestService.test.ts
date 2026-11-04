@@ -1,6 +1,7 @@
 import { it, expect } from "@effect/vitest";
 import {
   CommandId,
+  ContextTransferId,
   EnvironmentId,
   MessageId,
   ProjectId,
@@ -155,16 +156,44 @@ it.effect(
         ...records.runs[0]!,
         id: RunId.make("child-run"),
         threadId: childId,
-        delegatedTaskId: taskId,
       };
-      const child: ProjectionRecords<ProjectionRecordField> = {
+      let child: ProjectionRecords<ProjectionRecordField> = {
         ...records,
-        thread: { ...records.thread, id: childId },
+        thread: {
+          ...records.thread,
+          id: childId,
+          lineage: {
+            rootThreadId: threadId,
+            parentThreadId: threadId,
+            relationshipToParent: "subagent",
+          },
+          forkedFrom: { type: "node", nodeId: taskId },
+        },
+        contextTransfers: [
+          {
+            id: ContextTransferId.make("spawn"),
+            type: "subagent_spawn",
+            sourceThreadId: threadId,
+            targetThreadId: childId,
+            sourcePoint: { threadId, runId },
+            basePoint: null,
+            sourceProviderInstanceId: modelSelection.instanceId,
+            targetProviderInstanceId: modelSelection.instanceId,
+            targetRunId: childRun.id,
+            status: "consumed",
+            resolution: null,
+            createdBy: "agent",
+            error: null,
+            createdAt: now,
+            updatedAt: now,
+            consumedAt: now,
+          },
+        ],
         runs: [childRun, { ...childRun, id: otherId, delegatedTaskId: NodeId.make("other-task") }],
         attempts: [makeAttempt("child", childRun.id), makeAttempt("unrelated-child", otherId)],
         providerTurns: [makeTurn("child", 200), makeTurn("unrelated-child", 100_000)],
       };
-      const parent: ProjectionRecords<ProjectionRecordField> = {
+      let parent: ProjectionRecords<ProjectionRecordField> = {
         ...records,
         runs: [...records.runs, { ...records.runs[0]!, id: otherId, ordinal: 2 }],
         attempts: [
@@ -201,13 +230,73 @@ it.effect(
           },
         ],
       };
+      const nativeId = ThreadId.make("native-child");
+      const nativeTask = {
+        ...parent.subagents[0]!,
+        id: NodeId.make("native-task"),
+        origin: "provider_native" as const,
+        childThreadId: nativeId,
+        providerThreadId: ProviderThreadId.make("native-provider"),
+      };
+      const native: ProjectionRecords<ProjectionRecordField> = {
+        ...records,
+        runs: [],
+        thread: {
+          ...records.thread,
+          id: nativeId,
+          lineage: {
+            rootThreadId: threadId,
+            parentThreadId: threadId,
+            relationshipToParent: "subagent",
+          },
+          forkedFrom: { type: "node", nodeId: nativeTask.id },
+        },
+        providerThreads: [
+          {
+            id: nativeTask.providerThreadId!,
+            driver: nativeTask.driver,
+            providerInstanceId: nativeTask.providerInstanceId,
+            providerSessionId: null,
+            appThreadId: nativeId,
+            ownerNodeId: null,
+            nativeThreadRef: null,
+            nativeConversationHeadRef: null,
+            status: "idle",
+            firstRunOrdinal: null,
+            lastRunOrdinal: null,
+            handoffIds: [],
+            forkedFrom: {
+              providerThreadId: ProviderThreadId.make("parent"),
+              providerTurnId: ProviderTurnId.make("parent"),
+            },
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        providerTurns: [
+          {
+            ...makeTurn("native", 125),
+            providerThreadId: nativeTask.providerThreadId!,
+            runAttemptId: null,
+          },
+          makeTurn("unrelated-native", 100_000),
+          {
+            ...makeTurn("later-native", 100_000),
+            providerThreadId: nativeTask.providerThreadId!,
+            runAttemptId: null,
+            startedAt: DateTime.add(now, { hours: 1 }),
+            completedAt: DateTime.add(now, { hours: 1 }),
+          },
+        ],
+      };
       let failPricing = false;
       let costReads = 0;
       const dependencies = Layer.mergeAll(
         Layer.mock(Threads.ThreadManagementService)({
           getThreadShell: () => Effect.succeed(shell),
           getProjectThreadRecords: () => Effect.succeed(parent),
-          getThreadRecords: (id) => Effect.succeed(id === childId ? child : parent),
+          getThreadRecords: (id) =>
+            Effect.succeed(id === nativeId ? native : id === childId ? child : parent),
         }),
         Layer.mock(Launch.ThreadLaunchService)({}),
         Layer.mock(Events.EventStoreV2)({}),
@@ -256,6 +345,48 @@ it.effect(
             }),
           );
         expect(costReads).toBe(2);
+        const followupTaskId = NodeId.make("followup-task");
+        const followupRun = {
+          ...childRun,
+          id: RunId.make("followup-run"),
+          delegatedTaskId: followupTaskId,
+        };
+        child = {
+          ...child,
+          runs: [...child.runs, followupRun],
+          attempts: [...child.attempts, makeAttempt("followup", followupRun.id)],
+          providerTurns: [...child.providerTurns, makeTurn("followup", 75), makeTurn("child", 200)],
+        };
+        parent = {
+          ...parent,
+          subagents: [
+            ...parent.subagents,
+            { ...parent.subagents[0]!, id: followupTaskId },
+            nativeTask,
+          ],
+        };
+        expect((yield* service.get(CommandId.make("request"), query)).cost).toEqual({
+          usd: 5.5,
+          coverage: "complete",
+        });
+        parent = { ...parent, subagents: [...parent.subagents].reverse() };
+        expect((yield* service.get(CommandId.make("request"), query)).cost).toEqual({
+          usd: 5.5,
+          coverage: "complete",
+        });
+        const known = parent.subagents;
+        parent = {
+          ...parent,
+          subagents: [
+            ...known,
+            { ...known[0]!, id: taskId, origin: "app_owned", childThreadId: threadId },
+          ],
+        };
+        expect((yield* service.get(CommandId.make("request"), query)).cost).toEqual({
+          usd: 5.5,
+          coverage: "partial",
+        });
+        parent = { ...parent, subagents: known };
         failPricing = true;
         const failed = yield* service.get(CommandId.make("request"), query);
         expect(failed.status).toBe("completed");
