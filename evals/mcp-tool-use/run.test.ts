@@ -30,11 +30,13 @@ import {
 import { briefRoute, gradeDevice, shellInvocations } from "./device-grading.ts";
 import { taskPrompt } from "../../apps/server/src/mcp/delegatedTaskModes.ts";
 
-it("grades Codex shell and subagent calls with the shared rules", () => {
+it("grades Codex shell, subagent and user-input calls with the shared rules", () => {
   const calls = [
     { name: "exec_command", input: { cmd: "sleep 60" } },
     { name: "collaboration.spawn_agent", input: { task: "review" } },
     { name: "mcp__t3_code__delegate_task", input: {} },
+    { name: "functions.request_user_input", input: { questions: [] } },
+    { name: "functions.request_user_input_async", input: { questions: [] } },
   ].map(({ name, input }) => ({
     step: 0,
     tool: normalizeToolName(name),
@@ -42,7 +44,7 @@ it("grades Codex shell and subagent calls with the shared rules", () => {
   }));
   assert.deepEqual(
     calls.map((c) => c.tool),
-    ["Bash", "Agent", "delegate_task"],
+    ["Bash", "Agent", "delegate_task", "AskUserQuestion", "AskUserQuestion"],
   );
   assert.deepEqual(
     failed(

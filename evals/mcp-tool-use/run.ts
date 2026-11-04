@@ -60,6 +60,7 @@ import {
   makeClaudeQueryOptions,
 } from "../../apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { proxyConfig } from "../shared/proxy.ts";
+import { t3AutomaticChatContext } from "../../packages/provider-core/src/server/orchestrationInstructions.ts";
 import { changeRequestsCreatedBy } from "../../apps/server/src/orchestration-v2/PullRequestSyncReactor.ts";
 import { DeviceExpect, gradeDevice } from "./device-grading.ts";
 import {
@@ -232,6 +233,7 @@ export const McpToolUseCase = Schema.Struct({
     /** delegate_task `role` for a delegated child. T3 builds the child's first message from it. */
     delegateRole: Schema.optional(OrchestratorMcpTaskRole),
     context: Schema.optional(Schema.String),
+    automatic: Schema.optional(Schema.Boolean),
     priorTurns: Schema.optional(
       Schema.Array(
         Schema.Struct({
@@ -341,6 +343,8 @@ const CODEX_NAMES: Readonly<Record<string, string>> = {
   spawn_agent: "Agent",
   apply_patch: "Edit",
   write_stdin: "write_stdin",
+  request_user_input: "AskUserQuestion",
+  request_user_input_async: "AskUserQuestion",
   web__run: "WebFetch",
 };
 export const normalizeToolName = (name: string) => {
@@ -840,6 +844,9 @@ export const buildMessages = (sample: Sample) => {
       ? "You are a subagent started by the parent agent's Agent tool. Your final message goes to the parent agent, not to the user."
       : undefined,
     context,
+    testCase.setup.automatic
+      ? t3AutomaticChatContext("11111111-1111-4111-8111-111111111111")
+      : undefined,
   ];
   const reminders = base.reminders.toSpliced(base.gitStatusAt, 0, reminder(gitStatus(testCase)));
   push("user", ...reminders, ...notes.flatMap((note) => (note ? [reminder(note)] : [])));
