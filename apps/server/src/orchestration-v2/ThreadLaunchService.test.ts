@@ -1,4 +1,5 @@
 import * as Events from "./EventStore.ts";
+import * as Usage from "../usage/UsageService.ts";
 import * as ExecutionRequests from "./ExecutionRequestService.ts";
 import { EventId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -3163,7 +3164,16 @@ it.effect(
   () => {
     const harness = makeHarness({ adapters: [adapter, claudeAdapter] });
     const layerMation = MationExecution.layer.pipe(
-      Layer.provide(ExecutionRequests.layer.pipe(Layer.provide(Events.layer))),
+      Layer.provide(
+        ExecutionRequests.layer.pipe(
+          Layer.provide(
+            Layer.mock(Usage.UsageService)({
+              readRunCost: () => Effect.succeed({ usd: null, coverage: "unavailable" }),
+            }),
+          ),
+          Layer.provide(Events.layer),
+        ),
+      ),
       Layer.provide(Layer.succeed(HostProcess.Environment, {})),
       Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(harness.layer))),
       Layer.provide(harness.layer),
@@ -3246,6 +3256,11 @@ it.effect(
   () => {
     const harness = makeHarness();
     const requests = ExecutionRequests.layer.pipe(
+      Layer.provide(
+        Layer.mock(Usage.UsageService)({
+          readRunCost: () => Effect.succeed({ usd: null, coverage: "unavailable" }),
+        }),
+      ),
       Layer.provide(Events.layer),
       Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(harness.layer))),
       Layer.provide(harness.layer),

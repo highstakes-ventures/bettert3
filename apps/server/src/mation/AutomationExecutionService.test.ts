@@ -17,6 +17,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
 import { FetchHttpClient } from "effect/http";
+import * as Usage from "../usage/UsageService.ts";
 import * as ExecutionRequests from "../orchestration-v2/ExecutionRequestService.ts";
 import * as Events from "../orchestration-v2/EventStore.ts";
 import * as Execution from "./AutomationExecutionService.ts";
@@ -41,6 +42,9 @@ it.effect(
     Effect.gen(function* () {
       let launched: Launch.ThreadLaunchInput | undefined;
       const dependencies = Layer.mergeAll(
+        Layer.mock(Usage.UsageService)({
+          readRunCost: () => Effect.succeed({ usd: null, coverage: "unavailable" }),
+        }),
         Layer.mock(Events.EventStoreV2)({}),
         Layer.mock(Threads.ThreadManagementService)({ getThreadShell: () => Effect.succeed(null) }),
         Layer.mock(Receipts.CommandReceiptStoreV2)({
@@ -184,6 +188,9 @@ it.effect(
       let launched = 0,
         sent = 0;
       const dependencies = Layer.mergeAll(
+        Layer.mock(Usage.UsageService)({
+          readRunCost: () => Effect.succeed({ usd: null, coverage: "unavailable" }),
+        }),
         Layer.mock(Events.EventStoreV2)({}),
         Layer.mock(Threads.ThreadManagementService)({
           getThreadShell: () => Effect.succeed(shell),
@@ -194,6 +201,7 @@ it.effect(
             expect(fields).toEqual(["runs", "messages"]);
             return Effect.succeed(records);
           },
+          getThreadRecords: () => Effect.succeed(records),
           dispatch: (command) =>
             Effect.sync(() => {
               commands.push(command);
@@ -238,6 +246,7 @@ it.effect(
           },
         });
         const execution = {
+          cost: { usd: null, coverage: "unavailable" },
           ref: { environmentId: "env", threadId, runId },
           status: "completed",
           startedAt: iso,
@@ -288,6 +297,9 @@ it.effect(
         : Response.json({ status: 202, body: '{"saved":true}' });
     };
     const dependencies = Layer.mergeAll(
+      Layer.mock(Usage.UsageService)({
+        readRunCost: () => Effect.succeed({ usd: null, coverage: "unavailable" }),
+      }),
       Layer.mock(ExecutionRequests.ExecutionRequestService)({}),
       Layer.mock(Environment.ServerEnvironmentIdentity)({
         getEnvironmentId: Effect.succeed(EnvironmentId.make("trusted-environment")),

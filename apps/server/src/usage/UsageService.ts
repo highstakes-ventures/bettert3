@@ -1,4 +1,5 @@
 import {
+  type ExecutionCost,
   type ProviderInstanceConfig,
   ProviderInstanceId,
   USAGE_CONTRACT_VERSION,
@@ -41,6 +42,7 @@ import type {
 } from "@t3tools/provider-core/server/usage";
 import { resolveModelAliases, UsageAggregator } from "./usageAggregation.ts";
 import { createOverrideRateTable, parseRateTable, type RateTable } from "./usagePricing.ts";
+import { priceRunUsage, type RunUsage } from "./runUsage.ts";
 import {
   listTranscriptFiles,
   readDirectoryVolumeId,
@@ -144,6 +146,7 @@ export class UsageService extends Context.Service<
   {
     readonly readSummary: (input: UsageSummaryInput) => Effect.Effect<UsageSummary, UsageReadError>;
     readonly refreshRates: Effect.Effect<UsagePricing>;
+    readonly readRunCost: (input: RunUsage) => Effect.Effect<ExecutionCost, UsageReadError>;
   }
 >()("t3/usage/UsageService") {}
 
@@ -927,7 +930,23 @@ export const make = Effect.gen(function* () {
     return yield* Deferred.await(deferred);
   });
 
-  return { readSummary, refreshRates, awaitPersisted } as const;
+  const readRunCost = Effect.fn("UsageService.readRunCost")(function* (input: RunUsage) {
+    if (input.samples.length === 0)
+      return {
+        usd: input.complete ? 0 : null,
+        coverage: input.complete ? "complete" : "unavailable",
+      } satisfies ExecutionCost;
+    const settings = yield* readSettings;
+    yield* ensureRates(false);
+    return priceRunUsage(
+      input,
+      rates,
+      createOverrideRateTable(settings.usagePriceOverrides),
+      resolveModelAliases(settings.usageModelAliases),
+    );
+  });
+
+  return { readSummary, readRunCost, refreshRates, awaitPersisted } as const;
 });
 
 export const layer = Layer.effect(UsageService, make);

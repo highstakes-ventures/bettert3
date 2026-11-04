@@ -22,6 +22,9 @@ import * as CommandReceipts from "./CommandReceiptStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as UsageService from "../usage/UsageService.ts";
+import type { RunUsage } from "../usage/runUsage.ts";
+import type { ExecutionCost, OrchestrationV2Run, NodeId } from "@t3tools/contracts";
 
 export class ExecutionOperationError extends Schema.TaggedError<ExecutionOperationError>()(
   "ExecutionOperationError",
@@ -76,6 +79,129 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const providers = yield* ProviderRegistry.ProviderRegistry;
   const environment = yield* ServerEnvironment.ServerEnvironmentIdentity;
+  const usage = yield* UsageService.UsageService;
+  const readCost = Effect.fn("executionRequest.readCost")(function* (
+    threadId: ThreadId,
+    run: OrchestrationV2Run,
+  ) {
+    const samples: RunUsage["samples"][number][] = [];
+    const visited = new Set<string>();
+    let complete = true;
+    const collect = Effect.fn("executionRequest.collectUsage")(function* (
+      id: ThreadId,
+      runIds: ReadonlySet<RunId>,
+      delegatedTaskId?: NodeId,
+    ): Effect.fn.Return<void, ExecutionOperationError> {
+      if (visited.has(id)) {
+        complete = false;
+        return;
+      }
+      visited.add(id);
+      const ids = delegatedTaskId
+        ? new Set(
+            (yield* threads
+              .getThreadRecords(id, ["runs"])
+              .pipe(
+                Effect.mapError(
+                  (cause) => new ExecutionOperationError({ operation: "read", cause }),
+                ),
+              )).runs
+              .filter((candidate) => candidate.delegatedTaskId === delegatedTaskId)
+              .map((candidate) => candidate.id),
+          )
+        : runIds;
+      const records = yield* threads
+        .getThreadRecords(id, ["runs", "attempts", "providerTurns", "subagents", "nodes"], {
+          runIds: [...ids],
+        })
+        .pipe(
+          Effect.mapError((cause) => new ExecutionOperationError({ operation: "read", cause })),
+        );
+      const selectedRuns = records.runs.filter((candidate) =>
+        delegatedTaskId ? candidate.delegatedTaskId === delegatedTaskId : runIds.has(candidate.id),
+      );
+      if (!selectedRuns.length) {
+        complete = false;
+        return;
+      }
+      const selectedIds = new Set(selectedRuns.map((candidate) => candidate.id));
+      const attempts = records.attempts.filter((attempt) => selectedIds.has(attempt.runId));
+      const attemptById = new Map(attempts.map((attempt) => [attempt.id, attempt]));
+      const nodes = new Map(
+        records.nodes
+          .filter((node) => node.runId && selectedIds.has(node.runId))
+          .map((node) => [node.id, node]),
+      );
+      const subagents = records.subagents.filter(
+        (child) => child.runId && selectedIds.has(child.runId),
+      );
+      const nativeThreads = new Map(
+        subagents
+          .filter((child) => child.origin === "provider_native" && child.providerThreadId)
+          .map((child) => [child.providerThreadId!, child]),
+      );
+      const turns = records.providerTurns.filter(
+        (turn) =>
+          (turn.runAttemptId && attemptById.has(turn.runAttemptId)) || nodes.has(turn.nodeId),
+      );
+      for (const candidate of selectedRuns) {
+        if (
+          !["completed", "interrupted", "failed", "cancelled", "rolled_back"].includes(
+            candidate.status,
+          )
+        )
+          complete = false;
+        if (
+          !attempts.some((attempt) => attempt.runId === candidate.id) &&
+          candidate.startedAt !== null
+        )
+          complete = false;
+      }
+      for (const attempt of attempts) {
+        if (!turns.some((turn) => turn.runAttemptId === attempt.id)) complete = false;
+      }
+      for (const turn of turns) {
+        const attempt = turn.runAttemptId ? attemptById.get(turn.runAttemptId) : undefined;
+        const node = nodes.get(turn.nodeId);
+        const owner = selectedRuns.find(
+          (candidate) => candidate.id === (attempt?.runId ?? node?.runId),
+        );
+        const native = nativeThreads.get(turn.providerThreadId);
+        const selection = native
+          ? (native.modelSelection ??
+            (native.model
+              ? { instanceId: native.providerInstanceId, model: native.model }
+              : undefined))
+          : owner?.modelSelection;
+        if (!selection) {
+          complete = false;
+          continue;
+        }
+        samples.push({ id: turn.id, selection, usage: turn.turnTokenUsage });
+        if (turn.status === "running" || turn.status === "pending") complete = false;
+        if (turn.turnTokenUsage?.hasSubagents && !subagents.length) complete = false;
+      }
+      for (const child of subagents) {
+        if (child.origin === "app_owned" && child.childThreadId && !child.remoteChild) {
+          yield* collect(child.childThreadId, new Set(), child.id).pipe(
+            Effect.catchTags({
+              ExecutionOperationError: () =>
+                Effect.sync(() => {
+                  complete = false;
+                }),
+            }),
+          );
+        } else if (child.origin === "provider_native") {
+          if (!turns.some((turn) => turn.providerThreadId === child.providerThreadId))
+            complete = false;
+        } else complete = false;
+        if (!["completed", "failed", "cancelled", "interrupted"].includes(child.status))
+          complete = false;
+      }
+    });
+    yield* collect(threadId, new Set([run.id]));
+    return yield* usage.readRunCost({ samples, complete });
+  });
   const inspect = Effect.fn("executionRequest.inspect")(function* (
     commandId: CommandId,
     query: ExecutionLookup,
@@ -127,9 +253,14 @@ const make = Effect.gen(function* () {
         return yield* new ExecutionConflictError({ commandId });
     }
     if (!message || !run) return null;
+    const cost = yield* readCost(query.threadId, run).pipe(
+      Effect.timeout(2_000),
+      Effect.orElseSucceed(() => ({ usd: null, coverage: "unavailable" }) satisfies ExecutionCost),
+    );
     return {
       message,
       execution: {
+        cost,
         ref: {
           environmentId: yield* environment.getEnvironmentId,
           threadId: query.threadId,

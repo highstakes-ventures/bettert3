@@ -48,7 +48,13 @@ export const ExecutionReference = Schema.Struct({
   threadId: ThreadId,
   runId: RunId,
 });
+export const ExecutionCost = Schema.Struct({
+  usd: Schema.NullOr(Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0))),
+  coverage: Schema.Literals(["complete", "partial", "unavailable"]),
+});
+export type ExecutionCost = typeof ExecutionCost.Type;
 export const ExecutionResult = Schema.Struct({
+  cost: Schema.optional(ExecutionCost),
   ref: ExecutionReference,
   status: OrchestrationV2RunStatus,
   startedAt: Schema.NullOr(IsoDateTime),
