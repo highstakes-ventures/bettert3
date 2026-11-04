@@ -1,0 +1,31 @@
+{
+  "name": "@highstakes/marketing",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./contracts": "./src/contracts.ts",
+    "./server": "./src/store.ts",
+    "./linkedin": "./src/linkedin.ts",
+    "./releases": "./src/releases.ts",
+    "./studio": "./src/Studio.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0"
+  }
+}

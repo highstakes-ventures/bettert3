@@ -1,3 +1,4 @@
+import { ReleaseStudioPanel } from "../marketing/ReleaseStudioPanel";
 import { WorkflowTicketPanel } from "../workflows/WorkflowTicketPanel";
 import { ProjectId as WorkflowProjectId } from "@t3tools/contracts";
 import type {
@@ -84,6 +85,14 @@ export function RightPanelSurfaceContent(props: {
   const { surface, threadRef, visible } = props;
   if (surface === null) return null;
   switch (surface.kind) {
+    case "marketing":
+      return (
+        <ReleaseStudioPanel
+          key={scopedThreadKey(threadRef)}
+          environmentId={props.environmentId}
+          threadId={threadRef.threadId}
+        />
+      );
     case "ticket":
       return (
         <WorkflowTicketPanel

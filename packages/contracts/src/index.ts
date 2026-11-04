@@ -80,3 +80,5 @@ export * from "./pai.ts";
 export * from "./executionRequest.ts";
 
 export * from "./todo.ts";
+
+export * from "./marketing.ts";

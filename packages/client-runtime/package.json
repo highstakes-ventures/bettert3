@@ -538,6 +538,10 @@
     "./state/todo": {
       "types": "./src/state/todo.ts",
       "default": "./src/state/todo.ts"
+    },
+    "./state/marketing": {
+      "types": "./src/state/marketing.ts",
+      "default": "./src/state/marketing.ts"
     }
   },
   "scripts": {

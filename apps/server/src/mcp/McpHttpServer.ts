@@ -1,3 +1,5 @@
+import { MarketingToolkit } from "./toolkits/marketing/tools.ts";
+import * as MarketingHandlers from "./toolkits/marketing/handlers.ts";
 import { PaiToolkit } from "./toolkits/pai/tools.ts";
 import * as PaiHandlers from "./toolkits/pai/handlers.ts";
 import { MationToolkit } from "./toolkits/mation/tools.ts";
@@ -1160,6 +1162,7 @@ export const layerTools = Layer.mergeAll(
   layerOrchestratorToolkit,
   layerThreadToolkit,
   toolkitRegistration(MationToolkit, MationHandlers.layer),
+  toolkitRegistration(MarketingToolkit, MarketingHandlers.layer),
   toolkitRegistration(PaiToolkit, PaiHandlers.layer),
   toolkitRegistration(WorkflowToolkit, WorkflowHandlers.layer),
   layerAttachmentToolkit,

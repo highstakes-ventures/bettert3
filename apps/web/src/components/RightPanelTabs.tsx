@@ -42,6 +42,7 @@ import {
   ChevronRight,
   FileDiff,
   Files,
+  PanelsTopLeft,
   Globe2,
   MessagesSquare,
   Plus,
@@ -141,6 +142,8 @@ export interface RightPanelTabsProps {
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddDevice: () => void;
+  onAddMarketing?: () => void;
+  marketingAvailable?: boolean;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
   browserAvailable: boolean;
@@ -322,6 +325,8 @@ function RightPanelEmptyState(props: {
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddDevice: () => void;
+  onAddMarketing?: () => void;
+  marketingAvailable?: boolean;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
   browserAvailable: boolean;
@@ -393,6 +398,14 @@ function RightPanelEmptyState(props: {
       available: props.deviceAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
       onClick: props.onAddDevice,
+    },
+    {
+      label: "Release Studio",
+      icon: PanelsTopLeft,
+      shortcut: "R",
+      available: props.marketingAvailable ?? false,
+      disabledReason: "Open a release conversation to use Studio.",
+      onClick: props.onAddMarketing ?? (() => undefined),
     },
     ...(props.onAddSideChat
       ? [
@@ -575,6 +588,8 @@ function surfaceTitle(
   switch (surface.kind) {
     case "diff":
       return "Diff";
+    case "marketing":
+      return "Release Studio";
     case "ticket":
       return "Refinement";
     case "files":
@@ -659,6 +674,8 @@ function SurfaceIcon({
   switch (surface.kind) {
     case "preview":
       return <PreviewFavicon capturedUrl={previewCapturedUrl} url={previewUrl} />;
+    case "marketing":
+      return <PanelsTopLeft className="size-3 shrink-0" />;
     case "ticket":
       return <Files className="size-3 shrink-0" />;
     case "diff":
@@ -1151,6 +1168,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       disabledReason: SURFACE_DISABLED_REASONS.device,
       onClick: props.onAddDevice,
     },
+    {
+      label: "Release Studio",
+      icon: PanelsTopLeft,
+      shortcut: "R",
+      available: props.marketingAvailable ?? false,
+      disabledReason: "Open a release conversation to use Studio.",
+      onClick: props.onAddMarketing ?? (() => undefined),
+    },
     ...(props.onAddSideChat
       ? [
           {
@@ -1537,6 +1562,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
             onAddDevice={props.onAddDevice}
+            onAddMarketing={props.onAddMarketing ?? (() => undefined)}
+            marketingAvailable={props.marketingAvailable ?? false}
             onAddSideChat={props.onAddSideChat}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}

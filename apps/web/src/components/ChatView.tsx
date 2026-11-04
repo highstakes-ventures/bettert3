@@ -1,3 +1,4 @@
+import { ReleaseStudioAutoOpen } from "./marketing/ReleaseStudioPanel";
 import { createModelSelection } from "@t3tools/shared/model";
 import { Atom } from "effect/reactivity";
 import type { OrchestrationV2ShellSnapshot } from "@t3tools/contracts";
@@ -4093,6 +4094,8 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequest={addPullRequestSurfaceStable}
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
+          onAddMarketing={() => useRightPanelStore.getState().open(activeThreadRef, "marketing")}
+          marketingAvailable={isServerThread && activeProject !== null}
           onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
@@ -4120,6 +4123,12 @@ export default function ChatView(props: ChatViewProps) {
       cwd={activeWorkspaceRoot}
       checkpoints={serverProjection?.checkpoints}
     >
+      {activeThreadRef && (
+        <ReleaseStudioAutoOpen
+          environmentId={activeThread.environmentId}
+          threadId={activeThreadRef.threadId}
+        />
+      )}
       {content}
     </FileMetadataThreadProvider>
   );

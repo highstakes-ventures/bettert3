@@ -1,3 +1,4 @@
+import * as Marketing from "../marketing/MarketingService.ts";
 import * as WorkflowRuntimePolicy from "../workflows/WorkflowRuntimePolicy.ts";
 import * as TodoService from "../todo/TodoService.ts";
 import * as ExecutionRequestService from "./ExecutionRequestService.ts";
@@ -437,6 +438,11 @@ export const layerProduction = Layer.mergeAll(
   layerThreadLifecycleProvided,
   layerExecutionRequestsProvided,
   layerMationProvided,
+  Marketing.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(layerThreadManagementProvided, layerThreadLaunchProvided, layerProjectService),
+    ),
+  ),
   TodoService.layer,
   PaiService.layer.pipe(Layer.provide(layerMationProvided)),
   layerScheduledTaskProvided,

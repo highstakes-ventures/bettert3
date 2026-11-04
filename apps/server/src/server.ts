@@ -1,3 +1,4 @@
+import * as MarketingHttp from "./marketing/http.ts";
 import * as ExecutionRequestsHttp from "./orchestration-v2/executionRequestsHttp.ts";
 import * as PaiHttp from "./pai/http.ts";
 import * as CodexCloudChats from "./provider/CodexCloudChats.ts";
@@ -732,6 +733,7 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(PullRequestHttp.layer),
       Layer.provide(ProjectHttp.layer),
       Layer.provide(MationHttp.layer),
+      Layer.provide(MarketingHttp.layer),
       Layer.provide(TodoHttp.layer),
       Layer.provide(PaiHttp.layer),
       Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),

@@ -1,3 +1,4 @@
+import { MarketingService } from "../marketing/MarketingService.ts";
 import { PaiService } from "../pai/PaiService.ts";
 import { AutomationExecutionService } from "../mation/AutomationExecutionService.ts";
 import { WorkflowService } from "../workflows/WorkflowService.ts";
@@ -49,6 +50,7 @@ import budget from "./agentContextBudget.json" with { type: "json" };
 
 // Registration only stores tool definitions, so the handlers' services are never called.
 const toolHandlerServices = Layer.mergeAll(
+  Layer.mock(MarketingService)({}),
   Layer.mock(PaiService)({}),
   Layer.mock(AutomationExecutionService)({}),
   Layer.mock(WorkflowService)({}),

@@ -2,6 +2,7 @@
 @layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
 @source "../../../packages/workflows/src";
+@source "../../../packages/marketing/src";
 
 @custom-variant dark (&:is(.dark, .dark *));
 @custom-variant light (&:not(.dark, .dark *));

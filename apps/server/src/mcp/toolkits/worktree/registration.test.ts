@@ -1,3 +1,4 @@
+import * as Marketing from "../../../marketing/MarketingService.ts";
 import * as DocumentText from "../../../provider/DocumentText.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
 import * as PeerLinkRequests from "../../../peer/PeerLinkRequests.ts";
@@ -47,6 +48,7 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(Marketing.MarketingService)({}),
   Layer.mock(DocumentText.DocumentText)({}),
   Layer.mock(PeerForwarding.PeerForwarding)({}),
   Layer.mock(PeerLinkRequests.PeerLinkRequests)({}),
@@ -166,6 +168,8 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       // than replacing them.
       expect(toolNames).toContain("preview_status");
       expect(toolNames).toContain("delegate_task");
+      expect(toolNames).toContain("marketing_studio");
+      expect(toolNames).toContain("marketing_update");
       expect(toolNames).toContain("t3_workflow_read");
       expect(toolNames).toContain("refresh_linear");
       expect(toolNames).toContain("t3_workflow_search");

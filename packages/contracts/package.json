@@ -25,6 +25,7 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
+    "@highstakes/marketing": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

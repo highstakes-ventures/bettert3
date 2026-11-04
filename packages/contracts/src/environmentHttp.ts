@@ -1,3 +1,4 @@
+import { MarketingStudioRequest, MarketingStudioResponse } from "./marketing.ts";
 import { TodoFrontendPage, TodoFrontendRequest, TodoFrontendResponse } from "./todo.ts";
 import {
   ExecutionCapabilities,
@@ -961,6 +962,24 @@ class EnvironmentPaiHttpApi extends HttpApiGroup.make("pai")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+class EnvironmentMarketingHttpApi extends HttpApiGroup.make("marketing")
+  .add(
+    HttpApiEndpoint.post("studio", "/api/marketing/studio", {
+      headers: OptionalBearerHeaders,
+      payload: MarketingStudioRequest,
+      success: MarketingStudioResponse,
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("collect", "/api/marketing/releases/collect", {
+      headers: OptionalBearerHeaders,
+      payload: MationExecutionInput,
+      success: Schema.Struct({ imported: Schema.Number, checkedAt: Schema.String }),
+      error: EnvironmentOrchestrationThreadHistoryErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
@@ -971,5 +990,6 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentConnectHttpApi)
   .add(EnvironmentWebhooksHttpApi)
   .add(EnvironmentMationHttpApi)
+  .add(EnvironmentMarketingHttpApi)
   .add(EnvironmentTodoHttpApi)
   .add(EnvironmentPaiHttpApi) {}
