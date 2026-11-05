@@ -13,7 +13,7 @@ import {
   ProjectId,
   ThreadId,
   RunId,
-  type MationExecutionInput,
+  type MarketingReleaseCollectionRequest,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
@@ -70,7 +70,7 @@ export class MarketingService extends Context.Service<
       command: typeof AgentCommand.Type,
     ) => Effect.Effect<Draft, MarketingFailure>;
     readonly collect: (
-      input: MationExecutionInput,
+      input: MarketingReleaseCollectionRequest,
     ) => Effect.Effect<{ imported: number; checkedAt: string }, MarketingFailure>;
   }
 >()("t3/marketing/MarketingService") {}
@@ -293,7 +293,9 @@ const make = Effect.gen(function* () {
     }
     return draft;
   });
-  const collect = Effect.fn("marketing.collect")(function* (input: MationExecutionInput) {
+  const collect = Effect.fn("marketing.collect")(function* (
+    input: MarketingReleaseCollectionRequest,
+  ) {
     const project = yield* projects.getById(input.target.projectId).pipe(
       Effect.mapError(failure),
       Effect.flatMap((p) =>
@@ -319,7 +321,7 @@ const make = Effect.gen(function* () {
               : Effect.fail(new MarketingFailure({ reason: "unavailable" })),
           ),
         );
-    const verified = yield* verifiedReleases(read, store.releaseIds()).pipe(
+    const verified = yield* verifiedReleases(read, store.releaseIds(), input.releaseId).pipe(
       Effect.mapError(failure),
     );
     let imported = 0;
@@ -327,7 +329,11 @@ const make = Effect.gen(function* () {
       ...verified,
       ...store
         .pending()
-        .filter((d) => !verified.some((r) => r.id === d.release.id))
+        .filter(
+          (d) =>
+            (input.releaseId === undefined || d.release.id === input.releaseId) &&
+            !verified.some((r) => r.id === d.release.id),
+        )
         .map((d) => d.release),
     ];
     for (const release of candidates) {

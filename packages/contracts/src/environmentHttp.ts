@@ -1,4 +1,8 @@
-import { MarketingStudioRequest, MarketingStudioResponse } from "./marketing.ts";
+import {
+  MarketingStudioRequest,
+  MarketingStudioResponse,
+  MarketingReleaseCollectionRequest,
+} from "./marketing.ts";
 import { TodoFrontendPage, TodoFrontendRequest, TodoFrontendResponse } from "./todo.ts";
 import {
   ExecutionCapabilities,
@@ -974,7 +978,7 @@ class EnvironmentMarketingHttpApi extends HttpApiGroup.make("marketing")
   .add(
     HttpApiEndpoint.post("collect", "/api/marketing/releases/collect", {
       headers: OptionalBearerHeaders,
-      payload: MationExecutionInput,
+      payload: MarketingReleaseCollectionRequest,
       success: Schema.Struct({ imported: Schema.Number, checkedAt: Schema.String }),
       error: EnvironmentOrchestrationThreadHistoryErrors,
     }).middleware(EnvironmentAuthenticatedAuth),

@@ -102,5 +102,6 @@ it.effect(
       };
       expect((yield* verifiedReleases(read, new Set())).map((r) => r.id)).toEqual(["42", "43"]);
       expect((yield* verifiedReleases(read, new Set(["43"]))).map((r) => r.id)).toEqual(["42"]);
+      expect((yield* verifiedReleases(read, new Set(), "43")).map((r) => r.id)).toEqual(["43"]);
     }),
 );

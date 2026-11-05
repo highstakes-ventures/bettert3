@@ -36,6 +36,7 @@ export type GitHubReader<E, R> = (path: string) => Effect.Effect<unknown, E, R>;
 export const verifiedReleases = Effect.fn("marketing.verifiedReleases")(function* <E, R>(
   read: GitHubReader<E, R>,
   known: ReadonlySet<string>,
+  releaseId?: string,
 ) {
   const releases: Array<typeof GitHubRelease.Type> = [];
   for (let page = 1; ; page++) {
@@ -48,7 +49,9 @@ export const verifiedReleases = Effect.fn("marketing.verifiedReleases")(function
       (r) => !r.draft && !r.prerelease && r.published_at && /^v\d+\.\d+\.\d+$/.test(r.tag_name),
     )
     .sort((a, b) => Date.parse(a.published_at!) - Date.parse(b.published_at!));
-  const unseen = candidates.filter((r) => !known.has(String(r.id)));
+  const unseen = candidates.filter(
+    (r) => !known.has(String(r.id)) && (releaseId === undefined || String(r.id) === releaseId),
+  );
   const verified: Release[] = [];
   for (const release of unseen.toReversed()) {
     const runId =
