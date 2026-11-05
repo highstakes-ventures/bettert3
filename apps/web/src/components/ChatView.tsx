@@ -4095,7 +4095,9 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
           onAddMarketing={() => useRightPanelStore.getState().open(activeThreadRef, "marketing")}
-          marketingAvailable={isServerThread && activeProject !== null}
+          marketingAvailable={
+            isServerThread && activeThreadRef.threadId.startsWith("marketing-release:")
+          }
           onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}

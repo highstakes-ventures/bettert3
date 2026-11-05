@@ -57,6 +57,7 @@ export const Draft = Schema.Struct({
   highlights: Schema.NullOr(Highlights),
   selectionApproved: Schema.Boolean,
   company: Post,
+  xText: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(3000))),
   personal: Schema.Struct({ ...Post.fields, enabled: Schema.Boolean }),
   media: Schema.Array(Media).check(Schema.isMaxLength(1)),
   approvedRevision: Schema.NullOr(Revision),
@@ -79,6 +80,7 @@ export const AgentCommand = Schema.Union([
     expectedRevision: Revision,
     companyText: Text,
     personalText: Schema.String.check(Schema.isMaxLength(3000)),
+    xText: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(3000))),
   }),
   Schema.Struct({
     type: Schema.Literal("set_personal"),

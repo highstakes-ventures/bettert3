@@ -111,7 +111,7 @@ describe("one release Studio", () => {
   it("removes final approval when the text or selected personal post changes", async () =>
     fixture(async (s) => {
       const d = await ready(s);
-      const edited = await s.save("chat", d.revision, "Revised text", d.personal.text);
+      const edited = await s.save("chat", d.revision, "Revised text", d.personal.text, "X preview");
       expect(edited.approvedRevision).toBeNull();
       await expect(s.publish("chat", edited.revision, publisher([]))).rejects.toThrow("approval");
       const approved = await s.human("chat", {
@@ -271,4 +271,36 @@ it("does not let the creation result fabricate approval", async () =>
       "approval",
     );
     expect(calls).toEqual([]);
+  }));
+
+it("persists independent X preview copy without losing it to legacy saves or older state", async () =>
+  fixture(async (store, dir) => {
+    let d = (await store.create(release, "p", "chat", authors)).draft;
+    d = await store.highlights("chat", d.revision, {
+      title: "Release",
+      summary: "Summary",
+      items: ["Live payments"],
+    });
+    d = await store.save("chat", d.revision, "LinkedIn copy", "", "Separate X copy");
+    d = await store.save("chat", d.revision, "Updated LinkedIn copy", "");
+    expect(d.xText).toBe("Separate X copy");
+    const reopened = await MarketingStore.open(dir);
+    expect(reopened.read("chat")?.xText).toBe("Separate X copy");
+    expect(reopened.read("chat")?.company.text).toBe("Updated LinkedIn copy");
+    await expect(reopened.save("chat", d.revision - 1, "Stale", "", "Stale X")).rejects.toThrow(
+      "changed",
+    );
+    d = await reopened.highlights("chat", d.revision, {
+      title: "Different story",
+      summary: "Changed",
+      items: ["Refunds"],
+    });
+    expect(d.xText).toBe("");
+    const file = NodePath.join(dir, "drafts.json");
+    const legacy = JSON.parse(await NodeFSP.readFile(file, "utf8"));
+    delete legacy.drafts[0].xText;
+    await NodeFSP.writeFile(file, JSON.stringify(legacy));
+    expect((await MarketingStore.open(dir)).read("chat")?.highlights?.title).toBe(
+      "Different story",
+    );
   }));

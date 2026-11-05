@@ -144,6 +144,7 @@ export class MarketingStore {
         highlights: null,
         selectionApproved: false,
         company: { text: "", author: authors.company },
+        xText: "",
         personal: { text: "", author: authors.personal, enabled: false },
         media: [],
         approvedRevision: null,
@@ -176,13 +177,20 @@ export class MarketingStore {
           selectionApproved: false,
           stage: "selecting",
           company: { ...d.company, text: "" },
+          xText: "",
           personal: { ...d.personal, text: "", enabled: false },
           media: [],
         }),
       );
     });
   }
-  async save(threadId: string, revision: number, companyText: string, personalText: string) {
+  async save(
+    threadId: string,
+    revision: number,
+    companyText: string,
+    personalText: string,
+    xText?: string,
+  ) {
     return this.exclusive(async () => {
       const d = this.require(threadId, revision);
       this.editable(d);
@@ -192,6 +200,7 @@ export class MarketingStore {
         this.changed(d, {
           stage: d.selectionApproved ? "review" : "selecting",
           company: { ...d.company, text: companyText },
+          ...(xText === undefined ? {} : { xText }),
           personal: { ...d.personal, text: personalText },
         }),
       );

@@ -9,19 +9,22 @@
     "./server": "./src/store.ts",
     "./linkedin": "./src/linkedin.ts",
     "./releases": "./src/releases.ts",
-    "./studio": "./src/Studio.tsx"
+    "./studio": "./src/Studio.tsx",
+    "./preview": "./src/PostPreview.tsx"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vp test run"
   },
   "dependencies": {
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "twitter-text": "3.1.0"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
+    "@types/twitter-text": "3.1.10",
     "react": "catalog:",
     "vite-plus": "catalog:"
   },

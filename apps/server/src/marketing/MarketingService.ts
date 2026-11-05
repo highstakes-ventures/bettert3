@@ -189,6 +189,7 @@ const make = Effect.gen(function* () {
             command.expectedRevision,
             command.companyText,
             command.personalText,
+            command.xText,
           ),
         );
         break;

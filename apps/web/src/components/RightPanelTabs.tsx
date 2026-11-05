@@ -399,14 +399,18 @@ function RightPanelEmptyState(props: {
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
       onClick: props.onAddDevice,
     },
-    {
-      label: "Release Studio",
-      icon: PanelsTopLeft,
-      shortcut: "R",
-      available: props.marketingAvailable ?? false,
-      disabledReason: "Open a release conversation to use Studio.",
-      onClick: props.onAddMarketing ?? (() => undefined),
-    },
+    ...(props.marketingAvailable && props.onAddMarketing
+      ? [
+          {
+            label: "Release Studio",
+            disabledReason: "",
+            icon: PanelsTopLeft,
+            shortcut: "R",
+            available: true,
+            onClick: props.onAddMarketing,
+          },
+        ]
+      : []),
     ...(props.onAddSideChat
       ? [
           {
@@ -1168,14 +1172,18 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       disabledReason: SURFACE_DISABLED_REASONS.device,
       onClick: props.onAddDevice,
     },
-    {
-      label: "Release Studio",
-      icon: PanelsTopLeft,
-      shortcut: "R",
-      available: props.marketingAvailable ?? false,
-      disabledReason: "Open a release conversation to use Studio.",
-      onClick: props.onAddMarketing ?? (() => undefined),
-    },
+    ...(props.marketingAvailable && props.onAddMarketing
+      ? [
+          {
+            label: "Release Studio",
+            disabledReason: "",
+            icon: PanelsTopLeft,
+            shortcut: "R",
+            available: true,
+            onClick: props.onAddMarketing,
+          },
+        ]
+      : []),
     ...(props.onAddSideChat
       ? [
           {

@@ -37,6 +37,7 @@ it("hides the previous environment's review while the next draft is loading", as
       },
       selectionApproved: false,
       company: { text: "Preview copy before approval", author: "" },
+      xText: "Hello 👨‍👩‍👧‍👦 https://example.com/long/path",
       personal: { text: "", author: "", enabled: false },
       media: [
         {
@@ -90,8 +91,17 @@ it("hides the previous environment's review while the next draft is loading", as
   await expect.element(screen.getByText("Preview copy before approval")).toBeVisible();
   await expect.element(screen.getByRole("img", { name: "Announcement preview" })).toBeVisible();
   await expect
-    .element(screen.getByRole("button", { name: "Approve selected posts and publish" }))
+    .element(screen.getByRole("button", { name: "Approve LinkedIn posts and publish" }))
     .not.toBeInTheDocument();
+  await screen.getByRole("button", { name: "X · Preview only", exact: true }).click();
+  await expect.element(screen.getByText("Hello 👨‍👩‍👧‍👦 https://example.com/long/path")).toBeVisible();
+  await expect.element(screen.getByText("32 / 280 weighted characters")).toBeVisible();
+  await expect.element(screen.getByText("Preview copy before approval")).not.toBeInTheDocument();
+  await screen.getByRole("button", { name: "Personal repost · Not selected", exact: true }).click();
+  await expect
+    .element(screen.getByRole("article", { name: "LinkedIn personal repost preview" }))
+    .toBeVisible();
+  await expect.element(screen.getByText("Preview copy before approval")).toBeVisible();
   await screen.rerender(view("second"));
   await expect.element(screen.getByText("First environment's selection")).not.toBeInTheDocument();
   await expect
@@ -129,4 +139,24 @@ it("opens Studio on entering a release chat after earlier panel actions and lets
   );
   expect(panel().isOpen).toBe(false);
   await screen.unmount();
+});
+
+it("expands the rendered LinkedIn fold without changing saved copy or approval", async () => {
+  state.read.mockReset();
+  const text = "A release headline.\n\n" + "A source-checked product change. ".repeat(24);
+  const { SocialPostPreview } = await import("@highstakes/marketing/preview");
+  await using screen = await render(
+    <div style={{ width: 360 }}>
+      <SocialPostPreview platform="linkedin" text={text} media={[]} dark={false} />
+    </div>,
+  );
+  await expect.element(screen.getByRole("button", { name: "…see more" })).toBeVisible();
+  await screen.getByRole("button", { name: "…see more" }).click();
+  await expect
+    .element(screen.getByRole("button", { name: "Show less" }))
+    .toHaveAttribute("aria-expanded", "true");
+  await screen.getByRole("button", { name: "Show less" }).click();
+  await expect
+    .element(screen.getByRole("button", { name: "…see more" }))
+    .toHaveAttribute("aria-expanded", "false");
 });

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { HumanCommand, StudioResponse } from "./contracts.ts";
+import { SocialPostPreview, PreviewToggle } from "./PostPreview.tsx";
 
 /** The host supplies transport and controls; this package owns the complete release-review presentation. */
 export function ReleaseStudio({
@@ -16,6 +17,9 @@ export function ReleaseStudio({
   button: (label: string, action: () => void, disabled: boolean) => ReactNode;
 }) {
   const [feedback, setFeedback] = useState("");
+  const [destination, setDestination] = useState<"company" | "personal" | "x">("company");
+  const [mobile, setMobile] = useState(false);
+  const [dark, setDark] = useState(false);
   const d = value.draft;
   if (!d)
     return (
@@ -47,84 +51,128 @@ export function ReleaseStudio({
           {d.release.tag}
         </a>
       </header>
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
-        <div className="space-y-2">
-          <h2 className="text-xl font-semibold leading-snug tracking-tight">
-            {d.highlights?.title ?? "Choosing the release highlights"}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {d.highlights?.summary ??
-              "The agent is reviewing the release. Its recommended combination will appear here and in the conversation."}
-          </p>
+      <div className="scrollbar-gutter-both min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
+        <nav aria-label="Post previews" className="flex flex-wrap gap-1 border-b pb-3">
+          <PreviewToggle
+            selected={destination === "company"}
+            onClick={() => setDestination("company")}
+          >
+            LinkedIn · recuut
+          </PreviewToggle>
+          <PreviewToggle
+            selected={destination === "personal"}
+            onClick={() => setDestination("personal")}
+          >
+            Personal repost{d.personal.enabled ? "" : " · Not selected"}
+          </PreviewToggle>
+          <PreviewToggle selected={destination === "x"} onClick={() => setDestination("x")}>
+            X · Preview only
+          </PreviewToggle>
+        </nav>
+        <div
+          className="flex flex-wrap items-center justify-between gap-2"
+          aria-label="Preview display"
+        >
+          <div className="flex gap-1">
+            <PreviewToggle selected={!mobile} onClick={() => setMobile(false)}>
+              Desktop
+            </PreviewToggle>
+            <PreviewToggle selected={mobile} onClick={() => setMobile(true)}>
+              Mobile
+            </PreviewToggle>
+          </div>
+          <div className="flex gap-1">
+            <PreviewToggle selected={!dark} onClick={() => setDark(false)}>
+              Light
+            </PreviewToggle>
+            <PreviewToggle selected={dark} onClick={() => setDark(true)}>
+              Dark
+            </PreviewToggle>
+          </div>
         </div>
-        {d.highlights && (
-          <section className="space-y-3">
-            <h3 className="text-sm font-medium">Selected highlights</h3>
-            <ul className="list-disc space-y-2 pl-5 text-sm">
-              {d.highlights.items.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </section>
+        <div className="mx-auto w-full min-w-0" style={{ maxWidth: mobile ? 360 : 552 }}>
+          <SocialPostPreview
+            key={destination}
+            platform={destination === "x" ? "x" : "linkedin"}
+            personal={destination === "personal"}
+            text={
+              destination === "personal"
+                ? d.personal.text
+                : destination === "x"
+                  ? (d.xText ?? "")
+                  : d.company.text
+            }
+            media={d.media}
+            dark={dark}
+            {...(destination === "personal"
+              ? { company: { text: d.company.text, media: d.media } }
+              : {})}
+          />
+        </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {destination === "x"
+            ? "X preview only. Standard post limits use X’s weighted character rules. X publishing is not connected."
+            : "Approximate feed preview. The collapsed cutoff can vary with the live platform and device."}
+          {destination === "personal"
+            ? " Your profile image is not connected. Only your supplied reaction is included."
+            : " The logo comes from recuut’s brand assets; the live account identity is not connected."}
+        </p>
+        {destination === "personal" && !d.personal.enabled && (
+          <p className="text-sm text-muted-foreground">
+            Personal repost is not selected. Give the agent your own reaction in chat to include it.
+          </p>
         )}
-        <>
-          <section aria-label="recuut company post" className="space-y-3 border-t pt-5">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-medium">recuut · LinkedIn company update</h3>
-              <span className="text-xs text-muted-foreground">Included</span>
-            </div>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">
-              {d.company.text || "The post draft will appear here as we prepare it."}
+        <details className="border-t pt-4">
+          <summary className="cursor-pointer text-sm font-medium">
+            Release brief and sources
+          </summary>
+          <div className="space-y-3 pt-3 text-sm">
+            <h2 className="font-semibold">
+              {d.highlights?.title ?? "Choosing the release highlights"}
+            </h2>
+            <p className="text-muted-foreground">
+              {d.highlights?.summary ??
+                "The release agent will fill this brief as you refine it together."}
             </p>
-            {d.media.map((m) => (
-              <figure key={m.id} className="space-y-2">
-                <img src={m.dataUrl} alt={m.alt} className="h-auto w-full rounded-lg" />
-                <figcaption className="text-xs text-muted-foreground">{m.alt}</figcaption>
-              </figure>
-            ))}
+            {d.highlights && (
+              <ul className="list-disc space-y-2 pl-5">
+                {d.highlights.items.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            )}
             {d.company.author && (
-              <p className="text-xs text-muted-foreground">Destination: {d.company.author}</p>
+              <p className="text-xs text-muted-foreground">
+                Company destination: {d.company.author}
+              </p>
             )}
-            {d.companyPublication.url && (
-              <a
-                href={d.companyPublication.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm text-primary underline"
-              >
-                Open company post
-              </a>
-            )}
-          </section>
-          <section aria-label="Personal repost" className="space-y-3 border-t pt-5">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-medium">Your personal repost</h3>
-              <span className="text-xs text-muted-foreground">
-                {d.personal.enabled ? "Included" : "Not selected"}
-              </span>
-            </div>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">
-              {d.personal.text ||
-                "Optional. Tell the agent your own reaction in the conversation to include a personal repost."}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Shares the company update after it is published.
-            </p>
             {d.personal.enabled && d.personal.author && (
-              <p className="text-xs text-muted-foreground">Destination: {d.personal.author}</p>
+              <p className="text-xs text-muted-foreground">
+                Personal destination: {d.personal.author}
+              </p>
             )}
-            {d.personalPublication.url && (
-              <a
-                href={d.personalPublication.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm text-primary underline"
-              >
-                Open personal repost
-              </a>
-            )}
-          </section>
-        </>
+          </div>
+        </details>
+        {d.companyPublication.url && (
+          <a
+            href={d.companyPublication.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm text-primary underline"
+          >
+            Open company post
+          </a>
+        )}
+        {d.personalPublication.url && (
+          <a
+            href={d.personalPublication.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm text-primary underline"
+          >
+            Open personal repost
+          </a>
+        )}
         {(error || d.error) && (
           <p role="alert" className="text-sm text-destructive">
             {error ?? d.error}
@@ -170,7 +218,7 @@ export function ReleaseStudio({
                       busy || !d.highlights,
                     )
                   : button(
-                      "Approve selected posts and publish",
+                      "Approve LinkedIn posts and publish",
                       () => act({ type: "approve_publication", expectedRevision: d.revision }),
                       busy ||
                         !d.company.text ||
