@@ -90,26 +90,39 @@ export function ReleaseStudio({
             </PreviewToggle>
           </div>
         </div>
-        <div className="mx-auto w-full min-w-0" style={{ maxWidth: mobile ? 360 : 552 }}>
-          <SocialPostPreview
-            key={destination}
-            platform={destination === "x" ? "x" : "linkedin"}
-            personal={destination === "personal"}
-            text={
-              destination === "personal"
-                ? d.personal.text
-                : destination === "x"
-                  ? (d.xText ?? "")
-                  : d.company.text
-            }
-            media={d.media}
-            dark={dark}
-            {...(destination === "personal"
-              ? { company: { text: d.company.text, media: d.media } }
-              : {})}
-          />
+        <div
+          className="overflow-x-auto pb-2"
+          role="region"
+          aria-label="Post preview at feed width"
+          tabIndex={0}
+        >
+          <div
+            className="mx-auto"
+            style={{ width: mobile ? 360 : destination === "x" ? 600 : 550 }}
+          >
+            <SocialPostPreview
+              key={destination}
+              platform={destination === "x" ? "x" : "linkedin"}
+              personal={destination === "personal"}
+              text={
+                destination === "personal"
+                  ? d.personal.text
+                  : destination === "x"
+                    ? (d.xText ?? "")
+                    : d.company.text
+              }
+              media={d.media}
+              dark={dark}
+              {...(destination === "personal"
+                ? { company: { text: d.company.text, media: d.media } }
+                : {})}
+            />
+          </div>
         </div>
         <p className="text-xs leading-relaxed text-muted-foreground">
+          {mobile
+            ? "360px mobile preview. "
+            : "Full-size desktop preview. Scroll sideways if needed. "}
           {destination === "x"
             ? "X preview only. Standard post limits use X’s weighted character rules. X publishing is not connected."
             : "Approximate feed preview. The collapsed cutoff can vary with the live platform and device."}
