@@ -186,14 +186,11 @@ export class MarketingStore {
     return this.exclusive(async () => {
       const d = this.require(threadId, revision);
       this.editable(d);
-      if (!d.selectionApproved)
-        throw new MarketingError(
-          "forbidden",
-          "Approve the selected highlights before preparing the post.",
-        );
+      if (!d.highlights)
+        throw new MarketingError("invalid", "Choose release highlights before preparing the post.");
       return this.replace(
         this.changed(d, {
-          stage: "review",
+          stage: d.selectionApproved ? "review" : "selecting",
           company: { ...d.company, text: companyText },
           personal: { ...d.personal, text: personalText },
         }),
@@ -216,12 +213,11 @@ export class MarketingStore {
     return this.exclusive(async () => {
       const d = this.require(threadId, revision);
       this.editable(d);
-      if (!d.selectionApproved)
-        throw new MarketingError(
-          "forbidden",
-          "Approve the selected highlights before preparing visuals.",
-        );
-      return this.replace(this.changed(d, { media: [media], stage: "review" }));
+      if (!d.highlights)
+        throw new MarketingError("invalid", "Choose release highlights before preparing visuals.");
+      return this.replace(
+        this.changed(d, { media: [media], stage: d.selectionApproved ? "review" : "selecting" }),
+      );
     });
   }
   async accounts(threadId: string, revision: number, authors: Authors) {

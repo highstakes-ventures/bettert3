@@ -68,11 +68,11 @@ describe("one release Studio", () => {
       const reopened = await MarketingStore.open(dir);
       expect(reopened.read("chat")?.highlights?.title).toBe("Chosen");
     }));
-  it("requires selection approval and rejects stale edits", async () =>
+  it("previews draft content before selection approval while rejecting publication and stale edits", async () =>
     fixture(async (s) => {
       const d = (await s.create(release, "p", "chat", authors)).draft;
-      await expect(s.save("chat", d.revision, "Post", "")).rejects.toThrow("Approve");
-      await s.highlights("chat", d.revision, {
+      await expect(s.save("chat", d.revision, "Post", "")).rejects.toThrow("highlights");
+      let preview = await s.highlights("chat", d.revision, {
         title: "Selected",
         summary: "Useful",
         items: ["One"],
@@ -80,6 +80,33 @@ describe("one release Studio", () => {
       await expect(
         s.highlights("chat", d.revision, { title: "Stale", summary: "Old", items: ["One"] }),
       ).rejects.toThrow("changed");
+      preview = await s.save("chat", preview.revision, "Preview company copy", "");
+      preview = await s.attach("chat", preview.revision, {
+        id: "preview-image",
+        name: "announcement.png",
+        mimeType: "image/png",
+        dataUrl: "data:image/png;base64,aW1hZ2U=",
+        source: "Branded announcement",
+        alt: "Release announcement",
+      });
+      expect(preview.selectionApproved).toBe(false);
+      expect(preview.stage).toBe("selecting");
+      expect(preview.company.text).toBe("Preview company copy");
+      expect(preview.media[0]?.id).toBe("preview-image");
+      await expect(
+        s.human("chat", { type: "approve_publication", expectedRevision: preview.revision }),
+      ).rejects.toThrow("Complete");
+      const calls: string[] = [];
+      await expect(s.publish("chat", preview.revision, publisher(calls))).rejects.toThrow(
+        "approval",
+      );
+      expect(calls).toEqual([]);
+      const approved = await s.human("chat", {
+        type: "approve_highlights",
+        expectedRevision: preview.revision,
+      });
+      expect(approved.company.text).toBe(preview.company.text);
+      expect(approved.media).toEqual(preview.media);
     }));
   it("removes final approval when the text or selected personal post changes", async () =>
     fixture(async (s) => {

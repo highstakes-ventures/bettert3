@@ -105,8 +105,12 @@ export function ReleaseStudioAutoOpen({
     if (!threadId.startsWith("marketing-release:")) return;
     const ref = scopeThreadRef(environmentId, threadId),
       store = useRightPanelStore.getState();
-    if (store.getUserActionRevision(ref) === 0)
-      store.openProactive(ref, { id: "marketing", kind: "marketing" }, 0);
+    store.openProactive(
+      ref,
+      { id: "marketing", kind: "marketing" },
+      store.getUserActionRevision(ref),
+      true,
+    );
   }, [environmentId, threadId]);
   return null;
 }

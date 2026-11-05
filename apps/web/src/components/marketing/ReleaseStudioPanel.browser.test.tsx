@@ -8,7 +8,9 @@ import type { StudioResponse } from "@highstakes/marketing/contracts";
 const state = vi.hoisted(() => ({ request: vi.fn(), read: vi.fn() }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => state.request }));
 vi.mock("~/state/marketing", () => ({ marketingEnvironment: { request: {}, read: state.read } }));
-import { ReleaseStudioPanel } from "./ReleaseStudioPanel";
+import { ReleaseStudioPanel, ReleaseStudioAutoOpen } from "./ReleaseStudioPanel";
+import { useRightPanelStore, selectThreadRightPanelState } from "~/rightPanelStore";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 it("hides the previous environment's review while the next draft is loading", async () => {
   state.request.mockReset();
   state.read.mockReset();
@@ -34,9 +36,19 @@ it("hides the previous environment's review while the next draft is loading", as
         items: ["Passkey setup"],
       },
       selectionApproved: false,
-      company: { text: "", author: "" },
+      company: { text: "Preview copy before approval", author: "" },
       personal: { text: "", author: "", enabled: false },
-      media: [],
+      media: [
+        {
+          id: "preview",
+          name: "preview.png",
+          mimeType: "image/png",
+          dataUrl:
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==",
+          source: "Synthetic fixture",
+          alt: "Announcement preview",
+        },
+      ],
       approvedRevision: null,
       companyPublication: { status: "pending", urn: null, url: null },
       personalPublication: { status: "pending", urn: null, url: null },
@@ -75,6 +87,11 @@ it("hides the previous environment's review while the next draft is loading", as
   await expect
     .element(screen.getByRole("button", { name: "Approve highlights and prepare" }))
     .toBeVisible();
+  await expect.element(screen.getByText("Preview copy before approval")).toBeVisible();
+  await expect.element(screen.getByRole("img", { name: "Announcement preview" })).toBeVisible();
+  await expect
+    .element(screen.getByRole("button", { name: "Approve selected posts and publish" }))
+    .not.toBeInTheDocument();
   await screen.rerender(view("second"));
   await expect.element(screen.getByText("First environment's selection")).not.toBeInTheDocument();
   await expect
@@ -88,4 +105,28 @@ it("hides the previous environment's review while the next draft is loading", as
       input: { threadId, command: { type: "approve_highlights", expectedRevision: 2 } },
     }),
   );
+});
+
+it("opens Studio on entering a release chat after earlier panel actions and lets it close during the visit", async () => {
+  const environmentId = EnvironmentId.make("studio-opening-test");
+  const threadId = ThreadId.make("marketing-release:opening-test");
+  const ref = scopeThreadRef(environmentId, threadId);
+  const store = useRightPanelStore.getState();
+  using _cleanup = { [Symbol.dispose]: () => useRightPanelStore.getState().removeThread(ref) };
+  store.open(ref, "marketing");
+  store.close(ref);
+  expect(store.getUserActionRevision(ref)).toBeGreaterThan(0);
+  const panel = () => selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref);
+  expect(panel().isOpen).toBe(false);
+  await using screen = await render(
+    <ReleaseStudioAutoOpen environmentId={environmentId} threadId={threadId} />,
+  );
+  expect(panel().isOpen).toBe(true);
+  expect(panel().activeSurfaceId).toBe("marketing");
+  await act(() => useRightPanelStore.getState().close(ref));
+  await screen.rerender(
+    <ReleaseStudioAutoOpen environmentId={environmentId} threadId={threadId} />,
+  );
+  expect(panel().isOpen).toBe(false);
+  await screen.unmount();
 });

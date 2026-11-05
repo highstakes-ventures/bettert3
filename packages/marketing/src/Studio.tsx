@@ -67,66 +67,64 @@ export function ReleaseStudio({
             </ul>
           </section>
         )}
-        {review && (
-          <>
-            <section aria-label="recuut company post" className="space-y-3 border-t pt-5">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-medium">recuut · LinkedIn company update</h3>
-                <span className="text-xs text-muted-foreground">Included</span>
-              </div>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                {d.company.text || "The agent is preparing this post."}
-              </p>
-              {d.media.map((m) => (
-                <figure key={m.id} className="space-y-2">
-                  <img src={m.dataUrl} alt={m.alt} className="h-auto w-full rounded-lg" />
-                  <figcaption className="text-xs text-muted-foreground">{m.alt}</figcaption>
-                </figure>
-              ))}
-              {d.company.author && (
-                <p className="text-xs text-muted-foreground">Destination: {d.company.author}</p>
-              )}
-              {d.companyPublication.url && (
-                <a
-                  href={d.companyPublication.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm text-primary underline"
-                >
-                  Open company post
-                </a>
-              )}
-            </section>
-            <section aria-label="Personal repost" className="space-y-3 border-t pt-5">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-medium">Your personal repost</h3>
-                <span className="text-xs text-muted-foreground">
-                  {d.personal.enabled ? "Included" : "Not selected"}
-                </span>
-              </div>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                {d.personal.text ||
-                  "Optional. Tell the agent your own reaction in the conversation to include a personal repost."}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Shares the company update after it is published.
-              </p>
-              {d.personal.enabled && d.personal.author && (
-                <p className="text-xs text-muted-foreground">Destination: {d.personal.author}</p>
-              )}
-              {d.personalPublication.url && (
-                <a
-                  href={d.personalPublication.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm text-primary underline"
-                >
-                  Open personal repost
-                </a>
-              )}
-            </section>
-          </>
-        )}
+        <>
+          <section aria-label="recuut company post" className="space-y-3 border-t pt-5">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-medium">recuut · LinkedIn company update</h3>
+              <span className="text-xs text-muted-foreground">Included</span>
+            </div>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed">
+              {d.company.text || "The post draft will appear here as we prepare it."}
+            </p>
+            {d.media.map((m) => (
+              <figure key={m.id} className="space-y-2">
+                <img src={m.dataUrl} alt={m.alt} className="h-auto w-full rounded-lg" />
+                <figcaption className="text-xs text-muted-foreground">{m.alt}</figcaption>
+              </figure>
+            ))}
+            {d.company.author && (
+              <p className="text-xs text-muted-foreground">Destination: {d.company.author}</p>
+            )}
+            {d.companyPublication.url && (
+              <a
+                href={d.companyPublication.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm text-primary underline"
+              >
+                Open company post
+              </a>
+            )}
+          </section>
+          <section aria-label="Personal repost" className="space-y-3 border-t pt-5">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-medium">Your personal repost</h3>
+              <span className="text-xs text-muted-foreground">
+                {d.personal.enabled ? "Included" : "Not selected"}
+              </span>
+            </div>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed">
+              {d.personal.text ||
+                "Optional. Tell the agent your own reaction in the conversation to include a personal repost."}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Shares the company update after it is published.
+            </p>
+            {d.personal.enabled && d.personal.author && (
+              <p className="text-xs text-muted-foreground">Destination: {d.personal.author}</p>
+            )}
+            {d.personalPublication.url && (
+              <a
+                href={d.personalPublication.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm text-primary underline"
+              >
+                Open personal repost
+              </a>
+            )}
+          </section>
+        </>
         {(error || d.error) && (
           <p role="alert" className="text-sm text-destructive">
             {error ?? d.error}
