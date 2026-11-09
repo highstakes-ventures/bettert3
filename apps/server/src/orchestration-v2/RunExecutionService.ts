@@ -87,8 +87,6 @@ type ProviderTerminalEvent = Extract<
   { readonly type: "turn.terminal" }
 >;
 
-const CAPACITY_RETRY_DELAYS_MS = [3_000, 5_000, 10_000, 20_000, 40_000, 60_000, 120_000];
-
 function isTerminalProviderTurnStatus(status: OrchestrationV2ProviderTurn["status"]): boolean {
   return (
     status === "completed" ||
@@ -871,16 +869,11 @@ export const layer: Layer.Layer<
         } satisfies Parameters<typeof eventSink.writeWithEffects>[0];
         let terminalEvents: ReadonlyArray<OrchestrationV2DomainEvent> | undefined;
         const retryCount = input.attempt.capacityRetryCount ?? 0;
-        const retryDelayMs = CAPACITY_RETRY_DELAYS_MS[retryCount];
+        const retryDelayMs = Math.min(900_000, 30_000 * 2 ** Math.min(retryCount, 5));
         if (
           input.terminal.status === "failed" &&
           input.terminal.threadDisposition === "reusable" &&
-          isProviderCapacityFailure(input.terminal.failure) &&
-          !(
-            input.terminal.retry?.maxAttempts != null &&
-            input.terminal.retry.attempt >= input.terminal.retry.maxAttempts
-          ) &&
-          retryDelayMs !== undefined
+          isProviderCapacityFailure(input.terminal.failure)
         ) {
           const attemptOrdinal = input.attempt.attemptOrdinal + 1;
           const attemptId = idAllocator.derive.runAttempt({ runId: input.run.id, attemptOrdinal });
@@ -969,7 +962,7 @@ export const layer: Layer.Layer<
                 failure: input.terminal.failure,
                 retry: {
                   attempt: retryCount + 1,
-                  maxAttempts: CAPACITY_RETRY_DELAYS_MS.length,
+                  maxAttempts: null,
                   retryDelayMs,
                 },
                 status: "running",

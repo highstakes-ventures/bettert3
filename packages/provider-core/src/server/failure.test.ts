@@ -246,6 +246,9 @@ it("recognizes explicit capacity failures after native retries are exhausted", (
     "overloaded_error",
     "capacity_exceeded",
     "model_capacity_exceeded",
+    "http503",
+    "api_error_502",
+    "http504",
   ]) {
     assert.isTrue(
       isProviderCapacityFailure(
@@ -262,6 +265,7 @@ it("recognizes explicit capacity failures after native retries are exhausted", (
     "529 overloaded",
     "The model is currently at capacity due to high demand.",
     "There is no available capacity.",
+    "We're currently experiencing high demand, which may cause temporary errors.",
   ]) {
     assert.isTrue(isProviderCapacityFailure(makeProviderFailure({ message, retryable: false })));
   }
@@ -272,9 +276,16 @@ it("does not retry authentication, quota, validation, or ambiguous transport fai
     makeProviderFailure({ class: "usage_limit", message: "Model at capacity", code: "overloaded" }),
     makeProviderFailure({ class: "permission_error", message: "Model at capacity" }),
     makeProviderFailure({ class: "validation_error", message: "Model at capacity" }),
-    ...["api_error_401", "api_error_403", "api_error_429", "insufficient_quota"].map((code) =>
-      makeProviderFailure({ code, message: "Model at capacity" }),
-    ),
+    ...[
+      "api_error_401",
+      "api_error_403",
+      "api_error_429",
+      "http401",
+      "http403",
+      "401",
+      "usageLimitExceeded",
+      "insufficient_quota",
+    ].map((code) => makeProviderFailure({ code, message: "Model at capacity" })),
     makeProviderFailure({
       class: "transport_error",
       message: "Connection closed unexpectedly",

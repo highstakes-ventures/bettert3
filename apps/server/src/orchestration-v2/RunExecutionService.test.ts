@@ -3062,11 +3062,20 @@ it.effect("keeps completed runs completed when pull request refresh fails", () =
   }),
 );
 
-it.effect.each([3, 5, 10, 20, 40, 60, 120, null])(
-  "backs off a capacity overload on attempt %$ for %s seconds, then stops",
-  (seconds) =>
+it.effect.each([
+  { retryCount: 0, seconds: 30, exhausted: false },
+  { retryCount: 1, seconds: 60, exhausted: false },
+  { retryCount: 2, seconds: 120, exhausted: false },
+  { retryCount: 3, seconds: 240, exhausted: false },
+  { retryCount: 4, seconds: 480, exhausted: false },
+  { retryCount: 5, seconds: 900, exhausted: false },
+  { retryCount: 6, seconds: 900, exhausted: false },
+  { retryCount: 500, seconds: 900, exhausted: false },
+  { retryCount: 0, seconds: 30, exhausted: true },
+])(
+  "retries capacity failures after $retryCount attempts for $seconds seconds, native retries exhausted $exhausted",
+  ({ retryCount, seconds, exhausted }) =>
     Effect.gen(function* () {
-      const retryCount = [3, 5, 10, 20, 40, 60, 120, null].indexOf(seconds);
       const now = yield* DateTime.now;
       const result = yield* captureRootRunTermination({
         key: `capacity:${retryCount}`,
@@ -3077,6 +3086,7 @@ it.effect.each([3, 5, 10, 20, 40, 60, 120, null])(
             ...rootTerminalEvent(ids, "failed"),
             status: "failed",
             failureItemOrdinal: 101,
+            ...(exhausted ? { retry: { attempt: 5, maxAttempts: 5, retryDelayMs: null } } : {}),
             failure: {
               class: "provider_error",
               code: "serverOverloaded",
@@ -3085,10 +3095,9 @@ it.effect.each([3, 5, 10, 20, 40, 60, 120, null])(
             },
           }),
       });
-      assert.equal(result.committedEffects.length, seconds === null ? 0 : 1);
+      assert.equal(result.committedEffects.length, 1);
       const run = result.finalEvents.findLast((event) => event.type === "run.updated");
-      assert.equal(run?.payload.status, seconds === null ? "failed" : "starting");
-      if (seconds === null) return;
+      assert.equal(run?.payload.status, "starting");
       const effect = result.committedEffects[0]!;
       assert.equal(effect.request.type, "provider-turn.start");
       assert.equal(
@@ -3100,6 +3109,7 @@ it.effect.each([3, 5, 10, 20, 40, 60, 120, null])(
       assert.equal(next?.payload.capacityRetryCount, retryCount + 1);
       assert.notEqual(next?.payload.id, backgroundScenarioIds(`capacity:${retryCount}`).attemptId);
       const retryItem = result.written.findLast((item) => item.type === "error");
+      assert.isNull(retryItem?.type === "error" ? retryItem.retry?.maxAttempts : undefined);
       assert.equal(
         retryItem?.type === "error" ? retryItem.retry?.retryDelayMs : undefined,
         seconds * 1000,

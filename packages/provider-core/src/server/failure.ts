@@ -229,19 +229,19 @@ export function isProviderCapacityFailure(failure: OrchestrationV2ProviderFailur
   const code = failure.code?.replace(/[_\s-]/g, "").toLowerCase();
   if (
     code !== undefined &&
-    /^(?:apierror(?:401|403|429)|authenticationerror|unauthorized|permissiondenied|invalidapikey|insufficientquota|quotaexceeded|usagelimit|ratelimitexceeded)$/.test(
+    /^(?:(?:apierror|http)?(?:400|401|403|404|422|429)|authentication(?:error|failed)|unauthorized|permissiondenied|invalidapikey|insufficientquota|quotaexceeded|usagelimit(?:exceeded)?|ratelimitexceeded)$/.test(
       code,
     )
   )
     return false;
   return (
-    code === "apierror529" ||
+    /^(?:(?:apierror|http)?(?:500|502|503|504|529))$/.test(code ?? "") ||
     code === "serveroverloaded" ||
     code === "overloaded" ||
     code === "overloadederror" ||
     code === "capacityexceeded" ||
     code === "modelcapacityexceeded" ||
-    /\b(?:overloaded|at capacity|capacity overload|no (?:available )?capacity)\b/i.test(
+    /\b(?:overloaded|at capacity|capacity overload|no (?:available )?capacity|experiencing high demand)\b/i.test(
       failure.message,
     )
   );
