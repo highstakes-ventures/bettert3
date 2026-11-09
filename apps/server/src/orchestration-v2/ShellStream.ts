@@ -75,7 +75,7 @@ function buildActiveShellSnapshot(input: {
 type ShellTrimRow = Pick<
   OrchestrationV2ThreadShell,
   "id" | "projectId" | "lineage" | "settledOverride" | "settledAt"
->;
+> & { readonly awaitingRefinement?: boolean };
 
 /**
  * What a subscriber's trims read across every active row. Computed from full shells or from the
@@ -84,6 +84,7 @@ type ShellTrimRow = Pick<
 interface ShellTrimFacts {
   readonly subagentParentIds: ReadonlySet<string>;
   readonly subagentThreadIds: Set<string>;
+  readonly refinementThreadIds: ReadonlySet<string>;
   /** Undefined when no thread is settled, so none is older. */
   readonly olderSettledBeforeMs: number | undefined;
   readonly olderSettledCounts: ReadonlyArray<OrchestrationV2OlderSettledCount>;
@@ -95,7 +96,9 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
   const subagentParentIds = new Set<string>();
   const subagentThreadIds = new Set<string>();
   const settledTimes: Array<number> = [];
+  const refinementThreadIds = new Set<string>();
   for (const row of rows) {
+    if (row.awaitingRefinement === true) refinementThreadIds.add(row.id);
     if (row.lineage.relationshipToParent === "subagent") {
       subagentThreadIds.add(row.id);
       if (row.lineage.parentThreadId) subagentParentIds.add(row.lineage.parentThreadId);
@@ -121,6 +124,7 @@ function shellTrimFacts(rows: ReadonlyArray<ShellTrimRow>): ShellTrimFacts {
   return {
     subagentParentIds,
     subagentThreadIds,
+    refinementThreadIds,
     olderSettledBeforeMs,
     olderSettledCounts: Array.from(counts, ([projectId, count]) => ({ projectId, count })),
   };
@@ -156,7 +160,10 @@ function omitOlderSettledShellsWith(
     readonly snapshotSequence: number;
     readonly now: DateTime.Utc;
   },
-  facts: Pick<ShellTrimFacts, "olderSettledBeforeMs" | "olderSettledCounts">,
+  facts: Pick<
+    ShellTrimFacts,
+    "olderSettledBeforeMs" | "olderSettledCounts" | "refinementThreadIds"
+  >,
 ): {
   readonly threads: ReadonlyArray<OrchestrationV2ThreadShell>;
   readonly olderSettled: OrchestrationV2OlderSettledThreads;
@@ -167,6 +174,7 @@ function omitOlderSettledShellsWith(
   const threads = input.threads.filter(
     (thread) =>
       !isOlderSettledThreadShell(thread, beforeMs) ||
+      facts.refinementThreadIds.has(thread.id) ||
       thread.pinnedAt != null ||
       (thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs) ||
       isLiveSubagentShell(thread) ||
@@ -277,6 +285,7 @@ function shellSubscriberThreadIds(
       : !options.omitOlderSettled ||
           beforeMs === undefined ||
           !isOlderSettledThreadShell(entry, beforeMs) ||
+          facts.refinementThreadIds.has(entry.id) ||
           entry.pinnedAt != null ||
           entry.snoozedUntil != null ||
           entry.mayBeLive ||

@@ -43,6 +43,7 @@ import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import { loadSubscriberShellSnapshot } from "./ShellStream.ts";
 import {
   buildBoundedThreadProjection,
   decodeThreadHistoryCursor,
@@ -1734,7 +1735,7 @@ it.effect("SQL shells read a subagent family and a worktree's threads", () =>
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("SQL list older settled threads below a cursor", () =>
+it.effect("SQL lists older settled threads and retains tickets awaiting refinement", () =>
   Effect.gen(function* () {
     const store = yield* ProjectionStore.ProjectionStoreV2;
     const now = yield* DateTime.now;
@@ -1825,6 +1826,53 @@ it.effect("SQL list older settled threads below a cursor", () =>
       threadIds: [],
       counts: [{ projectId: ProjectId.make("project:b"), count: 1 }],
     });
+
+    for (let index = 0; index < 25; index++)
+      yield* createThread({ name: `newer-${index}`, settledDay: 20 });
+    const sql = yield* SqlClient.SqlClient;
+    for (const [name, phase] of [
+      ["a", "review"],
+      ["b", "done"],
+      ["archived", "review"],
+    ] as const) {
+      const workflowId = `workflow:${name}`;
+      const record = JSON.stringify({ kind: "tickets", phase, threadId: id(name) });
+      yield* sql`INSERT INTO workflow_runs(id, project_id, run_json)
+        VALUES(${workflowId}, ${ProjectId.make("project:a")}, ${record})`;
+    }
+    const subscriberSnapshot = () =>
+      loadSubscriberShellSnapshot({
+        sql,
+        listShellIndex: store.listActiveShellIndex(),
+        readThreads: (threadIds) =>
+          store.readShellSnapshot({
+            location: "active",
+            ...(threadIds === undefined ? {} : { threadIds }),
+          }),
+        listProjects: Effect.succeed([]),
+        latestSequence: Effect.succeed(0),
+        options: { omitIdleSubagents: true, omitOlderSettled: true },
+      });
+    const { statements, tracer } = traceSqlStatements();
+    const ready = yield* subscriberSnapshot().pipe(Effect.withTracer(tracer));
+    const indexQuery = statements.find((statement) => statement.includes("AS awaiting_refinement"));
+    assert.isDefined(indexQuery);
+    const plan = yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${indexQuery}`);
+    assert.isTrue(plan.some((row) => row.detail.includes("USING INDEX workflow_runs_thread")));
+    assert.isFalse(plan.some((row) => row.detail.startsWith("SCAN workflow")));
+    const visible = ready.snapshot.threads.map((thread) => thread.id);
+    assert.include(visible, id("a"));
+    assert.notInclude(visible, id("b"));
+    assert.notInclude(visible, id("archived"));
+    assert.lengthOf(visible, 29);
+
+    yield* sql`UPDATE workflow_runs
+      SET run_json = json_set(run_json, '$.phase', 'done') WHERE id = 'workflow:a'`;
+    const completed = yield* subscriberSnapshot();
+    assert.notInclude(
+      completed.snapshot.threads.map((thread) => thread.id),
+      id("a"),
+    );
   }).pipe(Effect.provide(layerTest)),
 );
 

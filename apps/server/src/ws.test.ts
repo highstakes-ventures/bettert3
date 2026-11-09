@@ -424,6 +424,7 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
                 pinnedAt: null,
                 snoozedUntil: null,
                 mayBeLive: thread.activityRunStatus !== null,
+                awaitingRefinement: false,
               })),
             ),
           readShellSnapshot: (options?: { readonly threadIds?: ReadonlyArray<string> }) =>

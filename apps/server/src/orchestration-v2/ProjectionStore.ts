@@ -414,6 +414,7 @@ export interface ActiveShellIndexEntry extends Pick<
 > {
   /** False only when no run, request, work item, or watch can make the shell live. */
   readonly mayBeLive: boolean;
+  readonly awaitingRefinement: boolean;
 }
 
 export interface OlderSettledThreadsQuery {
@@ -6987,6 +6988,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly pinned_at: string | null;
         readonly snoozed_until: string | null;
         readonly may_be_live: number;
+        readonly awaiting_refinement: number;
       }>`
         SELECT
           t.thread_id,
@@ -7032,7 +7034,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               SELECT 1 FROM json_each(t.payload_json, '$.pullRequests') link
               WHERE json_type(link.value, '$.watch') IS NOT NULL
             )
-          ) AS may_be_live
+          ) AS may_be_live,
+          EXISTS (
+            SELECT 1 FROM workflow_runs workflow
+            -- Remove column affinity so SQLite can use workflow_runs_thread.
+            WHERE json_extract(workflow.run_json, '$.threadId') = +t.thread_id
+              AND json_extract(workflow.run_json, '$.kind') = 'tickets'
+              AND json_extract(workflow.run_json, '$.phase') = 'review'
+          ) AS awaiting_refinement
         FROM orchestration_v2_projection_threads t
         WHERE t.deleted_at IS NULL
           AND json_extract(t.payload_json, '$.archivedAt') IS NULL
@@ -7059,6 +7068,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         pinnedAt: row.pinned_at === null ? null : DateTime.makeUnsafe(row.pinned_at),
         snoozedUntil: row.snoozed_until === null ? null : DateTime.makeUnsafe(row.snoozed_until),
         mayBeLive: row.may_be_live === 1,
+        awaitingRefinement: row.awaiting_refinement === 1,
       }));
     }, Effect.mapError(shellSnapshotReadError));
 
