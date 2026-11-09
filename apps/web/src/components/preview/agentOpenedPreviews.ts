@@ -32,7 +32,7 @@ import { environmentSummaries } from "../../state/presentation";
 
 /**
  * Shows browsers an agent or another client revealed for a thread: floating
- * over chat, or focusing an existing panel tab when the reveal is forced.
+ * over chat, or selecting an existing open panel tab when the reveal is forced.
  */
 export function revealServerTabs(
   threadRef: ScopedThreadRef,
@@ -43,14 +43,14 @@ export function revealServerTabs(
   for (const session of sessions) {
     const force = session.revealRequest?.force === true;
     if (!options.autoShowFloatingPreview && !force) continue;
-    const surface = useRightPanelStore
-      .getState()
-      .byThreadKey[scopedThreadKey(threadRef)]?.surfaces.find(
-        (surface) => surface.kind === "preview" && surface.resourceId === session.tabId,
-      );
-    if (surface && force) {
-      useRightPanelStore.getState().activateSurface(threadRef, surface.id);
-    } else if (!surface) {
+    const panel = useRightPanelStore.getState().byThreadKey[scopedThreadKey(threadRef)];
+    const surface = panel?.surfaces.find(
+      (surface) => surface.kind === "preview" && surface.resourceId === session.tabId,
+    );
+    // Reopening a sheet or maximized panel would interrupt composer typing.
+    if (surface && force && panel?.isOpen) {
+      useRightPanelStore.getState().activateSurface(threadRef, surface.id, true);
+    } else if (!surface || force) {
       usePreviewMiniPlayerStore.getState().open(threadRef, browserMiniPlayerSource(session.tabId));
     }
   }

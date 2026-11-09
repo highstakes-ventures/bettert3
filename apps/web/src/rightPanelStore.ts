@@ -170,7 +170,7 @@ interface RightPanelStoreState {
   ) => void;
   activateTerminal: (ref: ScopedThreadRef, surfaceId: string, terminalId: string) => void;
   closeTerminal: (ref: ScopedThreadRef, surfaceId: string, terminalId: string) => void;
-  activateSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
+  activateSurface: (ref: ScopedThreadRef, surfaceId: string, automatic?: boolean) => void;
   closeSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeOtherSurfaces: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeSurfacesToRight: (ref: ScopedThreadRef, surfaceId: string) => void;
@@ -942,9 +942,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             };
           }),
         ),
-      activateSurface: (ref, surfaceId) =>
+      activateSurface: (ref, surfaceId, automatic = false) =>
         set((state) =>
-          userAction(state, scopedThreadKey(ref), (current) =>
+          (automatic ? automaticUpdate : userAction)(state, scopedThreadKey(ref), (current) =>
             current.surfaces.some((surface) => surface.id === surfaceId)
               ? { ...current, isOpen: true, activeSurfaceId: surfaceId }
               : current,
