@@ -100,6 +100,7 @@ export function RightPanelSurfaceContent(props: {
           projectId={WorkflowProjectId.make(surface.projectId)}
           runId={surface.runId}
           cwd={props.files.workspaceRoot}
+          visible={visible}
         />
       );
     case "preview":

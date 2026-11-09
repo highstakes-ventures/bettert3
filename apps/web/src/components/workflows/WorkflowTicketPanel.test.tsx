@@ -88,6 +88,7 @@ vi.mock("~/state/use-orchestration-command", () => ({
   useOrchestrationCommand: (command: string) =>
     command === "settle" ? state.settle : state.unsettle,
 }));
+vi.mock("~/lib/announce", () => ({ announce: vi.fn(), cancelAnnouncement: vi.fn() }));
 vi.mock("../ChatMarkdown", () => ({ default: ({ text }: { text: string }) => <p>{text}</p> }));
 vi.mock("../ui/select", () => ({
   Select: ({
@@ -153,6 +154,8 @@ beforeEach(() => {
   state.shells.clear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-22T12:00:00Z"));
+  vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+  vi.stubGlobal("window", new EventTarget());
   const current = run("current");
   state.detail = {
     run: current,
@@ -206,8 +209,9 @@ afterEach(async () => {
   useWorkflowDecisions.setState({ decisions: [] });
   lastOpenedRefinementRunByEnvironment.clear();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
-const render = async () =>
+const render = async (visible = true) =>
   act(async () => {
     renderer = create(
       <WorkflowTicketPanel
@@ -215,6 +219,7 @@ const render = async () =>
         projectId={projectId}
         runId="current"
         cwd="/project"
+        visible={visible}
       />,
     );
   });
@@ -235,6 +240,55 @@ const currentQueue = () => refinementQueueWithPendingDecisions(environmentId, st
 it("remembers a refinement ticket opened directly from its chat", async () => {
   await render();
   expect(lastOpenedRefinementRunByEnvironment.get(environmentId)).toBe("current");
+});
+
+it("refreshes the selected ticket only while visible and active, with 35 queued tickets", async () => {
+  state.queue = Array.from({ length: 35 }, (_, index) => run(`queued-${index}`));
+  await render();
+  state.refresh.mockClear();
+  state.refreshProjects.mockClear();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  expect(state.refresh).not.toHaveBeenCalled();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4.5 * 60_000);
+  });
+  expect(state.refresh).toHaveBeenCalledTimes(1);
+
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+  });
+  expect(state.refresh).toHaveBeenCalledTimes(1);
+
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+    document.dispatchEvent(new Event("pointerdown"));
+    window.dispatchEvent(new Event("focus"));
+  });
+  expect(state.refresh).toHaveBeenCalledTimes(2);
+  expect(state.refreshProjects).toHaveBeenCalledTimes(2);
+
+  await act(async () => {
+    renderer!.update(
+      <WorkflowTicketPanel
+        environmentId={environmentId}
+        projectId={projectId}
+        runId="current"
+        cwd="/project"
+        visible={false}
+      />,
+    );
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+  });
+  expect(state.refresh).toHaveBeenCalledTimes(2);
 });
 
 it.each(["Approve", "Reject", "Delay"])(
@@ -309,6 +363,7 @@ it.each(["Approve", "Reject", "Delay"])(
           projectId={projectId}
           runId="current"
           cwd="/project"
+          visible={true}
         />
       ) : null;
     }
@@ -425,6 +480,7 @@ it("keeps the current ticket while the queue reorders and wraps after approving 
         projectId={projectId}
         runId="current"
         cwd="/project"
+        visible={true}
       />,
     ),
   );
@@ -475,6 +531,7 @@ it("retries the failed project list and allows selection after recovery", async 
         projectId={projectId}
         runId="current"
         cwd="/project"
+        visible={true}
       />,
     );
   });
@@ -749,6 +806,7 @@ it("blocks a repeated click and keeps a successful decision hidden until the sub
         projectId={projectId}
         runId="current"
         cwd="/project"
+        visible={true}
       />,
     );
   });

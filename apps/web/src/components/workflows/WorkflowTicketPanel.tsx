@@ -13,6 +13,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useEffect, useState } from "react";
 import { serverEnvironment } from "~/state/server";
 import { useEnvironmentQuery } from "~/state/query";
+import { useLiveRefresh } from "~/hooks/useLiveRefresh";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useOrchestrationCommand } from "~/state/use-orchestration-command";
 import { threadEnvironment } from "~/state/threads";
@@ -36,6 +37,7 @@ export function WorkflowTicketPanel(props: {
   projectId: ProjectId;
   runId: string;
   cwd: string | undefined;
+  visible: boolean;
 }) {
   const live = useEnvironmentQuery(
     serverEnvironment.workflowLive({
@@ -57,6 +59,10 @@ export function WorkflowTicketPanel(props: {
     detail.refresh();
     connection.refresh();
   }
+  useLiveRefresh(detail.isPending ? null : refresh, {
+    enabled: props.visible,
+    key: `workflow-ticket:${props.environmentId}:${props.runId}`,
+  });
   if (!detail.data)
     return (
       <div role="status" className="p-5 text-sm text-muted-foreground">

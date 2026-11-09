@@ -15,7 +15,7 @@ import type { RpcSession } from "../rpc/session.ts";
 import { createServerEnvironmentAtoms } from "./server.ts";
 
 it.effect(
-  "refreshes only mounted ticket details and stops immediately when closed or switched",
+  "reads only mounted ticket details and leaves repeated refreshes to the visible view",
   () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -64,12 +64,17 @@ it.effect(
         const registry = AtomRegistry.make();
         yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
         const first = server.workflowDetail({ environmentId, input: { runId: "first" } });
-        server.workflowDetail({ environmentId, input: { runId: "unopened" } });
+        for (let index = 0; index < 35; index++) {
+          server.workflowDetail({ environmentId, input: { runId: `unopened-${index}` } });
+        }
         const closeFirst = registry.mount(first);
         yield* AtomRegistry.getResult(registry, first, { suspendOnWaiting: true });
         expect(reads).toEqual(["first"]);
 
-        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(30_000));
+        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(30 * 60_000));
+        expect(reads).toEqual(["first"]);
+        registry.refresh(first);
+        yield* AtomRegistry.getResult(registry, first, { suspendOnWaiting: true });
         expect(reads).toEqual(["first", "first"]);
         closeFirst();
         yield* Effect.yieldNow;
@@ -77,7 +82,10 @@ it.effect(
         const second = server.workflowDetail({ environmentId, input: { runId: "second" } });
         const closeSecond = registry.mount(second);
         yield* AtomRegistry.getResult(registry, second, { suspendOnWaiting: true });
-        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(30_000));
+        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(30 * 60_000));
+        expect(reads).toEqual(["first", "first", "second"]);
+        registry.refresh(second);
+        yield* AtomRegistry.getResult(registry, second, { suspendOnWaiting: true });
         expect(reads).toEqual(["first", "first", "second", "second"]);
         closeSecond();
         yield* Effect.yieldNow;
