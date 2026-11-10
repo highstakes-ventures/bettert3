@@ -7049,6 +7049,29 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           ),
         };
 
+        const hasPendingBackgroundWorkForThread = Effect.fn(
+          "CodexAdapterV2.hasPendingBackgroundWorkForThread",
+        )(function* (providerThread: OrchestrationV2ProviderThread) {
+          const contexts = [
+            ...(yield* Ref.get(activeTurns)).values(),
+            ...(yield* Ref.get(settledTurns)).values(),
+          ];
+          for (const context of contexts) {
+            let ancestor: ActiveCodexTurnContext | undefined = context;
+            while (ancestor !== undefined && ancestor.providerThread.id !== providerThread.id) {
+              ancestor = ancestor.subagent?.parentContext;
+            }
+            if (ancestor === undefined) continue;
+            if (yield* turnHasRetainedBackgroundWork(context.nativeTurnId)) return true;
+            if (
+              context.subagent !== null &&
+              (yield* Ref.get(activeTurns)).has(context.nativeTurnId)
+            )
+              return true;
+          }
+          return false;
+        });
+
         const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
           instanceId: adapterOptions.instanceId,
           driver: CODEX_PROVIDER,
@@ -7081,28 +7104,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             }
             return false;
           }),
-          hasPendingBackgroundWorkForThread: Effect.fn(
-            "CodexAdapterV2.hasPendingBackgroundWorkForThread",
-          )(function* (providerThread) {
-            const contexts = [
-              ...(yield* Ref.get(activeTurns)).values(),
-              ...(yield* Ref.get(settledTurns)).values(),
-            ];
-            const roots = contexts.filter(
-              (context) => context.providerThread.id === providerThread.id,
-            );
-            for (const context of contexts) {
-              if (!roots.some((root) => context === root || isDescendantCodexTurn(context, root)))
-                continue;
-              if (yield* turnHasRetainedBackgroundWork(context.nativeTurnId)) return true;
-              if (
-                context.subagent !== null &&
-                (yield* Ref.get(activeTurns)).has(context.nativeTurnId)
-              )
-                return true;
-            }
-            return false;
-          }),
+          hasPendingBackgroundWorkForThread,
           ensureThread: (threadInput) =>
             ensureInitialized.pipe(
               Effect.andThen(
@@ -7145,6 +7147,21 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           resumeThread: Effect.fn("CodexAdapterV2.resumeThread")(
             function* (threadInput) {
               const nativeThreadId = yield* getNativeThreadId(threadInput.providerThread);
+              const runtimePolicy = yield* resolveRuntimePolicy(
+                threadInput.runtimePolicy ?? input.runtimePolicy,
+              );
+              // Codex ignores resume config while the native thread is still loaded.
+              if (
+                runtimePolicy.ticketRefinement &&
+                !(yield* hasPendingBackgroundWorkForThread(threadInput.providerThread))
+              ) {
+                yield* ensureInitialized.pipe(
+                  Effect.andThen(
+                    client.request("thread/unsubscribe", { threadId: nativeThreadId }),
+                  ),
+                );
+                sessionApprovals.delete(nativeThreadId);
+              }
               const resume = client.raw.request("thread/resume", {
                 threadId: nativeThreadId,
                 excludeTurns: true,
@@ -7158,9 +7175,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   ...(threadInput.modelSelection === undefined
                     ? {}
                     : { modelSelection: threadInput.modelSelection }),
-                  runtimePolicy: yield* resolveRuntimePolicy(
-                    threadInput.runtimePolicy ?? input.runtimePolicy,
-                  ),
+                  runtimePolicy,
                 }),
               });
               const response = yield* ensureInitialized.pipe(
