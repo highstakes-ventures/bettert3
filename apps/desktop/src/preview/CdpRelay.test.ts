@@ -5,6 +5,7 @@ import { createCdpRelayConnection, type CdpRelayTarget } from "./CdpRelay.ts";
 const makeTarget = (
   send: CdpRelayTarget["send"],
   setDownloadDirectory: CdpRelayTarget["setDownloadDirectory"] = () => {},
+  screencastOwners: ReadonlySet<string | undefined> = new Set(),
 ): CdpRelayTarget => ({
   send,
   targetId: async () => "GUEST-TARGET",
@@ -12,6 +13,7 @@ const makeTarget = (
   title: () => "Fixture",
   userAgent: () => "Electron",
   setDownloadDirectory,
+  screencastOwners: () => screencastOwners,
 });
 
 const makeRelay = (target: CdpRelayTarget, write: (raw: string) => void) =>
@@ -22,6 +24,202 @@ const makeRelay = (target: CdpRelayTarget, write: (raw: string) => void) =>
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe("CDP relay", () => {
+  it("does not let Playwright acknowledge a recording before its encoder finishes", async () => {
+    const owners = new Set<string | undefined>();
+    const send = vi.fn<CdpRelayTarget["send"]>(async (method, _params, _session, owner) => {
+      if (method === "Page.startScreencast") owners.add(owner);
+      return {};
+    });
+    let finishEncoding = () => {};
+    const encoded = new Promise<void>((resolve) => {
+      finishEncoding = resolve;
+    });
+    let nextId = 10;
+    let recorderToken = 0;
+    const destinations: unknown[] = [];
+    const acknowledge = (sessionId: string, token: number) =>
+      relay.receive(
+        JSON.stringify({
+          id: nextId++,
+          method: "Page.screencastFrameAck",
+          sessionId,
+          params: { sessionId: token },
+        }),
+      );
+    const relay = makeRelay(
+      makeTarget(send, () => {}, owners),
+      (raw) => {
+        const message = JSON.parse(raw);
+        if (message.method !== "Page.screencastFrame") return;
+        destinations.push(message.sessionId);
+        if (message.sessionId === "t3-preview-page") {
+          // Playwright's main page session acknowledges immediately when no screencast client waits.
+          acknowledge(message.sessionId, message.params.sessionId);
+        } else {
+          recorderToken = message.params.sessionId;
+          void encoded.then(() => acknowledge(message.sessionId, message.params.sessionId));
+        }
+      },
+    );
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+    relay.receive(
+      JSON.stringify({
+        id: 2,
+        method: "Target.attachToTarget",
+        params: { targetId: "GUEST-TARGET" },
+      }),
+    );
+    await settle();
+    relay.receive(
+      JSON.stringify({ id: 3, method: "Page.startScreencast", sessionId: "t3-preview-page-1" }),
+    );
+    await settle();
+
+    relay.event("Page.screencastFrame", { sessionId: 17, data: "jpeg", metadata: {} }, "");
+    await settle();
+    expect(send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck")).toEqual([]);
+    expect(destinations).toEqual(["t3-preview-page-1"]);
+
+    acknowledge("t3-preview-page", recorderToken);
+    await settle();
+    expect(send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck")).toEqual([]);
+    finishEncoding();
+    await settle();
+    acknowledge("t3-preview-page-1", recorderToken);
+    await settle();
+    expect(send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck")).toEqual([
+      ["Page.screencastFrameAck", { sessionId: 17 }, undefined, "t3-preview-page-1"],
+    ]);
+  });
+
+  it("acknowledges each shared frame once after all consumers finish", async () => {
+    const owners = new Set<string | undefined>();
+    const send = vi.fn<CdpRelayTarget["send"]>(async (method, _params, _session, owner) => {
+      if (method === "Page.startScreencast") owners.add(owner);
+      return {};
+    });
+    const frames: Array<{ sessionId: string; params: { sessionId: number } }> = [];
+    const relay = makeRelay(
+      makeTarget(send, () => {}, owners),
+      (raw) => {
+        const message = JSON.parse(raw);
+        if (message.method === "Page.screencastFrame") frames.push(message);
+      },
+    );
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+    for (const id of [2, 3])
+      relay.receive(
+        JSON.stringify({
+          id,
+          method: "Target.attachToTarget",
+          params: { targetId: "GUEST-TARGET" },
+        }),
+      );
+    await settle();
+    for (const id of [1, 2])
+      relay.receive(
+        JSON.stringify({
+          id: id + 3,
+          method: "Page.startScreencast",
+          sessionId: `t3-preview-page-${id}`,
+        }),
+      );
+    await settle();
+    // Chromium uses one native session id for every frame in the same screencast.
+    for (let i = 0; i < 2; i++)
+      relay.event("Page.screencastFrame", { sessionId: 17, data: "jpeg", metadata: {} }, "");
+    expect(frames).toHaveLength(4);
+    const first = frames[0]!.params.sessionId;
+    const second = frames[2]!.params.sessionId;
+    expect(first).not.toBe(second);
+    let nextId = 10;
+    const ack = (owner: number, token: number) =>
+      relay.receive(
+        JSON.stringify({
+          id: nextId++,
+          method: "Page.screencastFrameAck",
+          sessionId: `t3-preview-page-${owner}`,
+          params: { sessionId: token },
+        }),
+      );
+    const nativeAcks = () =>
+      send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck");
+    ack(1, first);
+    ack(2, second);
+    await settle();
+    expect(nativeAcks()).toHaveLength(0);
+    ack(2, first);
+    ack(2, first);
+    await settle();
+    expect(nativeAcks()).toHaveLength(1);
+    ack(1, second);
+    await settle();
+    expect(nativeAcks().map(([, params]) => params)).toEqual([
+      { sessionId: 17 },
+      { sessionId: 17 },
+    ]);
+  });
+
+  it("releases detached consumers and ignores acknowledgements from an older screencast", async () => {
+    const owners = new Set<string | undefined>(["t3-preview-page-1", "t3-preview-page-2"]);
+    const send = vi.fn<CdpRelayTarget["send"]>(async () => ({}));
+    const frames: Array<{ sessionId: string; params: { sessionId: number } }> = [];
+    const target = {
+      ...makeTarget(send, () => {}, owners),
+      sessionDetached: (owner: string) => {
+        owners.delete(owner);
+      },
+    };
+    const relay = makeRelay(target, (raw) => {
+      const message = JSON.parse(raw);
+      if (message.method === "Page.screencastFrame") frames.push(message);
+    });
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+    for (const id of [2, 3])
+      relay.receive(
+        JSON.stringify({
+          id,
+          method: "Target.attachToTarget",
+          params: { targetId: "GUEST-TARGET" },
+        }),
+      );
+    await settle();
+    const ack = (id: number, token: number) =>
+      relay.receive(
+        JSON.stringify({
+          id,
+          method: "Page.screencastFrameAck",
+          sessionId: "t3-preview-page-1",
+          params: { sessionId: token },
+        }),
+      );
+    relay.event("Page.screencastFrame", { sessionId: 17, data: "jpeg", metadata: {} }, "");
+    ack(4, frames[0]!.params.sessionId);
+    relay.receive(
+      JSON.stringify({
+        id: 5,
+        method: "Target.detachFromTarget",
+        params: { sessionId: "t3-preview-page-2" },
+      }),
+    );
+    await settle();
+    expect(send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck")).toHaveLength(
+      1,
+    );
+    relay.event("Page.screencastFrame", { sessionId: 17, data: "old", metadata: {} }, "");
+    const old = frames.at(-1)!.params.sessionId;
+    relay.event("Page.screencastFrame", { sessionId: 18, data: "new", metadata: {} }, "");
+    const current = frames.at(-1)!.params.sessionId;
+    ack(6, old);
+    ack(7, current);
+    await settle();
+    expect(
+      send.mock.calls
+        .filter(([method]) => method === "Page.screencastFrameAck")
+        .map(([, params]) => params),
+    ).toEqual([{ sessionId: 17 }, { sessionId: 18 }]);
+  });
+
   it("announces only the tab's page, under its real target id", async () => {
     const written: Array<Record<string, unknown>> = [];
     const relay = makeRelay(makeTarget(vi.fn()), (raw) => written.push(JSON.parse(raw)));
@@ -165,7 +363,7 @@ describe("CDP relay extra sessions", () => {
     await settle();
     expect(send).toHaveBeenLastCalledWith("Page.startScreencast", {}, undefined, extra);
     written.length = 0;
-    relay.event("Page.screencastFrame", { data: "x" }, undefined);
+    relay.event("Page.loadEventFired", { timestamp: 1 }, undefined);
     expect(written.map((m) => m["sessionId"])).toEqual(["t3-preview-page", extra]);
   });
 });

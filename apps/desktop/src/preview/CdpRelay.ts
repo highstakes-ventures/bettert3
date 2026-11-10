@@ -9,6 +9,7 @@ export interface CdpRelayTarget {
     owner?: string,
   ) => Promise<unknown>;
   readonly sessionDetached?: (owner: string) => void;
+  readonly screencastOwners: () => ReadonlySet<string | undefined>;
   /** The page's own CDP target id; Playwright keys the main frame by it. */
   readonly targetId: () => Promise<string>;
   readonly url: () => string;
@@ -95,11 +96,29 @@ export function createCdpRelayConnection(
       return;
     }
     closed = true;
+    pendingFrames.clear();
     close();
   };
   let attached = false;
   /** Relay-created page sessions share one real debugger; child frame sessions retain their own ids. */
   const sessions = new Map<string, "browser" | "page">([[PAGE_SESSION_ID, "page"]]);
+  let frameSequence = 0;
+  let nativeScreencastSession: number | undefined;
+  const pendingFrames = new Map<number, { nativeSessionId: number; recipients: Set<string> }>();
+  const acknowledgeFrame = (token: number, recipient: string): Promise<unknown> => {
+    const frame = pendingFrames.get(token);
+    if (!frame?.recipients.delete(recipient) || frame.recipients.size > 0)
+      return Promise.resolve({});
+    pendingFrames.delete(token);
+    return target.send(
+      "Page.screencastFrameAck",
+      { sessionId: frame.nativeSessionId },
+      undefined,
+      recipient === PAGE_SESSION_ID ? undefined : recipient,
+    );
+  };
+  const releaseScreencastRecipient = (recipient: string) =>
+    Promise.all([...pendingFrames.keys()].map((token) => acknowledgeFrame(token, recipient)));
   let sessionSequence = 0;
   const newSession = (kind: "browser" | "page") => {
     const sessionId = `t3-preview-${kind}-${++sessionSequence}`;
@@ -162,6 +181,7 @@ export function createCdpRelayConnection(
         if (typeof sessionId === "string" && sessionId !== PAGE_SESSION_ID) {
           sessions.delete(sessionId);
           target.sessionDetached?.(sessionId);
+          await releaseScreencastRecipient(sessionId);
         }
         return {};
       }
@@ -185,13 +205,32 @@ export function createCdpRelayConnection(
     const child = sessions.get(command.sessionId!) === "page" ? undefined : command.sessionId;
     const owner =
       child === undefined && command.sessionId !== PAGE_SESSION_ID ? command.sessionId : undefined;
+    if (child === undefined && command.method === "Page.screencastFrameAck") {
+      const token = command.params?.["sessionId"];
+      return typeof token === "number"
+        ? acknowledgeFrame(token, command.sessionId!)
+        : Promise.resolve({});
+    }
     // Child frames/workers pause on auto-attach until resumed; only the main page can skip this command.
     if (command.method === "Runtime.runIfWaitingForDebugger" && child === undefined) {
       return Promise.resolve({});
     }
     // Playwright asks for this on every page; the host emulates focus only while it is in use.
     if (command.method === "Emulation.setFocusEmulationEnabled") return Promise.resolve({});
-    return target.send(command.method, command.params ?? {}, child, owner);
+    const result = target.send(command.method, command.params ?? {}, child, owner);
+    if (child === undefined && command.method === "Page.startScreencast") {
+      return result.catch(async (cause: unknown) => {
+        await releaseScreencastRecipient(command.sessionId!);
+        throw cause;
+      });
+    }
+    if (child === undefined && command.method === "Page.stopScreencast") {
+      return result.then(async (value) => {
+        await releaseScreencastRecipient(command.sessionId!);
+        return value;
+      });
+    }
+    return result;
   };
 
   return {
@@ -231,7 +270,28 @@ export function createCdpRelayConnection(
       );
     },
     event: (method, params, sessionId) => {
-      if (!attached) return;
+      if (!attached || closed) return;
+      if (method === "Page.screencastFrame" && !sessionId) {
+        if (typeof params !== "object" || params === null || !("sessionId" in params)) return;
+        const nativeSessionId = params.sessionId;
+        if (typeof nativeSessionId !== "number") return;
+        // Chromium reuses the native id across frames and resets its counter on a new stream.
+        if (nativeScreencastSession !== nativeSessionId) pendingFrames.clear();
+        nativeScreencastSession = nativeSessionId;
+        const owners = target.screencastOwners();
+        const recipients = new Set<string>();
+        for (const [id, kind] of sessions) {
+          if (kind === "page" && owners.has(id === PAGE_SESSION_ID ? undefined : id))
+            recipients.add(id);
+        }
+        if (recipients.size === 0) return;
+        const token = ++frameSequence;
+        pendingFrames.set(token, { nativeSessionId, recipients });
+        for (const recipient of recipients) {
+          send({ method, params: { ...params, sessionId: token }, sessionId: recipient });
+        }
+        return;
+      }
       // Download events are the browser's; Playwright listens on its root session.
       if (method.startsWith("Browser.download")) {
         send({ method, params });

@@ -267,6 +267,13 @@ export const make = Effect.gen(function* () {
 
   const dropRelay = (tab: AttachedTab) => {
     tab.relay = null;
+    if (tab.screencasts.size > 0) {
+      try {
+        void tab.debuggee.debugger.sendCommand("Page.stopScreencast").catch(() => {});
+      } catch {
+        // The guest can already be gone when its relay is released.
+      }
+    }
     tab.screencasts.clear();
     tab.agentUsed = false;
     dropFocusHolds(tab);
@@ -274,7 +281,13 @@ export const make = Effect.gen(function* () {
 
   /** A detached session, such as a closed viewer, waits on nothing it sent. */
   const dropSessionHolds = (tab: AttachedTab, owner: string) => {
-    tab.screencasts.delete(owner);
+    if (tab.screencasts.delete(owner) && tab.screencasts.size === 0) {
+      try {
+        void tab.debuggee.debugger.sendCommand("Page.stopScreencast").catch(() => {});
+      } catch {
+        // The debugger can already be gone when a session detaches.
+      }
+    }
     for (const [pending, hold] of tab.focusPending) {
       if (hold.owner === owner) tab.focusPending.delete(pending);
     }
@@ -317,6 +330,11 @@ export const make = Effect.gen(function* () {
             if (owner !== undefined) streamingOwners.add(owner);
           } else if (sessionId === undefined && method === "Page.stopScreencast") {
             tab.screencasts.delete(owner);
+            if (tab.screencasts.size > 0) {
+              releaseFocusWhenIdle(tab);
+              syncPainting(tab);
+              return Promise.resolve({});
+            }
           }
           // A person's input through a viewer, or Playwright's own housekeeping, is not the agent's.
           if (
@@ -352,6 +370,7 @@ export const make = Effect.gen(function* () {
                 })
               : holdFocus(tab, method, owner, forward);
         },
+        screencastOwners: () => tab.screencasts,
         sessionDetached: (owner) => {
           detachedOwners.add(owner);
           dropSessionHolds(tab, owner);

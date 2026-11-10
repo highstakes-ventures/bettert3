@@ -41,6 +41,7 @@ const makeDebuggee = (
   const pending: Array<() => void> = [];
   const focusChanges: Array<() => void> = [];
   const sent: Array<unknown> = [];
+  const sentMethods: string[] = [];
   const sendWaiters: Array<() => void> = [];
   const focusEmulation: Array<boolean> = [];
   const debuggee = Object.assign(emitter, {
@@ -64,6 +65,7 @@ const makeDebuggee = (
           else resolve({});
           return;
         }
+        sentMethods.push(method);
         sent.push(params?.id);
         pending.push(() => resolve({ method }));
         sendWaiters.shift()?.();
@@ -83,6 +85,7 @@ const makeDebuggee = (
     navigate: () => webContents.emit("did-navigate"),
     /** Ids of the commands the debugger received, in order. */
     sent,
+    sentMethods,
     focusEmulation,
     nextSend: () => new Promise<void>((resolve) => sendWaiters.push(resolve)),
     release: () => pending.splice(0).forEach((resolve) => resolve()),
@@ -801,6 +804,7 @@ describe("DesktopBrowserHost", () => {
       yield* settle;
       yield* TestClock.adjust("1 minute");
       expect(debuggee.focusEmulation).toEqual([true]);
+      expect(debuggee.sentMethods).not.toContain("Page.stopScreencast");
 
       yield* raw({
         id: 6,
@@ -809,6 +813,9 @@ describe("DesktopBrowserHost", () => {
       });
       yield* TestClock.adjust("1 minute");
       expect(debuggee.focusEmulation).toEqual([true, false]);
+      expect(
+        debuggee.sentMethods.filter((method) => method === "Page.stopScreencast"),
+      ).toHaveLength(1);
     }).pipe(Effect.scoped),
   );
 

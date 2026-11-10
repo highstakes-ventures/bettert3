@@ -571,6 +571,53 @@ describe("PreviewManager", () => {
     webviewSend.mockClear();
   });
 
+  effectIt.effect("leaves screencast acknowledgements to the frame consumer", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const webContents = makeTestPreviewWebContents(async () => ({
+          toJPEG: () => Buffer.from("frame"),
+          getSize: () => ({ width: 1440, height: 1100 }),
+        }));
+        let onMessage:
+          | ((event: unknown, method: string, params: Record<string, unknown>) => void)
+          | undefined;
+        let consoleReleased = () => {};
+        const released = new Promise<void>((resolve) => {
+          consoleReleased = resolve;
+        });
+        const sendCommand = vi.fn(async (method: string) => {
+          if (method === "Runtime.releaseObjectGroup") consoleReleased();
+          return {};
+        });
+        Object.assign(webContents.debugger, {
+          on: vi.fn((event: string, listener: NonNullable<typeof onMessage>) => {
+            if (event === "message") onMessage = listener;
+          }),
+          sendCommand,
+        });
+        Object.assign(webContents, { isDevToolsOpened: () => false, once: vi.fn() });
+        fromId.mockReturnValue(webContents);
+        yield* manager.prepareWebview(webContents);
+        yield* manager.createTab("tab_recorder_backpressure");
+        yield* manager.registerWebview("tab_recorder_backpressure", 42);
+        expect(onMessage).toBeDefined();
+
+        onMessage!({}, "Page.screencastFrame", {
+          sessionId: 17,
+          data: "frame-awaiting-encoding",
+          metadata: { deviceWidth: 1440, deviceHeight: 1100 },
+        });
+        // A later debugger event gives a completion milestone without waiting on time.
+        onMessage!({}, "Runtime.consoleAPICalled", {});
+        yield* Effect.promise(() => released);
+
+        expect(sendCommand).not.toHaveBeenCalledWith("Page.screencastFrameAck", {
+          sessionId: 17,
+        });
+      }),
+    ),
+  );
+
   effectIt.effect.each([
     ["linux", "ctrl+alt+[", "[", "BracketLeft", false],
     ["win32", "ctrl+alt+8", "[", "Digit8", false],
