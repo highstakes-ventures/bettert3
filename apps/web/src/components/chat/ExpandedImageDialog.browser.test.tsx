@@ -168,9 +168,19 @@ describe("ExpandedImageDialog", () => {
     expect(zoomedWidth).toBeCloseTo(fitWidth * Math.E, 0);
 
     const pan = async (delta: { x: number; y: number }) => {
-      const { scrollLeft, scrollTop } = viewport;
+      let start: { scrollLeft: number; scrollTop: number } | undefined;
+      const recordStart = () => {
+        start = { scrollLeft: viewport.scrollLeft, scrollTop: viewport.scrollTop };
+      };
+      // Playwright positions the pointer before sending the wheel and may scroll the viewer.
+      viewport.addEventListener("wheel", recordStart, { capture: true, once: true });
+      using _wheelStart = {
+        [Symbol.dispose]: () => viewport.removeEventListener("wheel", recordStart, true),
+      };
       await userEvent.wheel(viewportLocator, { delta });
       await vi.waitFor(() => {
+        if (start === undefined) throw new Error("Wheel event did not reach the viewer.");
+        const { scrollLeft, scrollTop } = start;
         expect(Math.sign(viewport.scrollLeft - scrollLeft)).toBe(Math.sign(delta.x));
         expect(Math.sign(viewport.scrollTop - scrollTop)).toBe(Math.sign(delta.y));
       });
