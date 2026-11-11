@@ -12,7 +12,7 @@ import {
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -169,13 +169,13 @@ const harness = Effect.gen(function* () {
   const deps = Layer.mergeAll(
     Sqlite.layerMemory,
     Layer.effect(
-      Crypto.Crypto,
+      SecureRandom.SecureRandom,
       Effect.gen(function* () {
-        const live = yield* Crypto.Crypto;
-        return Crypto.Crypto.of({
+        const live = yield* SecureRandom.SecureRandom;
+        return SecureRandom.SecureRandom.of({
           ...live,
-          randomUUIDv4: () =>
-            Effect.suspend(() => switches.beforeUuid.pipe(Effect.andThen(live.randomUUIDv4()))),
+          uuidV4: () =>
+            Effect.suspend(() => switches.beforeUuid.pipe(Effect.andThen(live.uuidV4()))),
         });
       }),
     ).pipe(Layer.provide(NodeCrypto.layer)),

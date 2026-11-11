@@ -2,7 +2,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { requestEnvironmentTodo } from "@t3tools/client-runtime/state/todo";
 import { createEnvironmentQueryAtomFamily } from "@t3tools/client-runtime/state/runtime";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import * as Data from "effect/Data";
+
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -23,9 +23,9 @@ const TodoList = Schema.Struct({
 });
 const decodeList = Schema.decodeUnknownEffect(Schema.fromJsonString(TodoList));
 
-class TodoUnavailable extends Data.TaggedError("TodoUnavailable")<{
-  readonly message: string;
-}> {}
+class TodoUnavailable extends Schema.TaggedError<TodoUnavailable>()("TodoUnavailable", {
+  message: Schema.String,
+}) {}
 
 const changes = Atom.make((get) => {
   let version = 0;

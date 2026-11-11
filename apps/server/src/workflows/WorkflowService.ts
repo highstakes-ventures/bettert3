@@ -24,7 +24,7 @@ import * as Refactor from "@t3tools/workflows/refactor";
 import * as Tickets from "@t3tools/workflows/tickets";
 import { dueScannerDate, scannerTriggers } from "@t3tools/workflows/triggers";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -116,9 +116,9 @@ export class WorkflowService extends Context.Service<
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const uuid = crypto
-    .randomUUIDv4()
+    .uuidV4()
     .pipe(
       Effect.mapError(
         (cause) => new WorkflowError({ message: "Could not allocate a workflow identity.", cause }),

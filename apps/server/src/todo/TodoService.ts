@@ -25,7 +25,7 @@ export class TodoService extends Context.Service<
     readonly page: Effect.Effect<typeof TodoFrontendPage.Type, TodoOperationError>;
     readonly request: (
       input: TodoFrontendRequest,
-    ) => Effect.Effect<typeof TodoFrontendResponse.Type, TodoOperationError>;
+    ) => Effect.Effect<TodoFrontendResponse, TodoOperationError>;
   }
 >()("t3/todo/TodoService") {}
 

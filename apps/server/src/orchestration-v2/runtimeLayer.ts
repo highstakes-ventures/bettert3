@@ -10,6 +10,7 @@ import * as WorkflowService from "../workflows/WorkflowService.ts";
 import * as LinearClient from "../workflows/LinearClient.ts";
 import * as CodexCloudChats from "../provider/CodexCloudChats.ts";
 import * as CloudThreadService from "./CloudThreadService.ts";
+import * as WorktreeBranchSync from "./WorktreeBranchSync.ts";
 import * as GuestShareService from "../guest/GuestShareService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
@@ -431,6 +432,9 @@ export const layer = Layer.mergeAll(
 );
 
 export const layerProduction = Layer.mergeAll(
+  WorktreeBranchSync.layer.pipe(
+    Layer.provide(Layer.merge(layerThreadManagementProvided, ProjectionStore.layer)),
+  ),
   layer.pipe(Layer.provide(layerProjectService)),
   layerProjectService,
   layerManagedProjectFoldersProvided,

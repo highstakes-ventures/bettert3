@@ -12,47 +12,45 @@ const wire = vi.hoisted(() => ({
   closed: 0,
   disconnect: () => {},
 }));
-vi.mock("@effect/platform-node/NodeSocket", async () => {
+vi.mock("ws", async () => {
   const { EventEmitter } = await import("node:events");
   return {
-    NodeWS: {
-      WebSocket: class extends EventEmitter {
-        static OPEN = 1;
-        readyState = 1;
-        constructor() {
-          super();
-          wire.disconnect = () => {
-            this.readyState = 3;
-            this.emit("close");
-          };
-          queueMicrotask(() => this.emit("open"));
-        }
-        send(text: string) {
-          const request = JSON.parse(text);
-          wire.sent.push(request);
-          queueMicrotask(() => {
-            if (wire.disconnected) {
-              this.readyState = 3;
-              this.emit("close");
-              return;
-            }
-            if (request.id !== undefined)
-              this.emit(
-                "message",
-                Buffer.from(JSON.stringify({ id: request.id, result: { ok: true } })),
-              );
-            this.emit(
-              "message",
-              Buffer.from(JSON.stringify({ method: "cloud/test", params: { text: "streamed" } })),
-            );
-          });
-        }
-        terminate() {
-          wire.closed++;
+    WebSocket: class extends EventEmitter {
+      static OPEN = 1;
+      readyState = 1;
+      constructor() {
+        super();
+        wire.disconnect = () => {
           this.readyState = 3;
           this.emit("close");
-        }
-      },
+        };
+        queueMicrotask(() => this.emit("open"));
+      }
+      send(text: string) {
+        const request = JSON.parse(text);
+        wire.sent.push(request);
+        queueMicrotask(() => {
+          if (wire.disconnected) {
+            this.readyState = 3;
+            this.emit("close");
+            return;
+          }
+          if (request.id !== undefined)
+            this.emit(
+              "message",
+              Buffer.from(JSON.stringify({ id: request.id, result: { ok: true } })),
+            );
+          this.emit(
+            "message",
+            Buffer.from(JSON.stringify({ method: "cloud/test", params: { text: "streamed" } })),
+          );
+        });
+      }
+      terminate() {
+        wire.closed++;
+        this.readyState = 3;
+        this.emit("close");
+      }
     },
   };
 });

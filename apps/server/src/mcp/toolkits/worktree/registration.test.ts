@@ -1,3 +1,5 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as AssetSigner from "../../../assets/AssetSigner.ts";
 import * as Marketing from "../../../marketing/MarketingService.ts";
 import * as DocumentText from "../../../provider/DocumentText.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
@@ -199,6 +201,8 @@ it.effect("production mcp layer lists worktree tools over http", () =>
     Effect.provide(
       Layer.mergeAll(
         NodeHttpServer.layerTest,
+        NodeCrypto.layer,
+        Layer.mock(AssetSigner.AssetSigner)({}),
         ServerConfig.layerTest(process.cwd(), { prefix: "t3-worktree-mcp-" }).pipe(
           Layer.provide(NodeServices.layer),
         ),

@@ -1,8 +1,10 @@
+import * as Schema from "effect/Schema";
 import { EnvironmentSupervisor } from "@t3tools/client-runtime/connection";
 import { createEnvironmentCommand } from "@t3tools/client-runtime/state/runtime";
 import * as Effect from "effect/Effect";
-import * as Data from "effect/Data";
+
 import * as SubscriptionRef from "effect/SubscriptionRef";
+import { createChildThreadApprovalsAtom } from "@t3tools/client-runtime/state/thread-requests";
 import { useAtomValue } from "@effect/atom-react";
 import { enabledEnvironmentIds } from "@t3tools/client-runtime/state/connections";
 import { arrayElementsEqual } from "@t3tools/client-runtime/state/entities";
@@ -20,11 +22,10 @@ import {
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useEffect } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
-import { appAtomRegistry } from "../rpc/atomRegistry";
+import { serverEnvironment } from "./server";
 import { environmentShell } from "./shell";
 
 export const threadFamilies = createThreadFamilyAtoms(
@@ -46,19 +47,12 @@ export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
 export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   snapshotAtom: threadEnvironment.snapshotAtom,
+  hiddenThreadTagsAtom: serverEnvironment.hiddenThreadTagsAtom,
 });
-
-/** Keeps the subagent tree under `rootThreadId` in the thread list while the caller shows it. */
-export function useThreadFamily(
-  environmentId: EnvironmentId | null,
-  rootThreadId: ThreadId | null,
-): void {
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mounts the subagent tree into the thread family registry while the caller shows it
-  useEffect(() => {
-    if (environmentId === null || rootThreadId === null) return;
-    return threadFamilies.mount(appAtomRegistry, environmentId, rootThreadId);
-  }, [environmentId, rootThreadId]);
-}
+export const childThreadApprovalsAtom = createChildThreadApprovalsAtom({
+  childThreadInputsAtom: environmentThreadShells.childThreadInputsAtom,
+  pendingRequestsAtom: environmentThreadDetails.pendingRequestsAtom,
+});
 
 const EMPTY_THREAD_STATE_ATOM = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE)).pipe(
   Atom.withLabel("web-environment-thread:empty"),
@@ -145,9 +139,10 @@ export const runningThreadKeepAliveAtom = createRunningThreadKeepAliveAtom({
   stateAtom: environmentThreads.stateAtom,
 });
 
-class ThreadSnapshotUnavailable extends Data.TaggedError("ThreadSnapshotUnavailable")<{
-  readonly message: string;
-}> {}
+class ThreadSnapshotUnavailable extends Schema.TaggedError<ThreadSnapshotUnavailable>()(
+  "ThreadSnapshotUnavailable",
+  { message: Schema.String },
+) {}
 
 export const readFreshThreadSnapshot = createEnvironmentCommand(connectionAtomRuntime, {
   label: "thread:fresh-snapshot",

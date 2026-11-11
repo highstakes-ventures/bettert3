@@ -1,3 +1,4 @@
+import * as ServerSettings from "../serverSettings.ts";
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
@@ -36,6 +37,7 @@ const adapter = {
 const database = Sqlite.layerMemory;
 const runtimeLayer = WorkflowRuntimePolicy.layer.pipe(
   Layer.provide(RuntimePolicy.layerFromProjectStore),
+  Layer.provide(ServerSettings.layerTest()),
   Layer.provide(Layer.merge(ProjectionStore.layer, ProjectStore.layer)),
   Layer.provide(database),
   Layer.provide(

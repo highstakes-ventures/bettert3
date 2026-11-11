@@ -1,4 +1,5 @@
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
+import { ProjectId, ThreadId, ScheduledTaskId, ProviderInstanceId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -69,6 +70,7 @@ it.effect.each([
               namedProjectsRoot: "/projects",
               isScratchProject: () => Effect.succeed(false),
             }),
+            ManagedPolicy.layerTest(),
             NodeCrypto.layer,
             Sqlite.layerMemory,
           ),
@@ -201,5 +203,69 @@ it.effect.each([null, "other-thread", "moving-thread"])(
       assert.equal(result._tag, boundThread === "moving-thread" ? "Failure" : "Success");
       assert.deepEqual(calls, ["/api/t3/tasks"]);
       assert.equal(tasks[0]!.projectId, "old-project");
+    }),
+);
+
+it.effect.each(["continue", "new_thread", "fresh_session"] as const)(
+  "Mation accepts only context modes it can persist: %s",
+  (threadMode) =>
+    Effect.gen(function* () {
+      const input = {
+        title: "Review",
+        prompt: "Review work",
+        enabled: true,
+        projectId: ProjectId.make("project"),
+        threadId: threadMode === "new_thread" ? null : ThreadId.make("thread"),
+        threadMode,
+        schedule: { type: "interval" as const, everyMs: 60_000 },
+        workspaceStrategy: { type: "root" as const },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        createdBy: "user" as const,
+        creationSource: "mcp" as const,
+      };
+      const task = {
+        ...input,
+        id: ScheduledTaskId.make("task"),
+        createdAt: "2026-11-11T08:00:00Z",
+        updatedAt: "2026-11-11T08:00:00Z",
+        nextRunAt: null,
+        lastRunAt: null,
+        lastRunStatus: "never" as const,
+        lastRunError: null,
+        runCount: 0,
+      };
+      const calls: string[] = [];
+      const outcome = yield* Effect.gen(function* () {
+        const service = yield* Scheduled.ScheduledTaskService;
+        return yield* service.upsert(input).pipe(Effect.result);
+      }).pipe(
+        Effect.provide(
+          Adapter.layer.pipe(
+            Layer.provide(
+              Layer.mock(Execution.AutomationExecutionService)({
+                proxy: (path) => {
+                  calls.push(path);
+                  return Effect.succeed({
+                    status: 200,
+                    contentType: "application/json",
+                    body: new TextEncoder().encode(JSON.stringify({ task })),
+                  });
+                },
+              }),
+            ),
+          ),
+        ),
+      );
+      if (threadMode === "fresh_session") {
+        assert.equal(outcome._tag, "Failure");
+        if (outcome._tag === "Failure")
+          assert.match(outcome.failure.message, /fresh session.*not supported/i);
+        assert.deepEqual(calls, []);
+      } else {
+        assert.equal(outcome._tag, "Success");
+        assert.deepEqual(calls, ["/api/t3/tasks/upsert"]);
+      }
     }),
 );

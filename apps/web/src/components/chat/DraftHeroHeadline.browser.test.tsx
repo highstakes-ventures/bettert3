@@ -28,6 +28,7 @@ vi.mock("~/state/entities", () => ({
     ),
   useProjects: () => state.projects,
   useThreadShells: () => [],
+  useVisibleThreadShells: () => [],
 }));
 vi.mock("~/state/environments", () => ({
   useEnvironments: () => ({

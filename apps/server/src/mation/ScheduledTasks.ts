@@ -65,7 +65,14 @@ export const layer = Layer.effect(
           Stream.retry(Schedule.spaced("5 seconds")),
         ),
       upsert: Effect.fn("ScheduledTasks.ScheduledTaskService.upsert")((input) =>
-        call("upsert", input, ScheduledTaskMutationResult),
+        input.threadMode === "fresh_session"
+          ? Effect.fail(
+              new ScheduledTaskError({
+                message:
+                  "Fresh session scheduling is not supported by Mation. Keep the conversation or use a new thread for each run.",
+              }),
+            )
+          : call("upsert", input, ScheduledTaskMutationResult),
       ),
       setEnabled: Effect.fn("ScheduledTasks.ScheduledTaskService.setEnabled")((input) =>
         call("enabled", input, ScheduledTaskMutationResult),

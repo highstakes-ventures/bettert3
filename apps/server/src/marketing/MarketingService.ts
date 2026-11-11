@@ -63,11 +63,11 @@ export class MarketingService extends Context.Service<
     >;
     readonly human: (
       threadId: string,
-      command: typeof HumanCommand.Type,
+      command: HumanCommand,
     ) => Effect.Effect<Draft, MarketingFailure>;
     readonly agent: (
       caller: { threadId: string; runId: string },
-      command: typeof AgentCommand.Type,
+      command: AgentCommand,
     ) => Effect.Effect<Draft, MarketingFailure>;
     readonly collect: (
       input: MarketingReleaseCollectionRequest,
@@ -149,10 +149,7 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError(failure));
     yield* call(() => store.delivered(draft.threadId, draft.pendingMessage!.id));
   });
-  const human = Effect.fn("marketing.human")(function* (
-    threadId: string,
-    command: typeof HumanCommand.Type,
-  ) {
+  const human = Effect.fn("marketing.human")(function* (threadId: string, command: HumanCommand) {
     yield* shell(threadId);
     const draft = yield* call(() => store.human(threadId, command));
     // The pending continuation is persisted first; a lost response retries its exact message identity.
@@ -161,7 +158,7 @@ const make = Effect.gen(function* () {
   });
   const agent = Effect.fn("marketing.agent")(function* (
     caller: { threadId: string; runId: string },
-    command: typeof AgentCommand.Type,
+    command: AgentCommand,
   ) {
     const t = yield* shell(caller.threadId);
     if (t.activeRunId !== RunId.make(caller.runId))

@@ -1,4 +1,4 @@
-import { NodeWS } from "@effect/platform-node/NodeSocket";
+import * as NodeWS from "ws";
 import type { CodexCloudDestination } from "@t3tools/contracts";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexError from "effect-codex-app-server/errors";

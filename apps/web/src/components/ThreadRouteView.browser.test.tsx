@@ -32,6 +32,7 @@ vi.mock("../composerDraftStore", () => ({
 }));
 vi.mock("../state/entities", () => ({
   useThreadRefs: () => [],
+  useAnyEnvironmentHiding: () => false,
   useEnvironmentThreadRefs: () => [],
   useQuietThreadShell: (ref: ScopedThreadRef | null) =>
     state.loaded && ref
@@ -45,7 +46,10 @@ vi.mock("../state/entities", () => ({
 }));
 vi.mock("../state/query", () => ({ useEnvironmentQuery: () => ({ data: { status: "live" } }) }));
 vi.mock("../state/shell", () => ({ useEnvironmentShellStatus: () => "live" }));
-vi.mock("../state/threads", () => ({
+vi.mock("../state/threads", async () => ({
+  environmentThreadShells: {
+    hiddenThreadKeysAtom: (await import("effect/reactivity")).Atom.make(new Set()),
+  },
   useEnvironmentThread: () => ({ status: "loading", data: { _id: "Option", _tag: "None" } }),
 }));
 

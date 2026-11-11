@@ -49,7 +49,7 @@ export function revealServerTabs(
     );
     // Reopening a sheet or maximized panel would interrupt composer typing.
     if (surface && force && panel?.isOpen) {
-      useRightPanelStore.getState().activateSurface(threadRef, surface.id, true);
+      useRightPanelStore.getState().revealSurface(threadRef, surface.id);
     } else if (!surface || force) {
       usePreviewMiniPlayerStore.getState().open(threadRef, browserMiniPlayerSource(session.tabId));
     }

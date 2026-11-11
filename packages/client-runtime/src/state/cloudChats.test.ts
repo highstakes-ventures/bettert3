@@ -8,7 +8,7 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
-import { AVAILABLE_CONNECTION_STATE } from "../connection/model.ts";
+import { AVAILABLE_CONNECTION_STATE, BearerConnectionTarget } from "../connection/model.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import type { RpcSession } from "../rpc/session.ts";
@@ -29,7 +29,7 @@ it.effect("shows a recently opened page immediately while refreshing and isolate
       const refreshStarted = yield* Deferred.make<void>();
       let requests = 0;
       const supervisor = {
-        target: { environmentId },
+        target: new BearerConnectionTarget({ environmentId, label: "Test", connectionId: "test" }),
         state: yield* SubscriptionRef.make({
           ...AVAILABLE_CONNECTION_STATE,
           phase: "connected" as const,

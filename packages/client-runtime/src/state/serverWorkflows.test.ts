@@ -7,7 +7,7 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { Atom, AtomRegistry } from "effect/reactivity";
 
-import { AVAILABLE_CONNECTION_STATE } from "../connection/model.ts";
+import { AVAILABLE_CONNECTION_STATE, BearerConnectionTarget } from "../connection/model.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as Persistence from "../platform/persistence.ts";
@@ -24,7 +24,11 @@ it.effect(
         const environmentId = EnvironmentId.make("workflow-test");
         const reads: string[] = [];
         const supervisor = {
-          target: { environmentId },
+          target: new BearerConnectionTarget({
+            environmentId,
+            label: "Test",
+            connectionId: "test",
+          }),
           state: yield* SubscriptionRef.make({
             ...AVAILABLE_CONNECTION_STATE,
             phase: "connected" as const,

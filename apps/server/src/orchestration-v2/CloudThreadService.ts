@@ -12,7 +12,7 @@ import {
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -47,14 +47,14 @@ const make = Effect.gen(function* () {
   const folders = yield* ManagedProjectFolders.ManagedProjectFolders;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const sink = yield* EventSink.EventSinkV2;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const scope = yield* Scope.Scope;
   const serial = yield* Semaphore.make(1);
   const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
   const bindings = new Map<string, ThreadId>();
   const monitoring = new Set<ThreadId>();
   const driver = ProviderDriverKind.make("codex");
-  const commandId = () => crypto.randomUUIDv4().pipe(Effect.orDie, Effect.map(CommandId.make));
+  const commandId = () => crypto.uuidV4().pipe(Effect.orDie, Effect.map(CommandId.make));
   const importedRunPrefix = (threadId: ThreadId) => `cloud-run:${threadId}:`;
 
   const synchronize = Effect.fn("CloudThreadService.synchronize")(
@@ -163,7 +163,7 @@ const make = Effect.gen(function* () {
             DateTime.makeUnsafe((seconds ?? snapshot.thread.createdAt) * 1000);
           const now = yield* DateTime.now;
           const event = () =>
-            crypto.randomUUIDv4().pipe(
+            crypto.uuidV4().pipe(
               Effect.orDie,
               Effect.map((id) => ({
                 id: EventId.make(id),

@@ -46,66 +46,64 @@ vi.mock("./CodexProvider.ts", async () => {
   };
 });
 
-vi.mock("@effect/platform-node/NodeSocket", async () => {
+vi.mock("ws", async () => {
   const { EventEmitter } = await import("node:events");
   return {
-    NodeWS: {
-      WebSocket: class extends EventEmitter {
-        static OPEN = 1;
-        readyState = 0;
-        terminated = false;
-        constructor() {
-          super();
-          wire.opened++;
-          wire.disconnects.push(() => {
+    WebSocket: class extends EventEmitter {
+      static OPEN = 1;
+      readyState = 0;
+      terminated = false;
+      constructor() {
+        super();
+        wire.opened++;
+        wire.disconnects.push(() => {
+          this.readyState = 3;
+          this.emit("close");
+        });
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.emit("open");
+        });
+      }
+      send(payload: string) {
+        const request = JSON.parse(payload) as {
+          id?: number;
+          method: string;
+          params?: Record<string, unknown>;
+        };
+        wire.requests.push({ method: request.method, params: request.params ?? {} });
+        if (request.id === undefined) return;
+        const result =
+          request.method === "initialize"
+            ? wire.initializeResponse()
+            : wire.response(request.method, request.params ?? {});
+        void Promise.resolve(result).then((result) => {
+          if (result === "disconnect") {
             this.readyState = 3;
             this.emit("close");
-          });
-          queueMicrotask(() => {
-            this.readyState = 1;
-            this.emit("open");
-          });
-        }
-        send(payload: string) {
-          const request = JSON.parse(payload) as {
-            id?: number;
-            method: string;
-            params?: Record<string, unknown>;
-          };
-          wire.requests.push({ method: request.method, params: request.params ?? {} });
-          if (request.id === undefined) return;
-          const result =
-            request.method === "initialize"
-              ? wire.initializeResponse()
-              : wire.response(request.method, request.params ?? {});
-          void Promise.resolve(result).then((result) => {
-            if (result === "disconnect") {
-              this.readyState = 3;
-              this.emit("close");
-            } else {
-              this.emit(
-                "message",
-                Buffer.from(
-                  result === "malformed"
-                    ? "invalid JSON"
-                    : JSON.stringify(
-                        result === "protocol-error"
-                          ? { id: request.id, error: { code: -32600 } }
-                          : { id: request.id, result },
-                      ),
-                ),
-              );
-            }
-          });
-        }
-        terminate() {
-          if (this.terminated) return;
-          this.terminated = true;
-          this.readyState = 3;
-          wire.closed++;
-          this.emit("close");
-        }
-      },
+          } else {
+            this.emit(
+              "message",
+              Buffer.from(
+                result === "malformed"
+                  ? "invalid JSON"
+                  : JSON.stringify(
+                      result === "protocol-error"
+                        ? { id: request.id, error: { code: -32600 } }
+                        : { id: request.id, result },
+                    ),
+              ),
+            );
+          }
+        });
+      }
+      terminate() {
+        if (this.terminated) return;
+        this.terminated = true;
+        this.readyState = 3;
+        wire.closed++;
+        this.emit("close");
+      }
     },
   };
 });

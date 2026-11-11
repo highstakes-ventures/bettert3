@@ -77,7 +77,12 @@ function environment() {
     label: "Laptop",
     connection: { phase: state.connected ? "connected" : "disconnected" },
     serverConfig: state.connected
-      ? { environment: { platform: "linux", capabilities: { scheduledTaskOwner: state.owner } } }
+      ? {
+          environment: {
+            platform: "linux",
+            capabilities: { scheduledTaskOwner: state.owner, oneTimeSchedules: true },
+          },
+        }
       : null,
   };
 }

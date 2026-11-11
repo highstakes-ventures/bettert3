@@ -138,6 +138,7 @@ export const AgentInput = Schema.Struct({ command: Schema.optionalKey(AgentComma
 export const FileState = Schema.Struct({ version: Schema.Literal(1), drafts: Schema.Array(Draft) });
 export type FileState = typeof FileState.Type;
 
+// @effect-diagnostics-next-line extendsNativeError:off -- Synchronous Studio callers catch this error by class and reason.
 export class MarketingError extends Error {
   readonly reason: "conflict" | "invalid" | "forbidden" | "unavailable";
   constructor(reason: "conflict" | "invalid" | "forbidden" | "unavailable", message: string) {

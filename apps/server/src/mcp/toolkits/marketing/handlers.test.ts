@@ -8,7 +8,7 @@ import type { Draft } from "@highstakes/marketing/contracts";
 import * as Marketing from "../../../marketing/MarketingService.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
 import * as Testkit from "../../McpToolAccess.testkit.ts";
-import { toolkitRegistration } from "../../McpHttpServer.ts";
+import { toolkitRegistration, layerInProcessMcpServer } from "../../McpHttpServer.ts";
 import { MarketingToolkit } from "./tools.ts";
 import { layer } from "./handlers.ts";
 
@@ -55,7 +55,7 @@ it.effect("returns media metadata without image bytes from both Studio tools", (
       ],
     };
     const registration = toolkitRegistration(MarketingToolkit, layer).pipe(
-      Layer.provideMerge(McpServer.McpServer.layer),
+      Layer.provideMerge(layerInProcessMcpServer),
       Layer.provide(NodeCrypto.layer),
       Layer.provide(Testkit.liveThreadsLayer),
       Layer.provide(

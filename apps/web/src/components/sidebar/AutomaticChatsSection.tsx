@@ -282,6 +282,7 @@ function localAutomaticState(
           approval: "Approval needed",
           input: "Input needed",
           request: "Subagent needs input",
+          preparing: "Setting up",
           working: "Running",
           failed: "Failed",
           limited: "Usage limit",

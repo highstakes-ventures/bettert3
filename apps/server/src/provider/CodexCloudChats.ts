@@ -3,7 +3,7 @@ import { ProviderInstanceId, type CodexCloudDestination } from "@t3tools/contrac
 import type * as CodexClient from "effect-codex-app-server/client";
 import type * as Scope from "effect/Scope";
 import * as CodexCloudTransport from "./CodexCloudTransport.ts";
-import { NodeWS } from "@effect/platform-node/NodeSocket";
+import * as NodeWS from "ws";
 import {
   CloudChatError,
   CodexSettings,
