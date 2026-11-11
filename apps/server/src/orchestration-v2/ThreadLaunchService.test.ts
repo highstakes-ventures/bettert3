@@ -3308,7 +3308,7 @@ it.effect(
         target: {
           projectId,
           threadId: null,
-          modelSelection,
+          modelSelection: claudeModelSelection,
           runtimeMode: "auto" as const,
           interactionMode: "default" as const,
           workspaceStrategy: { type: "root" as const },
@@ -3321,17 +3321,11 @@ it.effect(
       assert.equal(projection.messages.length, 1);
       assert.equal(projection.runs.length, 1);
       assert.equal(first.ref.runId, projection.runs[0]?.id);
-      assert.deepEqual(projection.runs[0]?.modelSelection, modelSelection);
-      yield* threads.dispatch({
-        type: "thread.model-selection.set",
-        commandId: CommandId.make("mation-switch-model"),
-        threadId: first.ref.threadId,
-        modelSelection: claudeModelSelection,
-      });
+      assert.deepEqual(projection.runs[0]?.modelSelection, claudeModelSelection);
       const boundInput = {
         ...input,
         prompt: "A second review",
-        target: { ...input.target, threadId: first.ref.threadId },
+        target: { ...input.target, modelSelection, threadId: first.ref.threadId },
       };
       const bound = yield* mation.start("c49f43ba-c472-4875-ad0a-c518683b49ce", boundInput);
       const boundReplay = yield* mation.start("c49f43ba-c472-4875-ad0a-c518683b49ce", boundInput);

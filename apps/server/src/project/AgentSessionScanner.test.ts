@@ -2349,6 +2349,22 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
           });
         }
 
+        const finishedPointerReads = yield* Queue.unbounded<void>();
+        const processRunner = Layer.effect(
+          ProcessRunner.ProcessRunner,
+          Effect.gen(function* () {
+            const runner = yield* ProcessRunner.ProcessRunner;
+            return ProcessRunner.ProcessRunner.of({
+              run: (input) =>
+                input.args.at(-1) === path.join(worktree, ".git")
+                  ? runner
+                      .run(input)
+                      .pipe(Effect.tap(() => Queue.offer(finishedPointerReads, undefined)))
+                  : runner.run(input),
+            });
+          }),
+        ).pipe(Layer.provide(ProcessRunner.layer), Layer.provide(NodeServices.layer));
+
         // One scanner across scans: later scans skip the files that blocked.
         yield* Effect.gen(function* () {
           const scanner = yield* AgentSessionScanner.AgentSessionScanner;
@@ -2364,6 +2380,10 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
             yield* Effect.scoped(
               Effect.gen(function* () {
                 yield* awaitGateReader(gatePath);
+                if (gatePath === path.join(pointerCheckout, ".git")) {
+                  // Let the real pointer read finish before expiring the blocked read's deadline.
+                  yield* Queue.take(finishedPointerReads);
+                }
                 yield* TestClock.adjust("2 seconds");
               }),
             );
@@ -2372,7 +2392,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
           for (let attempt = 2; attempt <= LIBUV_POOL_SIZE + 1; attempt++) {
             expect(yield* scanPaths, `scan ${attempt}`).toEqual([pointerCheckout]);
           }
-        }).pipe(Effect.provide(layerScannerTest({ claudeHomePath, codexHomePath })));
+        }).pipe(Effect.provide(layerScannerTest({ claudeHomePath, codexHomePath, processRunner })));
         // Hangs if the scans left libuv pool threads stuck in open().
         yield* fileSystem.readFileString(path.join(worktree, ".git"));
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

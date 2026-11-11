@@ -47,6 +47,7 @@ vi.mock("../state/entities", () => ({
 vi.mock("../state/query", () => ({ useEnvironmentQuery: () => ({ data: { status: "live" } }) }));
 vi.mock("../state/shell", () => ({ useEnvironmentShellStatus: () => "live" }));
 vi.mock("../state/threads", async () => ({
+  threadFamilies: { mount: () => () => {} },
   environmentThreadShells: {
     hiddenThreadKeysAtom: (await import("effect/reactivity")).Atom.make(new Set()),
   },

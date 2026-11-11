@@ -272,6 +272,7 @@ it.effect("returns an HTML render reference that Codex and Claude tool rows both
         Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
         Effect.provideService(McpSchema.McpServerClient, client),
       );
+    expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
     const reference = htmlRenderFromToolItem({
       toolName: "t3-code.html_render",
       output: result.structuredContent,
@@ -316,6 +317,7 @@ it.effect("returns an HTML render reference that Codex and Claude tool rows both
             getThreadShell: (id) =>
               Effect.succeed({
                 id,
+                lineage: { parentThreadId: null },
                 deletedAt: null,
                 archivedAt: null,
                 activeRunId: RunId.make("mcp-core-run"),

@@ -61,7 +61,7 @@ const makeCheckpointWorkspaceEffect = Effect.fn("makeCheckpointWorkspace")(funct
   }
   yield* runGit(cwd, ["add", "README.md", ...Object.keys(files)]);
   yield* runGit(cwd, ["commit", "-m", "initial"]);
-  return cwd;
+  return yield* fs.realPath(cwd);
 });
 
 const removeCheckpointWorkspaceEffect = Effect.fn("removeCheckpointWorkspace")(function* (
