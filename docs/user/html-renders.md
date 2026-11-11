@@ -1,6 +1,8 @@
 # Visual replies
 
-Agents can answer with a page instead of only text: a chart, table, diagram, image collage, or mockup. Ask for one ("show this as a chart", "make a collage of these screenshots") and the agent builds a self-contained HTML page, which appears in the thread above its written reply. It works with every provider, on web, desktop, and mobile.
+Agents use Mermaid for static flowcharts, sequence diagrams, and ownership trees, directly in their replies.
+
+For interactive visuals, image collages, UI mockups, and charts that Mermaid cannot express, agents can answer with an HTML page. Ask for one ("make an interactive credit calculator", "make a collage of these screenshots") and the page appears in the thread above the written reply. You can also request HTML explicitly. It works with every provider, on web, desktop, and mobile.
 
 Pages use your current theme, including custom themes, and follow light and dark mode as you switch. Scripts run inside the page, but it is sandboxed away from T3 Code and your session. Links you click in a page open in your browser. Use the expand button to open a page full screen. On web and desktop, use the zoom controls to see more detail.
 
