@@ -1,4 +1,5 @@
 import { todoThreadKeysAtom } from "../state/todos";
+import { threadListPlacement } from "@t3tools/client-runtime/state/thread-list-policy";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { SnoozeMenu } from "./SnoozeMenu";
 import { AutomaticChatsSection } from "./sidebar/AutomaticChatsSection";
@@ -7,12 +8,16 @@ import { timerThreadKeysAtom } from "../state/presentation";
 
 import {
   groupThreadsBySection,
-  resolveThreadSection,
   resolveThreadSectionDrop,
-  threadSectionKey,
+  threadMatchesSection,
 } from "@t3tools/client-runtime/state/thread-sections";
-import { SectionViewMenu, ThreadSectionHeading } from "./sidebar/ThreadSections";
-import { type EnvironmentId, type ScheduledTask, type ScopedProjectRef } from "@t3tools/contracts";
+import {
+  SectionViewMenu,
+  useSidebarThreadSections,
+  threadSectionMenuItems,
+  renderThreadSectionItems,
+} from "./sidebar/ThreadSections";
+import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import { attachSidebarTree } from "../lib/sidebarTree";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import {
@@ -160,8 +165,7 @@ import {
   useQuietThreadShells,
 } from "../state/entities";
 import { environmentPresentations } from "../state/presentation";
-import { primaryServerKeybindingsAtom, serverEnvironment } from "../state/server";
-import { useEnvironmentQuery } from "../state/query";
+import { primaryServerKeybindingsAtom } from "../state/server";
 import { environmentProjects } from "../state/projects";
 import { threadEnvironment } from "../state/threads";
 import { useOlderSettledShelf, useOlderSettledShelfGrowth } from "../state/olderSettledShelf";
@@ -358,7 +362,6 @@ type SidebarOptimisticDrop = {
 };
 
 interface SidebarThreadPartitionInput {
-  readonly scheduledTasks: readonly Pick<ScheduledTask, "threadId">[];
   readonly timerThreadKeys: ReadonlySet<string>;
   readonly todoThreadKeys: ReadonlySet<string>;
   readonly sectionFilter: string | null;
@@ -432,7 +435,6 @@ function routeThreadOnly(
 
 // Separate hooks cache maps independently of later Sidebar hooks and preserve dnd-kit inputs.
 function useSidebarThreads(input: {
-  readonly scheduledTasks: readonly Pick<ScheduledTask, "threadId">[];
   readonly timerThreadKeys: ReadonlySet<string>;
   readonly todoThreadKeys: ReadonlySet<string>;
   readonly sectionFilter: string | null;
@@ -495,7 +497,6 @@ function useSidebarThreads(input: {
     settledTail.scopeKey === projectScopeKey ? settledTail.count : SETTLED_TAIL_INITIAL_COUNT;
 
   const partition = partitionSidebarThreads({
-    scheduledTasks: input.scheduledTasks,
     timerThreadKeys: input.timerThreadKeys,
     todoThreadKeys: input.todoThreadKeys,
     sectionFilter: input.sectionFilter,
@@ -663,29 +664,18 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const preciseNow = new Date().toISOString();
   const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent, {
     environmentId: input.primaryEnvironmentId,
-    tasks: input.scheduledTasks,
     todoThreadKeys: input.todoThreadKeys,
-  }).filter((thread) => {
-    if (input.sectionFilter === null) return true;
-    const project = input.projectByKey.get(`${thread.environmentId}:${thread.projectId}`);
-    return (
-      project !== undefined &&
-      threadSectionKey(project, resolveThreadSection(project, thread)?.id ?? null) ===
-        input.sectionFilter
-    );
-  });
+  }).filter((thread) => threadMatchesSection(input.sectionFilter, input.projectByKey, thread));
   const inboxObservation = inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
   const timer: EnvironmentThreadShell[] = [];
   const working: EnvironmentThreadShell[] = [];
   const sections = { active, timer, working };
-  const inbox = (thread: EnvironmentThreadShell, manuallyMoved = false) =>
+  const inbox = (thread: EnvironmentThreadShell, hasTimer: boolean, manuallyMoved = false) =>
     sections[
       resolveInboxThreadSection(thread, {
-        hasTimer:
-          input.timerThreadKeys.has(threadShellKey(thread)) ||
-          input.todoThreadKeys.has(threadShellKey(thread)),
+        hasTimer,
         workingShelfEnabled,
         isWorking: manuallyMoved ? isThreadWorking(thread) : inboxObservation.isWorking(thread),
       })
@@ -698,6 +688,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     connectedEnvironmentIds: input.connectedEnvironmentIds,
   });
   for (const thread of visible) {
+    const { hasOpenTodo, hasTimer } = threadListPlacement(thread, input);
     const configLoaded = serverConfigs.has(thread.environmentId);
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
     if (optimisticDrop?.key === threadKey) {
@@ -711,7 +702,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
         ? pinned
         : optimisticDrop.section === "settled"
           ? settled
-          : inbox(projected, true)
+          : inbox(projected, hasTimer, true)
       ).push(
         optimisticDrop.clearsSnooze
           ? projected
@@ -719,7 +710,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
       );
     } else {
       const section = resolveSidebarThreadSection({
-        hasOpenTodo: input.todoThreadKeys.has(threadKey),
+        hasOpenTodo,
         snoozed: configLoaded && effectiveSnoozed(thread, { now: preciseNow }),
         settled: configLoaded && thread.settledOverride === "settled",
         pinned: thread.pinnedAt != null,
@@ -730,7 +721,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
           ? settled
           : section === "pinned"
             ? pinned
-            : inbox(thread)
+            : inbox(thread, hasTimer)
       ).push(thread);
     }
   }
@@ -1063,11 +1054,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   // Row callbacks capture only the handler; the rest of the context changes with the route.
   const { handleNewThread } = newThreadContext;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const scheduledTasks = useEnvironmentQuery(
-    primaryEnvironmentId
-      ? serverEnvironment.scheduledTasksLive({ environmentId: primaryEnvironmentId, input: {} })
-      : null,
-  );
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
@@ -1373,35 +1359,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     },
   );
 
-  const sectionGrouping = useUiStateStore((state) => state.sidebarThreadGrouping);
-  const persistedSectionFilter = useUiStateStore((state) => state.sidebarSectionFilter);
-  const collapsedThreadSections = useUiStateStore((state) => state.collapsedThreadSections);
-  const sectionProjects = projects.filter(
-    (project) =>
-      scopedProjectKeys === null || scopedProjectKeys.has(`${project.environmentId}:${project.id}`),
-  );
-  const sectionFilter = projects.some((project) =>
-    (project.sections ?? []).some(
-      (section) => threadSectionKey(project, section.id) === persistedSectionFilter,
-    ),
-  )
-    ? persistedSectionFilter
-    : null;
-  const assignThreadSection = (threadRef: ScopedThreadRef, sectionId: string | null) => {
-    void updateThreadMetadata({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, sectionId },
-    }).then((result) => {
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        toastManager.add({
-          type: "error",
-          title: "Could not move chat",
-          description: error instanceof Error ? error.message : "Try again.",
-        });
-      }
-    });
-  };
+  const {
+    sectionGrouping,
+    sectionFilter,
+    collapsedThreadSections,
+    sectionProjects,
+    assignThreadSection,
+  } = useSidebarThreadSections(projects, scopedProjectKeys);
   const {
     workingShelfEnabled,
     pinnedThreads,
@@ -1443,7 +1407,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     pinnedKeysById,
     activeKeysById,
   } = useSidebarThreads({
-    scheduledTasks: scheduledTasks.data?.tasks ?? [],
     timerThreadKeys,
     todoThreadKeys,
     sectionFilter,
@@ -2853,38 +2816,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             [
-              ...(projectByKey.get(`${thread.environmentId}:${thread.projectId}`)?.sections ===
-              undefined
-                ? []
-                : [
-                    {
-                      id: "assign-section",
-                      label: "Category",
-                      disabled: !readEnvironmentScope(
-                        thread.environmentId,
-                        AuthOrchestrationOperateScope,
-                      ),
-                      children: [
-                        {
-                          id: "clear-section",
-                          label: "Uncategorized",
-                          checked:
-                            resolveThreadSection(
-                              projectByKey.get(`${thread.environmentId}:${thread.projectId}`),
-                              thread,
-                            ) === null,
-                        },
-                        ...(
-                          projectByKey.get(`${thread.environmentId}:${thread.projectId}`)
-                            ?.sections ?? []
-                        ).map((section) => ({
-                          id: `assign-section:${section.id}`,
-                          label: section.name,
-                          checked: section.id === thread.sectionId,
-                        })),
-                      ],
-                    },
-                  ]),
+              ...threadSectionMenuItems(
+                projectByKey.get(`${thread.environmentId}:${thread.projectId}`),
+                thread,
+                readEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope),
+              ),
               ...buildThreadActionMenuItems({
                 canOperate: readEnvironmentScope(
                   threadRef.environmentId,
@@ -3849,62 +3785,28 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             break;
                           case "active-placeholder":
                             if (sectionGrouping === "section") {
-                              for (const group of categoryGroups) {
-                                const source = dragState
-                                  ? threadByKey.get(dragState.activeKey)
-                                  : undefined;
-                                const sameProject =
-                                  categoryDrag &&
-                                  source?.environmentId === group.project.environmentId &&
-                                  source.projectId === group.project.id;
-                                if (
-                                  group.section === null &&
-                                  group.threads.length === 0 &&
-                                  !sameProject
-                                )
-                                  continue;
-                                if (
-                                  !categoryDrag &&
-                                  sectionFilter !== null &&
-                                  group.key !== sectionFilter
-                                )
-                                  continue;
-                                items.push(
-                                  <ThreadSectionHeading
-                                    key={`heading:${group.key}`}
-                                    project={group.project}
-                                    section={group.section}
-                                    count={group.threads.length}
-                                    dropEnabled={sameProject}
-                                    expandForDrop={
-                                      categoryDrag &&
-                                      dragState.expandedCategoryKeys.includes(group.key)
-                                    }
-                                    isDropTarget={categoryDropTarget?.key === group.key}
-                                    showProject={sectionProjects.length > 1}
-                                    onNewThread={() => {
-                                      void handleNewThread(
-                                        scopeProjectRef(
-                                          group.project.environmentId,
-                                          group.project.id,
-                                        ),
-                                        { sectionId: group.section?.id ?? null },
-                                      );
-                                    }}
-                                  />,
-                                );
-                                if (
-                                  !collapsedThreadSections.includes(group.key) ||
-                                  (categoryDrag &&
-                                    dragState.expandedCategoryKeys.includes(group.key))
-                                ) {
-                                  items.push(
-                                    ...group.threads.map((thread) =>
-                                      renderThreadRow(thread, "active"),
-                                    ),
-                                  );
-                                }
-                              }
+                              items.push(
+                                ...renderThreadSectionItems({
+                                  groups: categoryGroups,
+                                  filter: sectionFilter,
+                                  collapsedKeys: collapsedThreadSections,
+                                  showProject: sectionProjects.length > 1,
+                                  drag: categoryDrag
+                                    ? {
+                                        source: threadByKey.get(dragState.activeKey),
+                                        expandedKeys: dragState.expandedCategoryKeys,
+                                        targetKey: categoryDropTarget?.key ?? null,
+                                      }
+                                    : null,
+                                  onNewThread: (project, sectionId) => {
+                                    void handleNewThread(
+                                      scopeProjectRef(project.environmentId, project.id),
+                                      { sectionId },
+                                    );
+                                  },
+                                  renderThread: (thread) => renderThreadRow(thread, "active"),
+                                }),
+                              );
                               break;
                             }
                             items.push(

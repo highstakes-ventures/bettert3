@@ -56,6 +56,18 @@ const RESTRICTED_UI_VARIANT_PATTERNS = [
   },
 ];
 
+const RESTRICTED_SERVER_IMPORT_PATTERNS = [
+  {
+    group: [
+      "@t3tools/source-control-*/client/*",
+      "../client/*",
+      "../../client/*",
+      "../../../client/*",
+    ],
+    message: "A forge's client entry is UI-only; the server reads its `shared/definition`.",
+  },
+];
+
 const RESTRICTED_PULL_REQUEST_GLYPH_IMPORTS = {
   name: "lucide-react",
   importNames: [
@@ -450,16 +462,31 @@ export default defineConfig({
             "error",
             {
               paths: [...RESTRICTED_IMPORT_PATHS, RESTRICTED_PULL_REQUEST_GLYPH_IMPORTS],
+              patterns: RESTRICTED_SERVER_IMPORT_PATTERNS,
+            },
+          ],
+        },
+      },
+      {
+        files: ["apps/server/src/orchestration-v2/**", "apps/server/src/provider/**"],
+        excludeFiles: ["apps/server/src/orchestration-v2/runtimeLayer.ts", "**/*.test.ts"],
+        rules: {
+          "eslint/no-restricted-imports": [
+            "error",
+            {
+              paths: [...RESTRICTED_IMPORT_PATHS, RESTRICTED_PULL_REQUEST_GLYPH_IMPORTS],
               patterns: [
+                ...RESTRICTED_SERVER_IMPORT_PATTERNS,
                 {
                   group: [
-                    "@t3tools/source-control-*/client/*",
-                    "../client/*",
-                    "../../client/*",
-                    "../../../client/*",
+                    "**/mation/**",
+                    "**/workflows/**",
+                    "**/pai/**",
+                    "**/marketing/**",
+                    "**/todo/**",
                   ],
                   message:
-                    "A forge's client entry is UI-only; the server reads its `shared/definition`.",
+                    "Keep product services outside execution code. Compose them in runtimeLayer.ts; see docs/internals/bettert3-boundaries.md.",
                 },
               ],
             },

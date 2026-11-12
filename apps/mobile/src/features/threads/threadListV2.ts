@@ -1,5 +1,6 @@
 import { isAutomaticThread, threadNeedsUserAttention } from "@t3tools/shared/threadAttention";
 import { groupThreadsBySection } from "@t3tools/client-runtime/state/thread-sections";
+import { threadListPlacement } from "@t3tools/client-runtime/state/thread-list-policy";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
 import type { ProjectSection } from "@t3tools/contracts";
 
@@ -879,7 +880,7 @@ export function buildThreadListV2Items(input: {
       pinned.push(thread);
     } else {
       const section = resolveInboxThreadSection(thread, {
-        hasTimer: input.timerThreadKeys?.has(`${thread.environmentId}:${thread.id}`) === true,
+        hasTimer: threadListPlacement(thread, input).hasTimer,
         workingShelfEnabled,
         isWorking: (input.isWorking ?? isThreadWorking)(thread),
       });

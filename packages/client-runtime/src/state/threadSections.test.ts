@@ -4,6 +4,7 @@ import {
   resolveThreadSection,
   resolveThreadSectionDrop,
   threadSectionKey,
+  threadMatchesSection,
 } from "./threadSections.ts";
 
 const build = { id: "build", name: "Build", color: "blue" as const };
@@ -51,6 +52,16 @@ describe("thread sections", () => {
     ).toEqual([["a"], ["b"], ["c"]]);
     expect(resolveThreadSection(project, chat("b", "build", "remote"))).toBeNull();
     expect(threadSectionKey(project, "build")).not.toBe(threadSectionKey(remote, "build"));
+    const projects = new Map(
+      [project, remote, other].map((entry) => [`${entry.environmentId}:${entry.id}`, entry]),
+    );
+    const filter = threadSectionKey(project, "build");
+    expect(threadMatchesSection(filter, projects, chat("a", "build"))).toBe(true);
+    expect(threadMatchesSection(filter, projects, chat("b", "build", "remote"))).toBe(false);
+    expect(threadMatchesSection(filter, projects, chat("c", "build", "local", "other"))).toBe(
+      false,
+    );
+    expect(threadMatchesSection(filter, new Map(), chat("a", "build"))).toBe(false);
   });
   it("keeps empty named categories and hides empty Uncategorized except during dragging", () => {
     expect(groupThreadsBySection([project], []).map((group) => group.section?.name)).toEqual([

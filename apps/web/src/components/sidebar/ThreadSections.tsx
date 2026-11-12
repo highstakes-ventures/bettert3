@@ -1,8 +1,23 @@
 import { useDroppable } from "@dnd-kit/core";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type ContextMenuItem,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import { useEnvironmentScope } from "../../state/session";
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/models";
-import { threadSectionKey } from "@t3tools/client-runtime/state/thread-sections";
+import type {
+  EnvironmentProject,
+  EnvironmentThreadShell,
+} from "@t3tools/client-runtime/state/models";
+import {
+  groupThreadsBySection,
+  resolveThreadSection,
+  threadSectionKey,
+} from "@t3tools/client-runtime/state/thread-sections";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import type { ProjectSection, ProjectSectionChange } from "@t3tools/contracts";
 import {
   CheckIcon,
@@ -14,10 +29,11 @@ import {
   PlusIcon,
   TagIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { projectIconColorClassName, PROJECT_ICON_COLORS } from "../../projectIconColors";
 import { projectEnvironment } from "../../state/projects";
+import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { useUiStateStore } from "../../uiStateStore";
 import { cn, randomUUID } from "../../lib/utils";
@@ -34,6 +50,126 @@ import {
 import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { SidebarHeaderIconButton } from "./SidebarThreadHeader";
+import { toastManager } from "../ui/toast";
+
+export function useSidebarThreadSections(
+  projects: readonly EnvironmentProject[],
+  scopedProjectKeys: ReadonlySet<string> | null,
+) {
+  const sectionGrouping = useUiStateStore((state) => state.sidebarThreadGrouping);
+  const persistedSectionFilter = useUiStateStore((state) => state.sidebarSectionFilter);
+  const collapsedThreadSections = useUiStateStore((state) => state.collapsedThreadSections);
+  const sectionProjects = projects.filter(
+    (project) =>
+      scopedProjectKeys === null || scopedProjectKeys.has(`${project.environmentId}:${project.id}`),
+  );
+  const sectionFilter = projects.some((project) =>
+    (project.sections ?? []).some(
+      (section) => threadSectionKey(project, section.id) === persistedSectionFilter,
+    ),
+  )
+    ? persistedSectionFilter
+    : null;
+  const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
+    reportFailure: false,
+  });
+  const assignThreadSection = (threadRef: ScopedThreadRef, sectionId: string | null) => {
+    void updateThreadMetadata({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, sectionId },
+    }).then((result) => {
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add({
+          type: "error",
+          title: "Could not move chat",
+          description: error instanceof Error ? error.message : "Try again.",
+        });
+      }
+    });
+  };
+  return {
+    sectionGrouping,
+    sectionFilter,
+    collapsedThreadSections,
+    sectionProjects,
+    assignThreadSection,
+  };
+}
+
+export function threadSectionMenuItems(
+  project: EnvironmentProject | undefined,
+  thread: Pick<EnvironmentThreadShell, "environmentId" | "projectId" | "sectionId">,
+  canOperate: boolean,
+): ContextMenuItem[] {
+  if (project?.sections === undefined) return [];
+  return [
+    {
+      id: "assign-section",
+      label: "Category",
+      disabled: !canOperate,
+      children: [
+        {
+          id: "clear-section",
+          label: "Uncategorized",
+          checked: resolveThreadSection(project, thread) === null,
+        },
+        ...project.sections.map((section) => ({
+          id: `assign-section:${section.id}`,
+          label: section.name,
+          checked: section.id === thread.sectionId,
+        })),
+      ],
+    },
+  ];
+}
+
+type ThreadSectionGroup = ReturnType<
+  typeof groupThreadsBySection<EnvironmentProject, EnvironmentThreadShell>
+>[number];
+
+export function renderThreadSectionItems(input: {
+  readonly groups: readonly ThreadSectionGroup[];
+  readonly filter: string | null;
+  readonly collapsedKeys: readonly string[];
+  readonly showProject: boolean;
+  readonly drag: {
+    readonly source: EnvironmentThreadShell | undefined;
+    readonly expandedKeys: readonly string[];
+    readonly targetKey: string | null;
+  } | null;
+  readonly onNewThread: (project: EnvironmentProject, sectionId: string | null) => void;
+  readonly renderThread: (thread: EnvironmentThreadShell) => ReactNode;
+}) {
+  // Headings and rows must remain separate virtual-list items.
+  const items: ReactNode[] = [];
+  for (const group of input.groups) {
+    const sameProject =
+      input.drag !== null &&
+      input.drag.source?.environmentId === group.project.environmentId &&
+      input.drag.source.projectId === group.project.id;
+    if (group.section === null && group.threads.length === 0 && !sameProject) continue;
+    if (input.drag === null && input.filter !== null && group.key !== input.filter) continue;
+    const expandForDrop = input.drag?.expandedKeys.includes(group.key) === true;
+    items.push(
+      <ThreadSectionHeading
+        key={`heading:${group.key}`}
+        project={group.project}
+        section={group.section}
+        count={group.threads.length}
+        dropEnabled={sameProject}
+        expandForDrop={expandForDrop}
+        isDropTarget={input.drag?.targetKey === group.key}
+        showProject={input.showProject}
+        onNewThread={() => input.onNewThread(group.project, group.section?.id ?? null)}
+      />,
+    );
+    if (!input.collapsedKeys.includes(group.key) || expandForDrop) {
+      items.push(...group.threads.map(input.renderThread));
+    }
+  }
+  return items;
+}
 
 function SectionDot({ section }: { section: ProjectSection | null }) {
   return (
@@ -297,7 +433,7 @@ export function ThreadSectionPicker({
   );
 }
 
-export function ThreadSectionHeading({
+function ThreadSectionHeading({
   project,
   section,
   count,

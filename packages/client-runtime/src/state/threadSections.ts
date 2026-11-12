@@ -25,6 +25,19 @@ export function threadSectionKey(project: SectionProject, sectionId: string | nu
   return JSON.stringify([project.environmentId, project.id, sectionId]);
 }
 
+export function threadMatchesSection(
+  filter: string | null,
+  projectByKey: ReadonlyMap<string, SectionProject>,
+  thread: SectionThread,
+): boolean {
+  if (filter === null) return true;
+  const project = projectByKey.get(`${thread.environmentId}:${thread.projectId}`);
+  return (
+    project !== undefined &&
+    threadSectionKey(project, resolveThreadSection(project, thread)?.id ?? null) === filter
+  );
+}
+
 /** Retains the input's row order and each physical project's definition order. */
 export function groupThreadsBySection<P extends SectionProject, T extends SectionThread>(
   projects: readonly P[],

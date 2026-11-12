@@ -66,6 +66,7 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
+// oxlint-disable-next-line eslint/no-restricted-imports -- Admission must reject writable refinement descendants before committing work.
 import * as WorkflowThreadPolicy from "../workflows/WorkflowThreadPolicy.ts";
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";

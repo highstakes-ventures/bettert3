@@ -1,4 +1,5 @@
 import { isAutomaticThread } from "@t3tools/shared/threadAttention";
+import { threadListVisibility } from "@t3tools/client-runtime/state/thread-list-policy";
 import { scheduledTaskKeepsThreadWaiting, type ScheduledTask } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
@@ -627,28 +628,28 @@ export function filterSidebarV2VisibleThreads<
   delegatedUnderParent: ReadonlySet<string> = new Set(),
   automatic?: {
     readonly environmentId: string | null;
-    readonly tasks: readonly Pick<ScheduledTask, "threadId">[];
     readonly todoThreadKeys?: ReadonlySet<string>;
   },
 ): T[] {
-  return threads.filter(
-    (thread) =>
-      (automatic?.todoThreadKeys?.has(`${thread.environmentId}:${thread.id}`) ||
-        (thread.archivedAt === null &&
-          thread.source?.backgroundWorkflowId === undefined &&
-          !(
-            automatic !== undefined &&
-            thread.environmentId === automatic.environmentId &&
-            isAutomaticSidebarThread(thread)
-          ) &&
+  const context = {
+    automaticEnvironmentId: automatic?.environmentId ?? null,
+    todoThreadKeys: automatic?.todoThreadKeys,
+  };
+  return threads.filter((thread) => {
+    const visibility = threadListVisibility(thread, context);
+    return (
+      (visibility === "keep" ||
+        (visibility !== "hide" &&
+          thread.archivedAt === null &&
           !isShownUnderParent(
             { environmentId: thread.environmentId, threadId: thread.id },
             thread.lineage,
             delegatedUnderParent,
           ))) &&
       (scopedProjectKeys === null ||
-        scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
-  );
+        scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`))
+    );
+  });
 }
 
 export function buildBulkTitleRegenerationContextMenuItem(input: {

@@ -104,10 +104,6 @@ describe("automatic sidebar membership", () => {
     ];
     const visible = filterSidebarV2VisibleThreads(threads, null, new Set(), {
       environmentId: localEnvironmentId,
-      tasks: [
-        { threadId: ThreadId.make("paused-bound") },
-        { threadId: ThreadId.make("webhook-bound") },
-      ],
     });
     expect(visible.map((thread) => thread.id)).toEqual([
       "manual",
@@ -125,10 +121,6 @@ describe("automatic sidebar membership", () => {
         new Set(),
         {
           environmentId: localEnvironmentId,
-          tasks: [
-            { threadId: ThreadId.make("paused-bound") },
-            { threadId: ThreadId.make("webhook-bound") },
-          ],
         },
       ).map((thread) => thread.id),
     ).toEqual(["manual", "webhook", "manual-timer", "email-review", "paused-bound", "ticket"]);
@@ -1653,10 +1645,17 @@ it("linked todos reveal hidden saved chats only while those todos remain open", 
   ];
   const options = {
     environmentId: localEnvironmentId,
-    tasks: [],
     todoThreadKeys: new Set(threads.map((thread) => `${thread.environmentId}:${thread.id}`)),
   };
   expect(filterSidebarV2VisibleThreads(threads, null, new Set(), options)).toEqual(threads);
+  expect(
+    filterSidebarV2VisibleThreads(
+      threads,
+      new Set([`${localEnvironmentId}:other`]),
+      new Set(),
+      options,
+    ),
+  ).toEqual([]);
   expect(
     filterSidebarV2VisibleThreads(threads, null, new Set(), {
       ...options,
