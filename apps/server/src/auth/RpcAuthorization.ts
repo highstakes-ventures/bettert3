@@ -1,3 +1,4 @@
+import { BETTERT3_RPC_REQUIRED_SCOPES } from "@t3tools/contracts";
 import {
   CLIENT_GUARDED_RPC_SCOPES,
   type DeviceListInput,
@@ -28,16 +29,17 @@ import {
   EnvironmentAuthorizationError,
   RpcScopeAuthorization,
   WS_METHODS,
-  WsRpcGroup,
+  BetterT3WsRpcGroup,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 
-type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
+type WsRpcMethod = RpcGroup.Rpcs<typeof BetterT3WsRpcGroup>["_tag"];
 
 export const RPC_REQUIRED_SCOPES = {
+  ...BETTERT3_RPC_REQUIRED_SCOPES,
   ...CLIENT_GUARDED_RPC_SCOPES,
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: AuthOrchestrationReadScope,
@@ -115,10 +117,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverRefreshUsageRates]: AuthDiagnosticsReadScope,
   [WS_METHODS.serverSignalProcess]: AuthEnvironmentMaintainScope,
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
-  [WS_METHODS.workflowsConnection]: AuthOrchestrationReadScope,
-  [WS_METHODS.workflowsSubscribe]: AuthOrchestrationReadScope,
-  [WS_METHODS.workflowsRead]: AuthOrchestrationReadScope,
-  [WS_METHODS.scheduledTasksList]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.secretsAnswerRequest]: AuthOrchestrationOperateScope,
   // Delivery logs hold request bodies, so they need the same scope as the URL.
@@ -126,10 +124,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.scheduledTasksGetWebhookDelivery]: AuthOrchestrationOperateScope,
   [WS_METHODS.cloudGetRelayClientStatus]: AuthRelayReadScope,
   [WS_METHODS.cloudInstallRelayClient]: AuthRelayWriteScope,
-  [WS_METHODS.cloudChatsDestinations]: AuthOrchestrationReadScope,
-  [WS_METHODS.cloudChatsList]: AuthOrchestrationReadScope,
-  [WS_METHODS.cloudChatsRead]: AuthOrchestrationReadScope,
-  [WS_METHODS.cloudChatsOpen]: AuthOrchestrationOperateScope,
   [WS_METHODS.pullRequestsList]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsListStats]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsFilterOptions]: AuthOrchestrationReadScope,

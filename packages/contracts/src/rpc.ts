@@ -1,27 +1,4 @@
 import {
-  WorkflowConfiguration,
-  WorkflowConnectInput,
-  WorkflowConnection,
-  WorkflowListInput,
-  WorkflowListResult,
-  WorkflowReadInput,
-  WorkflowDetail,
-  WorkflowIntakeInput,
-  WorkflowRun,
-  WorkflowDecisionInput,
-  WorkflowError,
-} from "./workflow.ts";
-import { CloudChatDestinationsResult } from "./cloudChats.ts";
-import {
-  CloudChatOpenInput,
-  CloudChatOpenResult,
-  CloudChatListInput,
-  CloudChatListResult,
-  CloudChatReadInput,
-  CloudChatReadResult,
-  CloudChatError,
-} from "./cloudChats.ts";
-import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -436,10 +413,6 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
-  cloudChatsDestinations: "cloudChats.destinations",
-  cloudChatsList: "cloudChats.list",
-  cloudChatsRead: "cloudChats.read",
-  cloudChatsOpen: "cloudChats.open",
   // Project registry methods
   projectsList: "projects.list",
   projectsAdd: "projects.add",
@@ -579,16 +552,6 @@ export const WS_METHODS = {
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
-  // Scheduled tasks
-  workflowsConnection: "workflows.connection",
-  workflowsConnect: "workflows.connect",
-  workflowsDisconnect: "workflows.disconnect",
-  workflowsSubscribe: "workflows.subscribe",
-  workflowsConfigure: "workflows.configure",
-  workflowsRead: "workflows.read",
-  workflowsIntake: "workflows.intake",
-  workflowsDecide: "workflows.decide",
-  scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
   scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
@@ -2017,54 +1980,6 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
-const WsWorkflowsConnectionRpc = Rpc.make(WS_METHODS.workflowsConnection, {
-  payload: Schema.Struct({}),
-  success: WorkflowConnection,
-  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
-});
-const WsWorkflowsConnectRpc = Rpc.make(WS_METHODS.workflowsConnect, {
-  payload: WorkflowConnectInput,
-  success: WorkflowConnection,
-  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
-});
-const WsWorkflowsDisconnectRpc = Rpc.make(WS_METHODS.workflowsDisconnect, {
-  payload: Schema.Struct({}),
-  success: Schema.Void,
-  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
-});
-const WsWorkflowsSubscribeRpc = Rpc.make(WS_METHODS.workflowsSubscribe, {
-  payload: WorkflowListInput,
-  success: WorkflowListResult,
-  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
-  stream: true,
-});
-const WsWorkflowsConfigureRpc = Rpc.make(WS_METHODS.workflowsConfigure, {
-  payload: WorkflowConfiguration,
-  success: WorkflowListResult,
-  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
-});
-const WsWorkflowsReadRpc = Rpc.make(WS_METHODS.workflowsRead, {
-  payload: WorkflowReadInput,
-  success: WorkflowDetail,
-  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
-});
-const WsWorkflowsIntakeRpc = Rpc.make(WS_METHODS.workflowsIntake, {
-  payload: WorkflowIntakeInput,
-  success: WorkflowRun,
-  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
-});
-const WsWorkflowsDecideRpc = Rpc.make(WS_METHODS.workflowsDecide, {
-  payload: WorkflowDecisionInput,
-  success: WorkflowRun,
-  error: Schema.Union([WorkflowError, EnvironmentAuthorizationError]),
-});
-
-const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
-  payload: ScheduledTaskListInput,
-  success: ScheduledTaskListResult,
-  error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
-});
-
 const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -2153,44 +2068,7 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
-export const WorkflowRpcGroup = RpcGroup.make(
-  WsWorkflowsConnectionRpc,
-  WsWorkflowsConnectRpc,
-  WsWorkflowsDisconnectRpc,
-  WsWorkflowsSubscribeRpc,
-  WsWorkflowsConfigureRpc,
-  WsWorkflowsReadRpc,
-  WsWorkflowsIntakeRpc,
-  WsWorkflowsDecideRpc,
-).middleware(RpcScopeAuthorization);
-
-const WsCloudChatsDestinationsRpc = Rpc.make(WS_METHODS.cloudChatsDestinations, {
-  payload: Schema.Struct({ instanceId: ProviderInstanceId }),
-  success: CloudChatDestinationsResult,
-  error: Schema.Union([CloudChatError, EnvironmentAuthorizationError]),
-});
-const WsCloudChatsListRpc = Rpc.make(WS_METHODS.cloudChatsList, {
-  payload: CloudChatListInput,
-  success: CloudChatListResult,
-  error: Schema.Union([CloudChatError, EnvironmentAuthorizationError]),
-});
-const WsCloudChatsReadRpc = Rpc.make(WS_METHODS.cloudChatsRead, {
-  payload: CloudChatReadInput,
-  success: CloudChatReadResult,
-  error: Schema.Union([CloudChatError, EnvironmentAuthorizationError]),
-});
-
-const WsCloudChatsOpenRpc = Rpc.make(WS_METHODS.cloudChatsOpen, {
-  payload: CloudChatOpenInput,
-  success: CloudChatOpenResult,
-  error: Schema.Union([CloudChatError, EnvironmentAuthorizationError]),
-});
-
 export const WsRpcGroup = RpcGroup.make(
-  WsCloudChatsOpenRpc,
-  WsCloudChatsDestinationsRpc,
-  WsCloudChatsListRpc,
-  WsCloudChatsReadRpc,
   WsGuestShareCreateRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
@@ -2250,15 +2128,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
-  WsWorkflowsConnectionRpc,
-  WsWorkflowsConnectRpc,
-  WsWorkflowsDisconnectRpc,
-  WsWorkflowsSubscribeRpc,
-  WsWorkflowsConfigureRpc,
-  WsWorkflowsReadRpc,
-  WsWorkflowsIntakeRpc,
-  WsWorkflowsDecideRpc,
-  WsScheduledTasksListRpc,
   WsScheduledTasksSubscribeRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,

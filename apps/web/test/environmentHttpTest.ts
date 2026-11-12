@@ -3,7 +3,7 @@ import {
   AuthSessionId,
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
-  EnvironmentHttpApi,
+  BetterT3EnvironmentHttpApi as EnvironmentHttpApi,
   EnvironmentVoiceBodyLimit,
   type AuthBrowserSessionRequest,
   type AuthBrowserSessionResult,

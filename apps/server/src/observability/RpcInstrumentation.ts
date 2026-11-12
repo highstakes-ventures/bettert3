@@ -1,4 +1,9 @@
-import { ORCHESTRATION_V2_WS_METHODS, WS_METHODS, type WsRpcGroup } from "@t3tools/contracts";
+import { RPC_AGGREGATES as BETTERT3_RPC_AGGREGATES } from "../bettert3/rpcMetrics.ts";
+import {
+  ORCHESTRATION_V2_WS_METHODS,
+  WS_METHODS,
+  type BetterT3WsRpcGroup,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
@@ -7,10 +12,11 @@ import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
 
 import { rpcRequestDuration, rpcRequestsTotal, withMetrics } from "./Metrics.ts";
 
-type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
+type WsRpcMethod = RpcGroup.Rpcs<typeof BetterT3WsRpcGroup>["_tag"];
 
 // Trace queries and dashboards depend on these labels, including deviations from method prefixes.
 const RPC_AGGREGATES = {
+  ...BETTERT3_RPC_AGGREGATES,
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: "orchestrationV2",
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: "orchestration",
   [ORCHESTRATION_V2_WS_METHODS.getNativeChildWork]: "orchestration",
@@ -94,15 +100,6 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverRefreshUsageRates]: "server",
   [WS_METHODS.serverSignalProcess]: "server",
   [WS_METHODS.serverReportClientActivity]: "server",
-  [WS_METHODS.workflowsConnection]: "workflows",
-  [WS_METHODS.workflowsConnect]: "workflows",
-  [WS_METHODS.workflowsDisconnect]: "workflows",
-  [WS_METHODS.workflowsSubscribe]: "workflows",
-  [WS_METHODS.workflowsConfigure]: "workflows",
-  [WS_METHODS.workflowsRead]: "workflows",
-  [WS_METHODS.workflowsIntake]: "workflows",
-  [WS_METHODS.workflowsDecide]: "workflows",
-  [WS_METHODS.scheduledTasksList]: "scheduledTasks",
   [WS_METHODS.scheduledTasksSubscribe]: "scheduledTasks",
   [WS_METHODS.scheduledTasksUpsert]: "scheduledTasks",
   [WS_METHODS.scheduledTasksSetEnabled]: "scheduledTasks",
@@ -115,10 +112,6 @@ const RPC_AGGREGATES = {
   [WS_METHODS.guestShareCreate]: "guest-share",
   [WS_METHODS.cloudGetRelayClientStatus]: "cloud",
   [WS_METHODS.cloudInstallRelayClient]: "cloud",
-  [WS_METHODS.cloudChatsDestinations]: "provider",
-  [WS_METHODS.cloudChatsList]: "provider",
-  [WS_METHODS.cloudChatsRead]: "provider",
-  [WS_METHODS.cloudChatsOpen]: "provider",
   [WS_METHODS.pullRequestsList]: "pull-requests",
   [WS_METHODS.pullRequestsListStats]: "pull-requests",
   [WS_METHODS.pullRequestsFilterOptions]: "pull-requests",

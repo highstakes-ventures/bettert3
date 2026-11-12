@@ -1,7 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
-  EnvironmentHttpApi,
+  BetterT3HttpApi,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
@@ -21,7 +21,7 @@ const failure = {
     failEnvironmentInternal("internal_error", error),
 };
 export const layer = HttpApiBuilder.group(
-  EnvironmentHttpApi,
+  BetterT3HttpApi,
   "mation",
   Effect.fnUntraced(function* (handlers) {
     const service = yield* AutomationExecutionService.AutomationExecutionService;

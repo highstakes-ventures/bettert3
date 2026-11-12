@@ -1,8 +1,8 @@
-import { WsRpcGroup } from "@t3tools/contracts";
+import { BetterT3WsRpcGroup } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { RpcClient } from "effect/rpc";
 
-export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup);
+export const makeWsRpcProtocolClient = RpcClient.make(BetterT3WsRpcGroup);
 type RpcClientFactory = typeof makeWsRpcProtocolClient;
 export type WsRpcProtocolClient =
   RpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never;

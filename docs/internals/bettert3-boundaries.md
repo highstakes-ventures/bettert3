@@ -23,6 +23,20 @@ production orchestration and provider modules from importing product services.
 Tests may compose real product implementations. `runtimeLayer.ts` is the service
 composition exception; transport toolkits remain adapters for their services.
 
+`bettert3Http` and `bettert3Rpc` compose the fork's API groups with T3's groups.
+The core API declarations must not import the fork's groups: composition imports
+core authentication and authorization tags, so the reverse dependency creates a
+cycle. Keep endpoint names, scopes and stored field encodings stable when moving
+definitions. `bettert3ThreadFields` owns the typed additions to existing records;
+those additions still participate in T3's command and replay validation.
+
+`ProjectionStore` has one import exception for `ThreadShellIntegrations`. Its SQL
+fragments execute inside the store's existing statements and transaction, preserving
+snapshot consistency and indexes. The adapter owns workflow joins and PAI review
+interpretation; it must not make network requests or perform per-thread reads.
+`draftRunDestination` owns pure destination decisions, while `composerDraftStore`
+continues to own drafts, preferences and persistence.
+
 `ThreadManagementService` has one statement-level exception for
 `WorkflowThreadPolicy`. This is an admission guard, not workflow execution. It
 rejects writable or worktree delegation from refinement chats and descendants

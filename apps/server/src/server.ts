@@ -19,7 +19,12 @@ import * as NodeHttp from "node:http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentHttpApi, ExecutionHttpApi, type RepositoryIdentity } from "@t3tools/contracts";
+import {
+  EnvironmentHttpApi,
+  BetterT3HttpApi,
+  ExecutionHttpApi,
+  type RepositoryIdentity,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -793,13 +798,16 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(OrchestrationHttp.layer),
       Layer.provide(PullRequestHttp.layer),
       Layer.provide(ProjectHttp.layer),
+      Layer.provide(speechHttpApiLayer),
+      Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),
+      Layer.provide(WebhookRoute.layer.pipe(Layer.provide(RelayDeliveryProof.layer))),
+      Layer.provide(AuthHttp.layerAuthenticatedAuth),
+    ),
+    HttpApiBuilder.layer(BetterT3HttpApi).pipe(
       Layer.provide(MationHttp.layer),
       Layer.provide(MarketingHttp.layer),
       Layer.provide(TodoHttp.layer),
       Layer.provide(PaiHttp.layer),
-      Layer.provide(speechHttpApiLayer),
-      Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),
-      Layer.provide(WebhookRoute.layer.pipe(Layer.provide(RelayDeliveryProof.layer))),
       Layer.provide(AuthHttp.layerAuthenticatedAuth),
     ),
     HttpApiBuilder.layer(ExecutionHttpApi).pipe(

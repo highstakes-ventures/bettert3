@@ -1,5 +1,6 @@
+import { BETTERT3_WS_METHODS } from "@t3tools/contracts";
 import { expect, it, vi } from "@effect/vitest";
-import { EnvironmentId, WS_METHODS, type WorkflowDetail } from "@t3tools/contracts";
+import { EnvironmentId, type WorkflowDetail } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -36,7 +37,7 @@ it.effect(
           session: yield* SubscriptionRef.make(
             Option.some({
               client: {
-                [WS_METHODS.workflowsRead]: ({ runId }: { runId: string }) =>
+                [BETTERT3_WS_METHODS.workflowsRead]: ({ runId }: { runId: string }) =>
                   Effect.sync(() => {
                     reads.push(runId);
                     return {

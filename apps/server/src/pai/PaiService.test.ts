@@ -4,7 +4,7 @@ import * as Environment from "../environment/ServerEnvironment.ts";
 import { NodeHttpPlatform } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, expect } from "@effect/vitest";
-import { AuthSessionId, EnvironmentHttpApi } from "@t3tools/contracts";
+import { AuthSessionId, BetterT3HttpApi } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as HttpApi from "effect/http-api/HttpApi";
@@ -94,7 +94,7 @@ it.effect(
     }),
 );
 
-class PaiTestApi extends HttpApi.make("environment").add(EnvironmentHttpApi.groups.pai) {}
+class PaiTestApi extends HttpApi.make(BetterT3HttpApi.identifier).add(BetterT3HttpApi.groups.pai) {}
 
 it("PAI reads require read scope, while every action requires operate scope in the destination environment", async () => {
   const forwarded: string[] = [];

@@ -14,7 +14,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
-  WsRpcGroup,
+  BetterT3WsRpcGroup,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import * as Console from "effect/Console";
@@ -170,7 +170,7 @@ const connectServer = Effect.fn("measure.connectServer")(function* (options: Opt
       Layer.provide(RpcSerialization.layerJson),
     ),
   );
-  const client = yield* RpcClient.make(WsRpcGroup).pipe(Effect.provideContext(protocol));
+  const client = yield* RpcClient.make(BetterT3WsRpcGroup).pipe(Effect.provideContext(protocol));
   return { client, environmentId: EnvironmentId.make(descriptor.environmentId), projectId };
 });
 

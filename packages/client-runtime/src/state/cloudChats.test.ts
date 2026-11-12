@@ -1,5 +1,6 @@
+import { BETTERT3_WS_METHODS } from "@t3tools/contracts";
 import { expect, it, vi } from "@effect/vitest";
-import { EnvironmentId, WS_METHODS } from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -37,7 +38,7 @@ it.effect("shows a recently opened page immediately while refreshing and isolate
         session: yield* SubscriptionRef.make(
           Option.some({
             client: {
-              [WS_METHODS.cloudChatsRead]: () =>
+              [BETTERT3_WS_METHODS.cloudChatsRead]: () =>
                 Effect.gen(function* () {
                   requests++;
                   if (requests === 1) return page;

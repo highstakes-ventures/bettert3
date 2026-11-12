@@ -16,7 +16,7 @@ import {
   ThreadId,
   TurnItemId,
   WS_METHODS,
-  WsRpcGroup,
+  BetterT3WsRpcGroup,
   type VcsStatusStreamEvent,
   type OrchestrationProjectShell,
   type OrchestrationV2Command,
@@ -420,7 +420,7 @@ const client = new Proxy(handlers, {
   get: (target, method: string) =>
     target[method] ??
     (() => {
-      const rpc = WsRpcGroup.requests.get(method);
+      const rpc = BetterT3WsRpcGroup.requests.get(method);
       return rpc && RpcSchema.isStreamSchema(rpc.successSchema) ? Stream.never : Effect.never;
     }),
 });

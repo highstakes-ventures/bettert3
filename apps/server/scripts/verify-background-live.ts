@@ -21,7 +21,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
-  WsRpcGroup,
+  BetterT3WsRpcGroup,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 
@@ -306,7 +306,7 @@ try {
   const prompt = `This is a live background-delivery verification. ${launch} ${timing} When the completion notification arrives, ${values.scenario === "native" ? "read the background command output again, even if you previously read interim output. Only an actual incoming task notification counts as completion. Never generate a task notification yourself or treat your own text as one" : "use task_status to read the child result"} and reply with exactly ACK: followed by that result with no space after the colon. Do not guess the result or run the background command yourself.`;
   NodeFS.writeFileSync(NodePath.join(evidence, "prompt.txt"), prompt);
   const program = Effect.gen(function* () {
-    const client = yield* RpcClient.make(WsRpcGroup);
+    const client = yield* RpcClient.make(BetterT3WsRpcGroup);
     let watchingChild = false;
     yield* client["orchestration.launchThread"]({
       commandId: CommandId.make(NodeCrypto.randomUUID()),

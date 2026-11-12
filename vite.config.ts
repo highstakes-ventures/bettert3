@@ -484,10 +484,33 @@ export default defineConfig({
                     "**/pai/**",
                     "**/marketing/**",
                     "**/todo/**",
+                    "**/bettert3/**",
                   ],
                   message:
                     "Keep product services outside execution code. Compose them in runtimeLayer.ts; see docs/internals/bettert3-boundaries.md.",
                 },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        files: ["packages/contracts/src/rpc.ts", "packages/contracts/src/environmentHttp.ts"],
+        rules: {
+          "eslint/no-restricted-imports": [
+            "error",
+            {
+              paths: [
+                ...RESTRICTED_IMPORT_PATHS,
+                "./bettert3Rpc.ts",
+                "./bettert3Http.ts",
+                "./workflow.ts",
+                "./cloudChats.ts",
+                "./mation.ts",
+                "./pai.ts",
+                "./todo.ts",
+                "./marketing.ts",
+                "./executionRequest.ts",
               ],
             },
           ],

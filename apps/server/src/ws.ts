@@ -1,4 +1,4 @@
-import * as WorkflowRpc from "./workflows/WorkflowRpc.ts";
+import * as BetterT3Rpc from "./bettert3/rpc.ts";
 import * as CloudThreadService from "./orchestration-v2/CloudThreadService.ts";
 import * as CodexCloudChats from "./provider/CodexCloudChats.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
@@ -105,6 +105,7 @@ import {
   type PullRequestRef,
   WS_METHODS,
   WsRpcGroup,
+  BetterT3WsRpcGroup,
 } from "@t3tools/contracts";
 import {
   HttpRouter,
@@ -666,17 +667,8 @@ function projectFileFailureContext(
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 // Middleware added later wraps middleware added earlier, so instrumentation wraps authorization.
-const ServerWsRpcGroup = WsRpcGroup.middleware(RpcInstrumentation);
-const CoreWsRpcGroup = ServerWsRpcGroup.omit(
-  WS_METHODS.workflowsConnection,
-  WS_METHODS.workflowsConnect,
-  WS_METHODS.workflowsDisconnect,
-  WS_METHODS.workflowsSubscribe,
-  WS_METHODS.workflowsConfigure,
-  WS_METHODS.workflowsRead,
-  WS_METHODS.workflowsIntake,
-  WS_METHODS.workflowsDecide,
-);
+const ServerWsRpcGroup = BetterT3WsRpcGroup.middleware(RpcInstrumentation);
+const CoreWsRpcGroup = WsRpcGroup.middleware(RpcInstrumentation);
 
 // RpcGroup.toLayer derives each handler's requirements by scanning every RPC in
 // the group, so its type cost grows with handlers × RPCs. Near 200 methods that
@@ -1463,8 +1455,6 @@ export const layerWsRpc = (
       const secretRequests = yield* SecretRequests.SecretRequests;
       const guestShares = yield* GuestShareService.GuestShareService;
       const pullRequests = yield* PullRequestService.PullRequestService;
-      const cloudChats = yield* CodexCloudChats.CodexCloudChats;
-      const cloudThreads = yield* CloudThreadService.CloudThreadService;
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
@@ -2374,7 +2364,6 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.setEnabled(input)),
           ),
-        [WS_METHODS.scheduledTasksList]: (_input) => scheduledTasks.list(),
         [WS_METHODS.scheduledTasksDelete]: (input) =>
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.delete(input)),
@@ -2802,13 +2791,6 @@ export const layerWsRpc = (
                 Effect.forkScoped,
               ),
           ),
-        [WS_METHODS.cloudChatsDestinations]: (input) =>
-          cloudChats
-            .destinations(input.instanceId)
-            .pipe(Effect.map((destinations) => ({ destinations }))),
-        [WS_METHODS.cloudChatsList]: () => cloudChats.list(),
-        [WS_METHODS.cloudChatsRead]: (input) => cloudChats.read(input),
-        [WS_METHODS.cloudChatsOpen]: (input) => cloudThreads.open(input),
         [WS_METHODS.pullRequestsList]: (input) => pullRequests.list(input),
         [WS_METHODS.pullRequestsListStats]: (input) => pullRequests.listStats(input),
         [WS_METHODS.pullRequestsFilterOptions]: (input) => pullRequests.filterOptions(input),
@@ -3544,7 +3526,7 @@ export const layerWsRpc = (
         yield* OtherWsRpcGroup.toHandlers(otherHandlers),
       );
     }),
-  ).pipe(Layer.merge(WorkflowRpc.layer));
+  ).pipe(Layer.merge(BetterT3Rpc.layer));
 
 // Default socket-level Defect frames end every pending client request.
 export const WS_RPC_SERVER_OPTIONS = {

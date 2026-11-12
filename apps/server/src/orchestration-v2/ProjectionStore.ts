@@ -1,4 +1,5 @@
-import { paiWidgetFromToolItem } from "@t3tools/shared/toolOutput";
+// oxlint-disable-next-line eslint/no-restricted-imports -- Custom shell fields compose inside the existing projection transaction.
+import * as ThreadShellIntegrations from "../bettert3/ThreadShellIntegrations.ts";
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
 import { pendingGuestMessageCount } from "@t3tools/contracts";
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
@@ -49,7 +50,6 @@ import type {
   RunAttemptId,
 } from "@t3tools/contracts";
 import {
-  CodexCloudDestination,
   IDLE_COMPACTION_TEXT,
   idleCompactionOf,
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
@@ -1216,9 +1216,6 @@ const decodeNodePayload = Schema.decodeUnknownEffect(
 const decodeSubagentPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2SubagentJsonSchema),
 );
-const decodeExecutionDestinationPayload = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.NullOr(CodexCloudDestination)),
-);
 const decodeProviderSessionPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2ProviderSessionJsonSchema),
 );
@@ -1639,49 +1636,12 @@ export function threadShellFromProjection(
     runs,
     pullRequests: projection.thread.pullRequests,
   });
-  const executionProviderThread = projection.providerThreads.find(
-    (thread) => thread.id === projection.thread.activeProviderThreadId,
-  );
-  const executionSession = projection.providerSessions.find(
-    (session) => session.id === executionProviderThread?.providerSessionId,
-  );
-  const importedCloudDestination =
-    executionProviderThread?.providerSessionId === null &&
-    projection.thread.runDestination?.existingThreadId !== undefined &&
-    executionProviderThread.nativeThreadRef?.nativeId ===
-      projection.thread.runDestination.existingThreadId
-      ? projection.thread.runDestination
-      : undefined;
-  const executionDestination = executionSession
-    ? executionSession.executionDestination
-    : importedCloudDestination;
-  const hasEmailReview = projection.turnItems.some(
-    (item) =>
-      item.type === "dynamic_tool" &&
-      item.status === "completed" &&
-      !projection.runs.some((run) => run.id === item.runId && run.status === "rolled_back") &&
-      paiWidgetFromToolItem(item) !== undefined,
-  );
-  const scheduledTaskId = projection.messages.find(
-    (message) => message.scheduledTaskId !== undefined,
-  )?.scheduledTaskId;
   return {
-    ...(hasEmailReview ? { hasEmailReview: true } : {}),
-    ...(projection.thread.automationOrigin !== undefined
-      ? { automationOrigin: projection.thread.automationOrigin }
-      : scheduledTaskId !== undefined
-        ? { automationOrigin: undefined }
-        : {}),
-    ...(scheduledTaskId === undefined ? {} : { scheduledTaskId }),
-    ...(executionDestination === undefined ? {} : { executionDestination }),
-    ...(projection.thread.runDestination === undefined
-      ? {}
-      : { runDestination: projection.thread.runDestination }),
+    ...ThreadShellIntegrations.fromProjection(projection, activityRun, isActivityRunForShell),
     createdBy: projection.thread.createdBy,
     creationSource: projection.thread.creationSource,
     id: projection.thread.id,
     projectId: projection.thread.projectId,
-    sectionId: projection.thread.sectionId ?? null,
     title: projection.thread.title,
     providerInstanceId: projection.thread.providerInstanceId,
     modelSelection: projection.thread.modelSelection,
@@ -1715,24 +1675,6 @@ export function threadShellFromProjection(
     latestRunRequestedAt: latestRun?.requestedAt ?? null,
     latestRunStartedAt: latestRun?.startedAt ?? null,
     latestRunCompletedAt: latestRun?.completedAt ?? null,
-    // Imported run dates can be ordering fallbacks. Cloud retains timing authority
-    // even after a native run becomes the latest run.
-    completedRunDurationMs: projection.runs.some((run) =>
-      run.id.startsWith(`cloud-run:${projection.thread.id}:`),
-    )
-      ? null
-      : projection.runs.reduce(
-          (total, run) =>
-            run.startedAt !== null && run.completedAt !== null && !isActivityRunForShell(run)
-              ? total +
-                Math.max(
-                  0,
-                  DateTime.toEpochMillis(run.completedAt) - DateTime.toEpochMillis(run.startedAt),
-                )
-              : total,
-          0,
-        ),
-    activityRunExecutionStartedAt: activityRun?.startedAt ?? null,
     latestRunStopRequested:
       latestRun != null &&
       projection.turnItems.some(
@@ -2006,33 +1948,11 @@ function shellFromState(input: {
   readonly visibleItemCount: number;
 }): OrchestrationV2ThreadShell {
   return {
-    ...(input.state.thread.automationOrigin !== undefined
-      ? { automationOrigin: input.state.thread.automationOrigin }
-      : input.state.backgroundWorkflowId !== null && input.state.ticketWorkflowId === null
-        ? { automationOrigin: "t3" as const }
-        : input.state.scheduledTaskId !== undefined
-          ? { automationOrigin: undefined }
-          : {}),
-    ...(input.state.scheduledTaskId === undefined
-      ? {}
-      : { scheduledTaskId: input.state.scheduledTaskId }),
-    ...(input.state.ticketWorkflowId === null
-      ? {}
-      : { ticketWorkflowId: input.state.ticketWorkflowId }),
-    ...(input.state.backgroundWorkflowId === null
-      ? {}
-      : { backgroundWorkflowId: input.state.backgroundWorkflowId }),
-    ...(input.state.executionDestination === undefined
-      ? {}
-      : { executionDestination: input.state.executionDestination }),
-    ...(input.state.thread.runDestination === undefined
-      ? {}
-      : { runDestination: input.state.thread.runDestination }),
+    ...ThreadShellIntegrations.fromState(input.state),
     createdBy: input.state.thread.createdBy,
     creationSource: input.state.thread.creationSource,
     id: input.state.thread.id,
     projectId: input.state.thread.projectId,
-    sectionId: input.state.thread.sectionId ?? null,
     title: input.state.thread.title,
     providerInstanceId: input.state.thread.providerInstanceId,
     modelSelection: input.state.thread.modelSelection,
@@ -2066,8 +1986,6 @@ function shellFromState(input: {
     latestRunRequestedAt: input.state.latestRunRequestedAt,
     latestRunStartedAt: input.state.latestRunStartedAt,
     latestRunCompletedAt: input.state.latestRunCompletedAt,
-    completedRunDurationMs: input.state.completedRunDurationMs,
-    activityRunExecutionStartedAt: input.state.activityRunExecutionStartedAt,
     latestRunStopRequested: input.state.latestRunStopRequested,
     latestRunBackgroundWake: input.state.latestRunBackgroundWake,
     activeRunId: input.state.activeRunId,
@@ -2084,7 +2002,6 @@ function shellFromState(input: {
     latestVisibleMessage: null,
     latestUserMessageAt: input.state.latestUserMessageAt,
     latestUserAuthoredMessageAt: input.state.latestUserAuthoredMessageAt,
-    ...(input.state.hasEmailReview ? { hasEmailReview: true } : {}),
     hasActionableProposedPlan: input.state.hasActionableProposedPlan,
     pendingBackgroundTasks: input.state.pendingBackgroundTasks,
     providerInstanceHistory: input.state.providerInstanceHistory,
@@ -2116,6 +2033,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
   ProjectionStoreV2,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
+    const integrations = ThreadShellIntegrations.makeSqlFragments(sql);
 
     const inlineWorkOutput = sql`item.type = 'dynamic_tool' AND (
       item.payload_json LIKE '%htmlRender%' OR item.payload_json LIKE ${`%${MCP_APP_OUTPUT_KEY}%`}
@@ -6459,35 +6377,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             SELECT
               t.thread_id,
               t.payload_json,
-              (
-                SELECT json_extract(message.payload_json, '$.scheduledTaskId')
-                FROM orchestration_v2_projection_messages message
-                WHERE message.thread_id = t.thread_id
-                  AND json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
-                ORDER BY message.created_at, message.message_id
-                LIMIT 1
-              ) AS scheduled_task_id,
-              (
-                SELECT workflow.id FROM workflow_runs workflow
-                WHERE json_extract(workflow.run_json, '$.threadId') = t.thread_id
-                  AND json_extract(workflow.run_json, '$.kind') = 'tickets'
-                LIMIT 1
-              ) AS ticket_workflow_id,
-              (
-                SELECT workflow.id FROM workflow_runs workflow
-                WHERE json_extract(workflow.run_json, '$.threadId') = t.thread_id
-                  AND (
-                    json_extract(workflow.run_json, '$.kind') IN ('performance', 'refactor')
-                    OR (
-                      json_extract(workflow.run_json, '$.kind') = 'tickets'
-                      AND (
-                        json_extract(workflow.run_json, '$.phase') IN ('queued', 'preparing')
-                        OR json_extract(t.payload_json, '$.refinementOpened') IS NOT 1
-                      )
-                    )
-                  )
-                LIMIT 1
-              ) AS background_workflow_id,
+${integrations.shellColumns}
               CASE
                 WHEN json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
                   AND json_extract(t.payload_json, '$.lineage.sideChat') IS NOT 1
@@ -6499,26 +6389,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               presented.requested_at AS latest_run_requested_at,
               json_extract(presented.payload_json, '$.startedAt') AS latest_run_started_at,
               presented.completed_at AS latest_run_completed_at,
-              (
-                SELECT CASE
-                  WHEN MAX(instr(r.run_id, 'cloud-run:' || t.thread_id || ':') = 1) = 1 THEN NULL
-                  ELSE COALESCE(SUM(CASE
-                    WHEN r.status NOT IN ('preparing', 'starting', 'running', 'waiting')
-                    THEN MAX(0, CAST(ROUND(
-                      (julianday(r.completed_at) - julianday(json_extract(r.payload_json, '$.startedAt'))) * 86400000
-                    ) AS INTEGER)) ELSE 0 END), 0)
-                END
-                FROM orchestration_v2_projection_runs r
-                WHERE r.thread_id = t.thread_id
-              ) AS completed_run_duration_ms,
-              (
-                SELECT json_extract(r.payload_json, '$.startedAt')
-                FROM orchestration_v2_projection_runs r
-                WHERE r.thread_id = t.thread_id
-                  AND r.status IN ('preparing', 'starting', 'running', 'waiting')
-                ORDER BY r.ordinal DESC, r.run_id DESC
-                LIMIT 1
-              ) AS activity_run_execution_started_at,
+${integrations.timingColumns}
               EXISTS (
                 SELECT 1 FROM orchestration_v2_projection_turn_items stop_request
                 WHERE stop_request.thread_id = t.thread_id AND stop_request.run_id = presented.run_id
@@ -6550,26 +6421,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 ORDER BY r.ordinal DESC, r.run_id DESC
                 LIMIT 1
               ) AS activity_run_started_at,
-              COALESCE(
-                (
-                  SELECT json_quote(json_extract(execution_session.payload_json, '$.executionDestination'))
-                  FROM orchestration_v2_projection_provider_threads runtime_thread
-                  JOIN orchestration_v2_projection_provider_sessions execution_session
-                    ON execution_session.provider_session_id = runtime_thread.provider_session_id
-                  WHERE runtime_thread.provider_thread_id = t.active_provider_thread_id
-                    AND json_type(execution_session.payload_json, '$.executionDestination') IS NOT NULL
-                  LIMIT 1
-                ),
-                (
-                  SELECT json_quote(json_extract(t.payload_json, '$.runDestination'))
-                  FROM orchestration_v2_projection_provider_threads runtime_thread
-                  WHERE runtime_thread.provider_thread_id = t.active_provider_thread_id
-                    AND runtime_thread.provider_session_id IS NULL
-                    AND json_extract(runtime_thread.payload_json, '$.nativeThreadRef.nativeId') =
-                      json_extract(t.payload_json, '$.runDestination.existingThreadId')
-                  LIMIT 1
-                )
-              ) AS execution_destination_json,
+${integrations.destinationColumn}
               (
                 SELECT json_extract(session.payload_json, '$.lastError')
                 -- Keep bindings outermost: one provider instance can hold every session.
@@ -6807,14 +6659,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           AND i.status IN ('running', 'waiting')
       `
       }
-      UNION ALL
-      SELECT i.thread_id, i.payload_json, NULL AS owning_provider_instance_id
-      FROM orchestration_v2_projection_turn_items i
-      LEFT JOIN orchestration_v2_projection_runs r ON r.run_id = i.run_id
-      WHERE i.type = 'dynamic_tool' AND i.status = 'completed'
-        AND i.payload_json GLOB '*paiWidget*'
-        AND (i.run_id IS NULL OR r.status <> 'rolled_back')
-        ${threadIds === undefined ? sql`` : sql`AND i.thread_id IN (SELECT value FROM json_each(${encodeIdList(threadIds)}))`}
+      ${integrations.emailReviewRows(threadIds)}
     `;
 
     const runMapsByThreadId = (input: {
@@ -6900,15 +6745,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           Effect.gen(function* () {
             const rows = yield* sql<SettlementThreadRow>`
             SELECT t.thread_id, t.payload_json,
-              EXISTS (
-                SELECT 1 FROM workflow_runs workflow
-                WHERE json_extract(workflow.run_json, '$.threadId') = t.thread_id
-                  AND json_extract(workflow.run_json, '$.kind') = 'tickets'
-                  AND json_extract(workflow.run_json, '$.phase') IN (
-                    'review', 'approving', 'approved', 'implementing', 'done', 'rejecting', 'rejected'
-                  )
-                  AND json_extract(workflow.run_json, '$.error') IS NULL
-              ) AS ticket_preparation_complete,
+${integrations.settlementColumn}
               r.run_id AS latest_run_id,
               r.status AS latest_run_status,
               r.requested_at AS latest_run_requested_at,
@@ -7248,7 +7085,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           executionDestination:
             row.execution_destination_json === null
               ? undefined
-              : yield* decodeExecutionDestinationPayload(row.execution_destination_json),
+              : yield* ThreadShellIntegrations.decodeDestination(row.execution_destination_json),
           thread,
           scheduledTaskId:
             row.scheduled_task_id === null
@@ -7295,11 +7132,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ? null
               : DateTime.makeUnsafe(row.latest_user_message_at),
           latestUserAuthoredMessageAt,
-          hasEmailReview: (relevantTurnItemsByThreadId.get(thread.id) ?? []).some(
-            (item) =>
-              item.type === "dynamic_tool" &&
-              item.status === "completed" &&
-              paiWidgetFromToolItem(item) !== undefined,
+          hasEmailReview: ThreadShellIntegrations.hasEmailReview(
+            relevantTurnItemsByThreadId.get(thread.id) ?? [],
           ),
           hasActionableProposedPlan: row.has_actionable_proposed_plan === 1,
           pendingBackgroundTasks,
@@ -7639,13 +7473,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               WHERE json_type(link.value, '$.watch') IS NOT NULL
             )
           ) AS may_be_live,
-          EXISTS (
-            SELECT 1 FROM workflow_runs workflow
-            -- Remove column affinity so SQLite can use workflow_runs_thread.
-            WHERE json_extract(workflow.run_json, '$.threadId') = +t.thread_id
-              AND json_extract(workflow.run_json, '$.kind') = 'tickets'
-              AND json_extract(workflow.run_json, '$.phase') = 'review'
-          ) AS awaiting_refinement
+${integrations.refinementIndexColumn}
+
         FROM orchestration_v2_projection_threads t
         WHERE t.deleted_at IS NULL
           AND json_extract(t.payload_json, '$.archivedAt') IS NULL

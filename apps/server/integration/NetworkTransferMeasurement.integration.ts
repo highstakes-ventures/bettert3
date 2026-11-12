@@ -3,7 +3,7 @@ import * as NodeHttp from "node:http";
 import * as NodeZlib from "node:zlib";
 
 import * as NodeWS from "@effect/platform-node/NodeWS";
-import { WsRpcGroup } from "@t3tools/contracts";
+import { BetterT3WsRpcGroup } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -181,7 +181,7 @@ function layerCountingWsRpcProtocol(input: {
   );
 }
 
-const makeCountingWsRpcClient = RpcClient.make(WsRpcGroup);
+const makeCountingWsRpcClient = RpcClient.make(BetterT3WsRpcGroup);
 export type CountingWsRpcClient = Effect.Success<typeof makeCountingWsRpcClient>;
 
 export interface MeasuredWsClient {

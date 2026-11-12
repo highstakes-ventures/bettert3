@@ -1,7 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
-  EnvironmentHttpApi,
+  BetterT3HttpApi,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
@@ -16,7 +16,7 @@ const failure = (e: Marketing.MarketingFailure) =>
     ? failEnvironmentInternal("internal_error", e)
     : failEnvironmentInvalidRequest("invalid_command");
 export const layer = HttpApiBuilder.group(
-  EnvironmentHttpApi,
+  BetterT3HttpApi,
   "marketing",
   Effect.fnUntraced(function* (handlers) {
     const service = yield* Marketing.MarketingService;

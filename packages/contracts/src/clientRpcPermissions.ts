@@ -1,3 +1,4 @@
+import { BETTERT3_CLIENT_GUARDED_RPC_SCOPES } from "./bettert3Rpc.ts";
 import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput, GitRunStackedActionInput } from "./git.ts";
 import {
@@ -17,7 +18,7 @@ import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
-  [WS_METHODS.cloudChatsOpen]: AuthOrchestrationOperateScope,
+  ...BETTERT3_CLIENT_GUARDED_RPC_SCOPES,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.
@@ -62,11 +63,6 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.vcsSwitchRef]: AuthSourceControlWriteScope,
   [WS_METHODS.vcsInit]: AuthSourceControlWriteScope,
 
-  [WS_METHODS.workflowsConnect]: AuthSettingsWriteScope,
-  [WS_METHODS.workflowsDisconnect]: AuthSettingsWriteScope,
-  [WS_METHODS.workflowsConfigure]: AuthOrchestrationOperateScope,
-  [WS_METHODS.workflowsIntake]: AuthOrchestrationOperateScope,
-  [WS_METHODS.workflowsDecide]: AuthOrchestrationOperateScope,
   // Starts an agent session on this environment that can read its logs and database.
   [WS_METHODS.serverPrepareTriage]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksUpsert]: AuthOrchestrationOperateScope,

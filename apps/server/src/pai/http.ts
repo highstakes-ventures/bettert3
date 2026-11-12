@@ -1,7 +1,7 @@
 import {
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
-  EnvironmentHttpApi,
+  BetterT3HttpApi,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
@@ -9,7 +9,7 @@ import { failEnvironmentInternal, requireEnvironmentScope } from "../auth/http.t
 import * as Pai from "./PaiService.ts";
 
 export const layer = HttpApiBuilder.group(
-  EnvironmentHttpApi,
+  BetterT3HttpApi,
   "pai",
   Effect.fnUntraced(function* (handlers) {
     const service = yield* Pai.PaiService;

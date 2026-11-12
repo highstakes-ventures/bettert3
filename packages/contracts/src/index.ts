@@ -85,3 +85,6 @@ export * from "./executionRequest.ts";
 export * from "./todo.ts";
 
 export * from "./marketing.ts";
+
+export * from "./bettert3Http.ts";
+export * from "./bettert3Rpc.ts";

@@ -1,3 +1,4 @@
+import { BETTERT3_WS_METHODS } from "@t3tools/contracts";
 import {
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
@@ -15,7 +16,7 @@ import {
   AuthTerminalReadScope,
   AuthTerminalOperateScope,
   WS_METHODS,
-  WsRpcGroup,
+  BetterT3WsRpcGroup,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -32,14 +33,20 @@ import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
   it("requires conversation read access for cloud listing and history", () => {
-    expect(requiredScopeForRpcMethod(WS_METHODS.cloudChatsList)).toBe(AuthOrchestrationReadScope);
-    expect(requiredScopeForRpcMethod(WS_METHODS.cloudChatsRead)).toBe(AuthOrchestrationReadScope);
-    expect(requiredScopeForRpcMethod(WS_METHODS.cloudChatsOpen)).toBe(
+    expect(requiredScopeForRpcMethod(BETTERT3_WS_METHODS.cloudChatsList)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(BETTERT3_WS_METHODS.cloudChatsRead)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(BETTERT3_WS_METHODS.cloudChatsOpen)).toBe(
       AuthOrchestrationOperateScope,
     );
   });
   it("declares exactly one scope for every RPC in the server group", () => {
-    expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
+    expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(
+      new Set(BetterT3WsRpcGroup.requests.keys()),
+    );
   });
 
   it("keeps webhook delivery logs, which hold request bodies, behind operate scope", () => {
@@ -106,8 +113,8 @@ it("requires operate permission for tool updates even alongside a read-only chec
 
 describe("RPC scope middleware", () => {
   const tested = [WS_METHODS.serverProbe, WS_METHODS.serverRetryResourceTelemetry] as const;
-  const group = WsRpcGroup.omit(
-    ...[...WsRpcGroup.requests.keys()].filter(
+  const group = BetterT3WsRpcGroup.omit(
+    ...[...BetterT3WsRpcGroup.requests.keys()].filter(
       (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tested)[number]> =>
         !(tested as ReadonlyArray<string>).includes(tag),
     ),
@@ -150,8 +157,8 @@ it.effect.each([WS_METHODS.subscribeVcsBranch, WS_METHODS.subscribeVcsStatus] as
   "enforces read permission on stream %s",
   (method) =>
     Effect.gen(function* () {
-      const group = WsRpcGroup.omit(
-        ...[...WsRpcGroup.requests.keys()].filter(
+      const group = BetterT3WsRpcGroup.omit(
+        ...[...BetterT3WsRpcGroup.requests.keys()].filter(
           (
             tag,
           ): tag is Exclude<
@@ -202,8 +209,8 @@ it.effect.each([WS_METHODS.subscribeVcsBranch, WS_METHODS.subscribeVcsStatus] as
 );
 
 describe("settings mutation authorization", () => {
-  const group = WsRpcGroup.omit(
-    ...[...WsRpcGroup.requests.keys()].filter(
+  const group = BetterT3WsRpcGroup.omit(
+    ...[...BetterT3WsRpcGroup.requests.keys()].filter(
       (
         tag,
       ): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof WS_METHODS.serverUpdateSettings> =>
@@ -304,8 +311,8 @@ describe("settings mutation authorization", () => {
 
 it.effect("requires task permission before attaching a prepared worktree to a thread", () =>
   Effect.gen(function* () {
-    const group = WsRpcGroup.omit(
-      ...[...WsRpcGroup.requests.keys()].filter(
+    const group = BetterT3WsRpcGroup.omit(
+      ...[...BetterT3WsRpcGroup.requests.keys()].filter(
         (
           tag,
         ): tag is Exclude<
@@ -340,8 +347,8 @@ it.effect("requires task permission before attaching a prepared worktree to a th
 );
 
 describe("thread context authorization", () => {
-  const group = WsRpcGroup.omit(
-    ...[...WsRpcGroup.requests.keys()].filter(
+  const group = BetterT3WsRpcGroup.omit(
+    ...[...BetterT3WsRpcGroup.requests.keys()].filter(
       (
         tag,
       ): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof WS_METHODS.gitRunStackedAction> =>
@@ -394,8 +401,8 @@ describe("thread context authorization", () => {
 
 it.effect("separates host file URLs from readable attachment URLs", () =>
   Effect.gen(function* () {
-    const group = WsRpcGroup.omit(
-      ...[...WsRpcGroup.requests.keys()].filter(
+    const group = BetterT3WsRpcGroup.omit(
+      ...[...BetterT3WsRpcGroup.requests.keys()].filter(
         (
           tag,
         ): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof WS_METHODS.assetsCreateUrl> =>
@@ -441,8 +448,8 @@ it.effect("separates host file URLs from readable attachment URLs", () =>
 
 it.effect("denies manual cleanup before the handler without settings permission", () =>
   Effect.gen(function* () {
-    const group = WsRpcGroup.omit(
-      ...[...WsRpcGroup.requests.keys()].filter(
+    const group = BetterT3WsRpcGroup.omit(
+      ...[...BetterT3WsRpcGroup.requests.keys()].filter(
         (
           tag,
         ): tag is Exclude<

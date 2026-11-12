@@ -1,3 +1,4 @@
+import { BETTERT3_WS_METHODS } from "@t3tools/contracts";
 import { requestGuarded, runStreamGuarded } from "../rpc/client.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -70,11 +71,11 @@ const setup = Effect.gen(function* () {
 
 describe("command permissions", () => {
   it.effect.each([
-    [WS_METHODS.workflowsConnect, AuthSettingsWriteScope],
-    [WS_METHODS.workflowsDisconnect, AuthSettingsWriteScope],
-    [WS_METHODS.workflowsConfigure, AuthOrchestrationOperateScope],
-    [WS_METHODS.workflowsIntake, AuthOrchestrationOperateScope],
-    [WS_METHODS.workflowsDecide, AuthOrchestrationOperateScope],
+    [BETTERT3_WS_METHODS.workflowsConnect, AuthSettingsWriteScope],
+    [BETTERT3_WS_METHODS.workflowsDisconnect, AuthSettingsWriteScope],
+    [BETTERT3_WS_METHODS.workflowsConfigure, AuthOrchestrationOperateScope],
+    [BETTERT3_WS_METHODS.workflowsIntake, AuthOrchestrationOperateScope],
+    [BETTERT3_WS_METHODS.workflowsDecide, AuthOrchestrationOperateScope],
   ] as const)("checks the destination grant again for %s", ([method, scope]) =>
     Effect.scoped(
       Effect.gen(function* () {

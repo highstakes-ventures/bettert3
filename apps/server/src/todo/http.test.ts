@@ -1,7 +1,7 @@
 import { NodeHttpPlatform } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, expect } from "@effect/vitest";
-import { AuthSessionId, EnvironmentHttpApi } from "@t3tools/contracts";
+import { AuthSessionId, BetterT3HttpApi } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as HttpApi from "effect/http-api/HttpApi";
@@ -13,7 +13,9 @@ import * as AuthHttp from "../auth/http.ts";
 import * as Execution from "./TodoService.ts";
 import { layer } from "./http.ts";
 
-class TodoTestApi extends HttpApi.make("environment").add(EnvironmentHttpApi.groups.todo) {}
+class TodoTestApi extends HttpApi.make(BetterT3HttpApi.identifier).add(
+  BetterT3HttpApi.groups.todo,
+) {}
 it("Todo reads and writes enforce the destination environment scopes", async () => {
   const forwarded: string[] = [];
   const routes = HttpApiBuilder.layer(TodoTestApi).pipe(

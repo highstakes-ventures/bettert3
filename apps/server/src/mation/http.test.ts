@@ -6,7 +6,7 @@ import {
   CommandId,
   EnvironmentId,
   RunId,
-  EnvironmentHttpApi,
+  BetterT3HttpApi,
   ExecutionHttpApi,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -22,7 +22,9 @@ import * as RequestsHttp from "../orchestration-v2/executionRequestsHttp.ts";
 import * as Execution from "./AutomationExecutionService.ts";
 import { layer } from "./http.ts";
 
-class MationTestApi extends HttpApi.make("environment").add(EnvironmentHttpApi.groups.mation) {}
+class MationTestApi extends HttpApi.make(BetterT3HttpApi.identifier).add(
+  BetterT3HttpApi.groups.mation,
+) {}
 it("Mation frontend requests and generic executions enforce the destination environment scopes", async () => {
   const forwarded: string[] = [];
   const routes = HttpApiBuilder.layer(MationTestApi).pipe(

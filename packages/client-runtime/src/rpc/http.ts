@@ -1,5 +1,5 @@
 import {
-  EnvironmentHttpApi,
+  BetterT3EnvironmentHttpApi as EnvironmentHttpApi,
   EnvironmentHttpCommonError,
   type EnvironmentAuthInvalidError,
   type EnvironmentInternalError,

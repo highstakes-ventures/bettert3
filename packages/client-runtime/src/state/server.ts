@@ -1,3 +1,4 @@
+import { BETTERT3_WS_METHODS } from "@t3tools/contracts";
 import {
   type EnvironmentId,
   type ProviderInstanceId,
@@ -1329,17 +1330,17 @@ export function createServerEnvironmentAtoms<R, E>(
     }),
     workflowConnection: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:workflows:connection",
-      tag: WS_METHODS.workflowsConnection,
+      tag: BETTERT3_WS_METHODS.workflowsConnection,
     }),
     workflowDetail: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:workflows:detail",
-      tag: WS_METHODS.workflowsRead,
+      tag: BETTERT3_WS_METHODS.workflowsRead,
       // The ticket panel owns refreshes so hidden and idle views stay quiet.
       idleTtlMs: 0,
     }),
     workflowLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:workflows:live",
-      tag: WS_METHODS.workflowsSubscribe,
+      tag: BETTERT3_WS_METHODS.workflowsSubscribe,
     }),
     scheduledTaskWebhookDeliveries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:scheduled-task:webhook-deliveries",
@@ -1573,23 +1574,23 @@ export function createServerEnvironmentAtoms<R, E>(
     }),
     connectWorkflow: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:workflows:connect",
-      tag: WS_METHODS.workflowsConnect,
+      tag: BETTERT3_WS_METHODS.workflowsConnect,
     }),
     disconnectWorkflow: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:workflows:disconnect",
-      tag: WS_METHODS.workflowsDisconnect,
+      tag: BETTERT3_WS_METHODS.workflowsDisconnect,
     }),
     configureWorkflow: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:workflows:configure",
-      tag: WS_METHODS.workflowsConfigure,
+      tag: BETTERT3_WS_METHODS.workflowsConfigure,
     }),
     intakeWorkflow: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:workflows:intake",
-      tag: WS_METHODS.workflowsIntake,
+      tag: BETTERT3_WS_METHODS.workflowsIntake,
     }),
     decideWorkflow: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:workflows:decide",
-      tag: WS_METHODS.workflowsDecide,
+      tag: BETTERT3_WS_METHODS.workflowsDecide,
     }),
     upsertScheduledTask: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:upsert",
