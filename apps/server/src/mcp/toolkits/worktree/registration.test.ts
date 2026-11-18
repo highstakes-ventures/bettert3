@@ -1,3 +1,5 @@
+import * as EnvironmentThemeService from "../../../environmentTheme.ts";
+import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as AssetSigner from "../../../assets/AssetSigner.ts";
 import * as Marketing from "../../../marketing/MarketingService.ts";
@@ -50,6 +52,8 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(EnvironmentThemeService.EnvironmentThemeService)({}),
+  Layer.mock(PullRequestService.PullRequestService)({}),
   Layer.mock(Marketing.MarketingService)({}),
   Layer.mock(DocumentText.DocumentText)({}),
   Layer.mock(PeerForwarding.PeerForwarding)({}),

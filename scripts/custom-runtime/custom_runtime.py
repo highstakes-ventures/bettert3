@@ -167,7 +167,7 @@ class Runtime:
             backend = self.owner(13873)
             return bool(backend and backend["cwd"] == starting["release"] and
                         backend["parent"] == starting["pid"])
-        wait(finished, 180)
+        wait(finished, 1800)
         state = self.selected()
         state.pop("startingDesktop", None)
         atomic(self.pointer, state)

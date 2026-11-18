@@ -50,6 +50,7 @@ type DestinationOptions = Partial<
   projectRef?: ScopedProjectRef;
   isProjectMissing?: (projectRef: ScopedProjectRef) => boolean;
   rememberWorkspace?: boolean;
+  checkoutPullRequest?: NonNullable<DraftSessionState["checkoutPullRequest"]> | null;
 };
 
 export function resolveDraftDestination(input: {

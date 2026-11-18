@@ -163,19 +163,20 @@ export function makeSqlFragments(sql: SqlClient.SqlClient) {
     timingColumns: sql`
               (
                 SELECT CASE
-                  WHEN MAX(instr(r.run_id, 'cloud-run:' || t.thread_id || ':') = 1) = 1 THEN NULL
+                  WHEN MAX(instr(duration_run.run_id, 'cloud-run:' || t.thread_id || ':') = 1) = 1 THEN NULL
                   ELSE COALESCE(SUM(CASE
-                    WHEN r.status NOT IN ('preparing', 'starting', 'running', 'waiting')
+                    WHEN duration_run.status NOT IN ('preparing', 'starting', 'running', 'waiting')
                     THEN MAX(0, CAST(ROUND(
-                      (julianday(r.completed_at) - julianday(json_extract(r.payload_json, '$.startedAt'))) * 86400000
+                      (julianday(duration_run.completed_at) - julianday(json_extract(duration_run.payload_json, '$.startedAt'))) * 86400000
                     ) AS INTEGER)) ELSE 0 END), 0)
                 END
-                FROM orchestration_v2_projection_runs r
-                WHERE r.thread_id = t.thread_id
+                FROM orchestration_v2_projection_runs duration_run
+                WHERE duration_run.thread_id = t.thread_id
               ) AS completed_run_duration_ms,
               (
                 SELECT json_extract(r.payload_json, '$.startedAt')
                 FROM orchestration_v2_projection_runs r
+                  INDEXED BY orchestration_v2_projection_runs_thread_status_idx
                 WHERE r.thread_id = t.thread_id
                   AND r.status IN ('preparing', 'starting', 'running', 'waiting')
                 ORDER BY r.ordinal DESC, r.run_id DESC

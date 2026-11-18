@@ -308,14 +308,16 @@ const make = Effect.gen(function* () {
     const run = projection.runs.find((item) => item.id === message?.runId);
     if (Option.isSome(receipt)) {
       // A receipt cannot be rebound to another message or replayed as a fresh launch.
-      const messageCommand =
+      const messageCommands =
         receipt.value.commandType === "thread.create"
-          ? CommandId.make(`${commandId}:initial-message`)
-          : commandId;
-      const recorded = yield* events.readByCommandId({ commandId: messageCommand }).pipe(
-        Stream.runCollect,
-        Effect.mapError((cause) => new ExecutionOperationError({ operation: "read", cause })),
-      );
+          ? [commandId, CommandId.make(`${commandId}:initial-message`)]
+          : [commandId];
+      const recorded = (yield* Effect.forEach(messageCommands, (messageCommand) =>
+        events.readByCommandId({ commandId: messageCommand }).pipe(
+          Stream.runCollect,
+          Effect.mapError((cause) => new ExecutionOperationError({ operation: "read", cause })),
+        ),
+      )).flat();
       if (
         !message ||
         !run ||

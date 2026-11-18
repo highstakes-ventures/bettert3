@@ -1,196 +1,94 @@
-import { act, render, type Screen } from "../../../test/render";
-
-import {
-  DEFAULT_SERVER_SETTINGS,
-  EnvironmentId,
-  ProjectId,
-  type T3ProjectFile,
-} from "@t3tools/contracts";
+import { createMemoryHistory } from "@tanstack/react-router";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { ProjectId } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import type * as Context from "effect/Context";
 import { expect, it, vi } from "vite-plus/test";
+import { page, userEvent } from "vite-plus/test/browser";
+
+import { AppRoot } from "~/AppRoot";
+// The draft route loads ChatView lazily; importing it here keeps its first transform out of the test's timeout.
+import "~/components/ChatView";
 import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
+import { __setClientSettingsForTests } from "~/hooks/useSettings";
+import { getRouter } from "~/router";
+import { useUiStateStore } from "~/uiStateStore";
+import {
+  ENVIRONMENT_ID,
+  PROJECT_ID,
+  installFakeEnvironment,
+  type FakeDriver,
+} from "../../../test/fakeEnvironment";
+import { render } from "../../../test/render";
 
-const state = vi.hoisted(() => ({
-  projects: ["source", "target", "other"].map((id) => ({
-    id,
-    title: id,
-    environmentId: "local",
-    workspaceRoot: `/repo/${id}`,
-    defaultModelSelection: null,
-  })),
-  readProjectFile: vi.fn<() => Promise<T3ProjectFile | null>>(),
+// The socket is the only fake layer; see test/appScenarios.renders.tsx.
+vi.mock(
+  "../../../../../packages/client-runtime/src/connection/driver.ts",
+  async (importOriginal) => {
+    const [actual, { fakeDriver }, Layer] = await Promise.all([
+      importOriginal<{ readonly ConnectionDriver: Context.Key<unknown, FakeDriver> }>(),
+      import("../../../test/fakeEnvironment"),
+      import("effect/Layer"),
+    ]);
+    return { ...actual, layer: Layer.succeed(actual.ConnectionDriver, fakeDriver) };
+  },
+);
+
+vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
+  ...(await original()),
+  trackRpcRequestSent: () => {},
 }));
 
-vi.mock("~/state/entities", () => ({
-  isProjectMissing: (ref: { environmentId: string; projectId: string }) =>
-    !state.projects.some(
-      (project) => project.environmentId === ref.environmentId && project.id === ref.projectId,
-    ),
-  useProjects: () => state.projects,
-  useThreadShells: () => [],
-  useVisibleThreadShells: () => [],
-}));
-vi.mock("~/state/environments", () => ({
-  useEnvironments: () => ({
-    environments: [
-      {
-        environmentId: "local",
-        label: "Local",
-        serverConfig: { settings: DEFAULT_SERVER_SETTINGS, environment: { platform: "darwin" } },
-      },
+it("the new-thread project picker follows the manual sidebar project order", async () => {
+  using _environment = installFakeEnvironment([], {
+    extraProjects: [
+      { id: ProjectId.make("project-alpha"), title: "alpha" },
+      { id: ProjectId.make("project-beta"), title: "beta" },
     ],
-  }),
-  usePrimaryEnvironmentId: () => "local",
-  useEnvironmentProviders: () => new Map(),
-}));
-vi.mock("~/hooks/useSettings", () => ({
-  useClientSettings: (select: (value: unknown) => unknown) =>
-    select({ sidebarProjectSortOrder: "name" }),
-}));
-vi.mock("~/hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => vi.fn() }));
-vi.mock("~/hooks/useScratchProject", () => ({
-  useScratchProject: () => ({
-    scratchEnvironmentId: () => "local",
-    scratchWorkspaceRootFor: () => null,
-    openScratchProject: vi.fn(),
-  }),
-}));
-vi.mock("~/logicalProject", () => ({
-  deriveLogicalProjectKeyFromSettings: (project: { id: string }) => project.id,
-  selectProjectGroupingSettings: () => ({}),
-}));
-vi.mock("~/sidebarProjectGrouping", () => ({
-  buildSidebarProjectSnapshots: () =>
-    state.projects.map((project) => ({
-      projectKey: project.id,
-      displayName: project.title,
-      title: project.title,
-      memberProjectRefs: [{ environmentId: project.environmentId, projectId: project.id }],
-    })),
-  buildSidebarProjectPickerEntries: ({ groups }: { groups: { projectKey: string }[] }) =>
-    groups.map((group) => ({
-      group,
-      targetProject: state.projects.find((project) => project.id === group.projectKey),
-    })),
-  projectGroupsSpanEnvironments: () => false,
-}));
-vi.mock("../ProjectFavicon", () => ({ ProjectFavicon: () => null }));
-vi.mock("../ProjectEnvironmentBadge", () => ({ ProjectEnvironmentBadge: () => null }));
-vi.mock("~/lib/t3ProjectFileDefaults", () => ({
-  readT3ProjectFile: () => state.readProjectFile(),
-}));
-vi.mock("~/state/server", () => ({ primaryServerKeybindingsAtom: "keybindings" }));
-vi.mock("@effect/atom-react", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@effect/atom-react")>()),
-  useAtomValue: () => ({}),
-}));
-
-vi.mock("~/hooks/useProjectGroupUpdate", () => ({
-  useProjectPin: () => ({ canPinProjectGroup: () => false, toggleProjectGroupPin: () => {} }),
-}));
-
-vi.mock("~/hooks/useStartTriage", () => ({
-  isTriagePrompt: () => false,
-  TRIAGE_CLI_COMMAND: "t3 triage",
-}));
-
-import { DraftHeroHeadline } from "./DraftHeroHeadline";
-
-const environmentId = EnvironmentId.make("local");
-const draftId = DraftId.make("project-picker-draft");
-const sourceRef = scopeProjectRef(environmentId, ProjectId.make("source"));
-
-async function chooseProject(screen: Screen, title: string) {
-  await act(async () =>
-    screen.container.querySelector<HTMLButtonElement>("[data-draft-project-trigger]")!.click(),
-  );
-  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-    (element) => element.textContent === title,
-  );
-  expect(option).toBeDefined();
-  await act(async () => option!.click());
-}
-
-it("moves a typed Cloud draft to the target project's file-defined workspace default", async () => {
-  using _state = setup();
-
-  let finishRead!: (file: T3ProjectFile | null) => void;
-  state.readProjectFile.mockReturnValue(
-    new Promise((resolve) => {
-      finishRead = resolve;
-    }),
-  );
-  await using screen = await render(
-    <DraftHeroHeadline
-      draftId={draftId}
-      activeProjectRef={sourceRef}
-      activeProjectTitle="source"
-    />,
-  );
-  await chooseProject(screen, "target");
-  expect(state.readProjectFile).toHaveBeenCalledOnce();
-  await act(async () => finishRead({ defaultThreadEnvMode: "worktree" }));
-  const store = useComposerDraftStore.getState();
-  expect(store.getDraftSession(draftId)).toMatchObject({
-    projectId: "target",
-    runDestination: null,
-    envMode: "worktree",
-    environmentSelection: "auto",
   });
-  expect(store.getComposerDraft(draftId)?.prompt).toBe("Keep this prompt");
-});
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+    sidebarProjectSortOrder: "manual",
+  });
+  useUiStateStore.setState({
+    projectOrder: [
+      `${ENVIRONMENT_ID}:/workspace/beta`,
+      `${ENVIRONMENT_ID}:/workspace/render`,
+      `${ENVIRONMENT_ID}:/workspace/alpha`,
+    ],
+  });
+  using _order = { [Symbol.dispose]: () => useUiStateStore.setState({ projectOrder: [] }) };
+  const draftId = DraftId.make("draft-manual-order");
+  useComposerDraftStore
+    .getState()
+    .setProjectDraftThreadId(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), draftId);
 
-it("keeps a later project choice when an earlier project's defaults finish loading", async () => {
-  using _state = setup();
+  const router = getRouter(createMemoryHistory({ initialEntries: [`/draft/${draftId}`] }));
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+  // The shell snapshot has arrived once the sidebar lists the project.
+  await expect.element(page.getByText("render", { exact: true }).first()).toBeVisible();
+  const trigger = document.querySelector<HTMLElement>("[data-draft-project-trigger]");
+  if (!trigger) throw new Error("The draft project picker did not render.");
+  await userEvent.click(page.elementLocator(trigger));
+  await expect.element(page.getByRole("option", { name: "beta" })).toBeVisible();
 
-  let finishRead!: (file: T3ProjectFile | null) => void;
-  state.readProjectFile.mockReturnValue(
-    new Promise((resolve) => {
-      finishRead = resolve;
-    }),
-  );
-  const store = useComposerDraftStore.getState();
-  const otherRef = scopeProjectRef(environmentId, ProjectId.make("other"));
-  const saved = DraftId.make("other-saved");
-  store.setLogicalProjectDraftThreadId("other", otherRef, saved);
-  store.setDraftThreadContext(saved, { envMode: "local", rememberWorkspace: true });
-  await using screen = await render(
-    <DraftHeroHeadline
-      draftId={draftId}
-      activeProjectRef={sourceRef}
-      activeProjectTitle="source"
-    />,
-  );
-  await chooseProject(screen, "target");
-  await chooseProject(screen, "other");
-  await act(async () => finishRead({ defaultThreadEnvMode: "worktree" }));
-  expect(store.getDraftSession(draftId)).toMatchObject({
-    projectId: "other",
-    envMode: "local",
-    runDestination: null,
+  // The draft's own project leads; the rest keep the sidebar's order.
+  await vi.waitFor(() => {
+    expect(
+      page
+        .getByRole("option")
+        .elements()
+        .map((option) => option.textContent),
+    ).toEqual([
+      expect.stringMatching(/render$/),
+      expect.stringMatching(/beta$/),
+      expect.stringMatching(/alpha$/),
+      "Add project",
+    ]);
   });
 });
-
-function setup() {
-  useComposerDraftStore.setState(useComposerDraftStore.getInitialState(), true);
-  const store = useComposerDraftStore.getState();
-  store.setLogicalProjectDraftThreadId("source", sourceRef, draftId);
-  store.setPrompt(draftId, "Keep this prompt");
-  store.setDraftThreadContext(draftId, {
-    environmentSelection: "manual",
-    runDestination: {
-      kind: "codexCloud",
-      accountId: "account",
-      environmentConfigId: "cloud",
-      name: "Cloud",
-      cwd: "/workspace",
-    },
-  });
-  state.readProjectFile.mockReset();
-
-  return {
-    [Symbol.dispose]() {
-      vi.unstubAllGlobals();
-    },
-  };
-}

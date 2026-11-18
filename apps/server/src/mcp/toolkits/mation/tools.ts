@@ -4,7 +4,7 @@ import {
   OrchestratorMcpFailure,
   PaiPublishEmailResult,
 } from "@t3tools/contracts";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 import * as Pai from "../../../pai/PaiService.ts";
 import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
@@ -23,5 +23,5 @@ export const MationToolkit = Toolkit.make(
       Threads.ThreadManagementService,
       Invocation.McpInvocationContext,
     ],
-  }),
+  }).annotate(McpSchema.EnabledWhen, Invocation.hiddenFromOutsideClients),
 );

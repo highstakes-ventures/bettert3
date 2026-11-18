@@ -1,5 +1,6 @@
 import { page } from "vite-plus/test/browser";
 import { RegistryContext } from "@effect/atom-react";
+import { DEFAULT_CLIENT_SETTINGS, type ClientSettings } from "@t3tools/contracts/settings";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
@@ -9,6 +10,10 @@ const state = vi.hoisted(() => ({
   environmentId: "home",
   request: vi.fn(),
   lists: new Map<string, unknown>(),
+}));
+vi.mock(import("../../hooks/useSettings"), () => ({
+  useClientSettings: ((select: (settings: ClientSettings) => unknown = (settings) => settings) =>
+    select(DEFAULT_CLIENT_SETTINGS)) as never,
 }));
 vi.mock(import("../../state/server"), () => ({
   primaryServerKeybindingsAtom: Atom.make(DEFAULT_RESOLVED_KEYBINDINGS),

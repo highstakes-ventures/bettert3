@@ -59,6 +59,8 @@ it.each([
           cursor: { r: 255, g: 255, b: 255 },
         },
         onData: writes,
+        onBinary() {},
+        onReply() {},
         onResize() {},
         onSelectionChange() {},
         beforeKey: () => true,

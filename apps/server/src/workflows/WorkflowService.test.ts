@@ -185,6 +185,7 @@ const harness = Effect.gen(function* () {
         Effect.succeedSome({
           projectId: id,
           title: "Project",
+          hasCustomTitle: false,
           workspaceRoot: "/fixture",
           defaultModelSelection: null,
           defaultThreadEnvMode: null,

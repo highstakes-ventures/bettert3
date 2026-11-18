@@ -7,7 +7,7 @@ import {
   TodoPreparationInput,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 import * as Pai from "../../../pai/PaiService.ts";
 import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Invocation from "../../McpInvocationContext.ts";
@@ -26,7 +26,7 @@ export const PaiToolkit = Toolkit.make(
     failure: OrchestratorMcpFailure,
     failureMode: "return",
     dependencies,
-  }),
+  }).annotate(McpSchema.EnabledWhen, Invocation.hiddenFromOutsideClients),
   Tool.make("pai_email_workflow", {
     description:
       "Read Mation's current morning email workflow before preparing an overview. Mation owns these instructions; T3 executes the workflow for the mailbox scope in the user's or Mation's request.",
@@ -35,7 +35,7 @@ export const PaiToolkit = Toolkit.make(
     failure: OrchestratorMcpFailure,
     failureMode: "return",
     dependencies,
-  }),
+  }).annotate(McpSchema.EnabledWhen, Invocation.hiddenFromOutsideClients),
   Tool.make("pai_publish_email_items", {
     description:
       "Publish this run's morning overview to Mation. Mation supplies the fixed calendar, todo and email components. Read the connected mailboxes and provide concise summaries. Include optional calendar data when reviewing the agenda: date as YYYY-MM-DD, timeZone, readAt as an ISO timestamp, sources with read/unavailable status, and events with the provider's real htmlLink. All-day start/end are dates with an exclusive end; timed start/end are ISO timestamps with offsets. Report unread calendars as unavailable, never empty. Exclude cancelled and declined events. Publication leaves messages in Inbox and unread. T3 supplies the authenticated run identity; do not invent a source run. An identical publication can be retried, while a different report for the same run is rejected.",
@@ -44,7 +44,7 @@ export const PaiToolkit = Toolkit.make(
     failure: OrchestratorMcpFailure,
     failureMode: "return",
     dependencies,
-  }),
+  }).annotate(McpSchema.EnabledWhen, Invocation.hiddenFromOutsideClients),
   Tool.make("pai_complete_email_action", {
     description:
       "Record the verified result of this PAI email action. Use the PAI action ID from the request. Only the action's own T3 chat can complete it, including a follow-up supplying missing context. For Ignore verify the exact message is read and remains in Inbox. For Personal prepare Joseph's draft without sending. Choosing PAI authorizes sending as PAI within Joseph's submitted instruction without a second approval. Ask only when required information or a decision is missing, and leave the action incomplete until resolved.",
@@ -53,5 +53,5 @@ export const PaiToolkit = Toolkit.make(
     failure: OrchestratorMcpFailure,
     failureMode: "return",
     dependencies,
-  }),
+  }).annotate(McpSchema.EnabledWhen, Invocation.hiddenFromOutsideClients),
 );
