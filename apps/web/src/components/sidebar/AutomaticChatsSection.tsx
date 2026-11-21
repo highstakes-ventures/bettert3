@@ -1,3 +1,4 @@
+import { T, useGT, useMessages, msg } from "gt-react";
 import { Link, useParams } from "@tanstack/react-router";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { CloudChatSummary, ScheduledTask } from "@t3tools/contracts";
@@ -52,14 +53,15 @@ type RunTiming = { completedMs: number; activeStartedAt: string | null };
 type AutomaticOrigin = ThreadShell["source"]["automationOrigin"] | "sge";
 
 function AutomaticOriginIcon({ origin }: { origin: AutomaticOrigin }) {
+  const gt = useGT();
   const label =
     origin === "sge"
-      ? "Triggered by SGE"
+      ? gt("Triggered by SGE")
       : origin === "t3"
-        ? "Started by T3"
+        ? gt("Started by T3")
         : origin === "external"
-          ? "Triggered externally"
-          : "Origin unknown";
+          ? gt("Triggered externally")
+          : gt("Origin unknown");
   const Icon =
     origin === "t3"
       ? WorkflowIcon
@@ -96,13 +98,14 @@ function cloudRunTiming(chat: CloudChatSummary): RunTiming | null {
 }
 
 function AutomaticRunDuration({ elapsed }: { elapsed: RunTiming | null }) {
+  const gt = useGT();
   if (!elapsed) return null;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <span
-            aria-label="Total task duration"
+            aria-label={gt("Total task duration")}
             className="inline-flex shrink-0 items-center gap-1 text-xs text-secondary-label"
           />
         }
@@ -119,9 +122,13 @@ function AutomaticRunDuration({ elapsed }: { elapsed: RunTiming | null }) {
         )}
       </TooltipTrigger>
       <TooltipPopup>
-        Total task duration · {formatDuration(elapsed.completedMs)} completed
+        {gt("Total task duration · {duration} completed", {
+          duration: formatDuration(elapsed.completedMs),
+        })}
         {elapsed.activeStartedAt
-          ? ` · Running since ${new Date(elapsed.activeStartedAt).toLocaleString()}`
+          ? gt(" · Running since {time}", {
+              time: new Date(elapsed.activeStartedAt).toLocaleString(),
+            })
           : ""}
       </TooltipPopup>
     </Tooltip>
@@ -142,6 +149,20 @@ function automaticRowClassName(active: boolean, unopened: boolean, running: bool
         : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
   );
 }
+
+const AUTOMATIC_STATUS_MESSAGES = {
+  Running: msg("Running"),
+  "No status": msg("No status"),
+  Completed: msg("Completed"),
+  "Approval needed": msg("Approval needed"),
+  "Input needed": msg("Input needed"),
+  "Subagent needs input": msg("Subagent needs input"),
+  "Setting up": msg("Setting up"),
+  Failed: msg("Failed"),
+  "Usage limit": msg("Usage limit"),
+  Waiting: msg("Waiting"),
+  Paused: msg("Paused"),
+};
 
 function AutomaticRowContent({
   title,
@@ -166,6 +187,11 @@ function AutomaticRowContent({
   status: string;
   unopened: boolean;
 }) {
+  const m = useMessages();
+  const statusLabel = m(
+    AUTOMATIC_STATUS_MESSAGES[status as keyof typeof AUTOMATIC_STATUS_MESSAGES] ??
+      AUTOMATIC_STATUS_MESSAGES["No status"],
+  );
   const identity = projectName ? deriveProjectIdentity(projectName) : null;
   const relativeTime = formatRelativeTimeLabel(updatedAt);
   const timeLabel = relativeTime === "just now" ? "now" : relativeTime.replace(/ ago$/, "");
@@ -185,7 +211,7 @@ function AutomaticRowContent({
               render={
                 <span
                   role="img"
-                  aria-label={status}
+                  aria-label={statusLabel}
                   className={cn(
                     "size-1.5 shrink-0 rounded-full",
                     status === "Running" ? "bg-primary" : "bg-current",
@@ -193,7 +219,7 @@ function AutomaticRowContent({
                 />
               }
             />
-            <TooltipPopup>{status}</TooltipPopup>
+            <TooltipPopup>{statusLabel}</TooltipPopup>
           </Tooltip>
           {projectName ? (
             <Tooltip>
@@ -252,7 +278,7 @@ function AutomaticRowContent({
           {timeLabel}
         </TooltipTrigger>
         <TooltipPopup>
-          {status} · {new Date(updatedAt).toLocaleString()}
+          {statusLabel} · {new Date(updatedAt).toLocaleString()}
         </TooltipPopup>
       </Tooltip>
     </>
@@ -495,6 +521,7 @@ export function AutomaticChatsSection({
   const machines = useEnvironmentMachines();
   const params = useParams({ strict: false });
   const threads = useThreadShells();
+  const gt = useGT();
   const visits = useUiStateStore((state) => state.threadLastVisitedAtById);
   const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   const query = useEnvironmentQuery(
@@ -587,13 +614,13 @@ export function AutomaticChatsSection({
     localStatuses.includes("No status");
   const runningLabel = activityIncomplete
     ? running > 0
-      ? `${running}+ running`
-      : "No status"
-    : `${running} running`;
+      ? gt("{count}+ running", { count: running })
+      : gt("No status")
+    : gt("{count} running", { count: running });
   const runningDescription = activityIncomplete
     ? running > 0
-      ? `At least ${running} running`
-      : "Cloud activity couldn't be checked for every automatic chat."
+      ? gt("At least {count} running", { count: running })
+      : gt("Cloud activity couldn't be checked for every automatic chat.")
     : runningLabel;
   const isUnopened = (chat: CloudChatSummary) =>
     !!environmentId &&
@@ -668,11 +695,19 @@ export function AutomaticChatsSection({
             >
               <>
                 {query.error ? (
-                  <span>Couldn't refresh ·</span>
+                  <span>
+                    <T>Couldn't refresh ·</T>
+                  </span>
                 ) : !data ? (
-                  <span>Loading… ·</span>
+                  <span>
+                    <T>Loading… ·</T>
+                  </span>
                 ) : null}
-                {data?.hasMore ? <span>Recent ·</span> : null}
+                {data?.hasMore ? (
+                  <span>
+                    <T>Recent ·</T>
+                  </span>
+                ) : null}
                 {unopened > 0 && expanded ? (
                   <Tooltip>
                     <TooltipTrigger
@@ -680,23 +715,25 @@ export function AutomaticChatsSection({
                         <button
                           type="button"
                           onClick={markAllRead}
-                          aria-label="Mark all automatic chats as read"
+                          aria-label={gt("Mark all automatic chats as read")}
                           className="group/mark-read pointer-events-auto -mx-1 grid cursor-pointer rounded-sm px-1 hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
                         />
                       }
                     >
                       <span className="col-start-1 row-start-1 group-hover/mark-read:invisible group-focus-visible/mark-read:invisible">
-                        {unopened} new
+                        {gt("{count} new", { count: unopened })}
                       </span>
                       <CheckCheckIcon
                         aria-hidden
                         className="invisible col-start-1 row-start-1 size-4 self-center justify-self-center group-hover/mark-read:visible group-focus-visible/mark-read:visible"
                       />
                     </TooltipTrigger>
-                    <TooltipPopup>Mark all as read</TooltipPopup>
+                    <TooltipPopup>
+                      <T>Mark all as read</T>
+                    </TooltipPopup>
                   </Tooltip>
                 ) : (
-                  <span>{unopened} new</span>
+                  <span>{gt("{count} new", { count: unopened })}</span>
                 )}
                 <Tooltip>
                   <TooltipTrigger
@@ -705,7 +742,7 @@ export function AutomaticChatsSection({
                         tabIndex={0}
                         aria-label={
                           activityIncomplete && running === 0
-                            ? "Activity unavailable"
+                            ? gt("Activity unavailable")
                             : runningDescription
                         }
                         className="pointer-events-auto rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
@@ -720,7 +757,7 @@ export function AutomaticChatsSection({
             </span>
           }
         >
-          Automatic
+          <T>Automatic</T>
         </CollapsibleSectionHeader>
       </li>
       {expanded ? (
@@ -743,7 +780,7 @@ export function AutomaticChatsSection({
               role="alert"
               className="list-none px-2.5 py-2 text-xs text-sidebar-muted-foreground"
             >
-              Local workflows couldn't refresh.
+              <T>Local workflows couldn't refresh.</T>
             </li>
           ) : null}
           {query.error ? (
@@ -775,7 +812,9 @@ export function AutomaticChatsSection({
               ))
             ) : (
               <li className="list-none px-2.5 py-2 text-xs text-sidebar-muted-foreground">
-                {localRows.length ? "No automatic Cloud chats yet." : "No automatic kickoffs yet."}
+                {localRows.length
+                  ? gt("No automatic Cloud chats yet.")
+                  : gt("No automatic kickoffs yet.")}
               </li>
             )
           ) : null}
@@ -787,13 +826,15 @@ export function AutomaticChatsSection({
                 className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
                 <PlusIcon aria-hidden className="size-4 shrink-0" />
-                Show more
+                <T>Show more</T>
               </button>
             </li>
           ) : null}
           {data?.hasMore && !query.error ? (
             <li className="list-none px-2.5 py-2 text-xs text-sidebar-muted-foreground">
-              Counts and read actions cover automatic chats among the 100 most recent Cloud chats.
+              <T>
+                Counts and read actions cover automatic chats among the 100 most recent Cloud chats.
+              </T>
             </li>
           ) : null}
         </>

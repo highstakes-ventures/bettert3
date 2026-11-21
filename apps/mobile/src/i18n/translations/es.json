@@ -342,6 +342,8 @@
   "39949fd3853031e5": "{count, plural, one {No pudo volver a ejecutar {count} check} other {No pudo volver a ejecutar {count} checks}}",
   "15d8d7174c79fc23": "{count, plural, one {Volvió a ejecutar {count} check} other {Volvió a ejecutar {count} checks}}",
   "24d802debbab31e0": "{rerun, plural, one {Volvió a ejecutar {rerun} check, {refused} rechazados} other {Volvió a ejecutar {rerun} checks, {refused} rechazados}}",
+  "6b52225fea8e8e78": "{count, plural, one {Se actualizó {count} revisión de correo} other {Se actualizaron {count} revisiones de correo}}",
+  "3e5a8b87246e31bb": "{count, plural, one {Se intentó actualizar {count} revisión de correo} other {Se intentó actualizar {count} revisiones de correo}}",
   "8146ee71f7426683": "{count, plural, one {Revisó {count} pull request} other {Revisó {count} pull requests}}",
   "638678077ba2e050": "{count, plural, one {Intentó revisar {count} pull request} other {Intentó revisar {count} pull requests}}",
   "420bea546d5f8802": "Hilo copiado",

@@ -342,6 +342,8 @@
   "39949fd3853031e5": "{count, plural, other {검사 {count}개를 재실행하지 못함}}",
   "15d8d7174c79fc23": "{count, plural, other {검사 {count}개를 재실행함}}",
   "24d802debbab31e0": "{rerun, plural, other {검사 {rerun}개를 재실행하고 {refused}개는 거부됨}}",
+  "6b52225fea8e8e78": "이메일 검토 {count}개를 업데이트했습니다",
+  "3e5a8b87246e31bb": "이메일 검토 {count}개 업데이트를 시도했습니다",
   "8146ee71f7426683": "{count, plural, other {풀 리퀘스트 {count}개를 검토함}}",
   "638678077ba2e050": "{count, plural, other {풀 리퀘스트 {count}개 검토를 시도함}}",
   "420bea546d5f8802": "스레드 복사됨",

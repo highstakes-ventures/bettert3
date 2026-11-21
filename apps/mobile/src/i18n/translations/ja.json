@@ -342,6 +342,8 @@
   "39949fd3853031e5": "{count, plural, other {{count} 件のチェックを再実行できませんでした}}",
   "15d8d7174c79fc23": "{count, plural, other {{count} 件のチェックを再実行しました}}",
   "24d802debbab31e0": "{rerun, plural, other {{rerun} 件のチェックを再実行し、{refused} 件は拒否されました}}",
+  "6b52225fea8e8e78": "メール確認を {count} 件更新しました",
+  "3e5a8b87246e31bb": "メール確認 {count} 件の更新を試みました",
   "8146ee71f7426683": "{count, plural, other {{count} 件のプルリクエストをレビューしました}}",
   "638678077ba2e050": "{count, plural, other {{count} 件のプルリクエストのレビューを試みました}}",
   "420bea546d5f8802": "スレッドをコピーしました",

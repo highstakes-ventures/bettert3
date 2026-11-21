@@ -342,6 +342,8 @@
   "39949fd3853031e5": "{count, plural, one {Não foi possível executar novamente {count} verificação} other {Não foi possível executar novamente {count} verificações}}",
   "15d8d7174c79fc23": "{count, plural, one {Executou novamente {count} verificação} other {Executou novamente {count} verificações}}",
   "24d802debbab31e0": "{rerun, plural, one {Executou novamente {rerun} verificação, {refused} recusadas} other {Executou novamente {rerun} verificações, {refused} recusadas}}",
+  "6b52225fea8e8e78": "{count, plural, one {{count} revisão de e-mail atualizada} other {{count} revisões de e-mail atualizadas}}",
+  "3e5a8b87246e31bb": "{count, plural, one {Tentativa de atualizar {count} revisão de e-mail} other {Tentativa de atualizar {count} revisões de e-mail}}",
   "8146ee71f7426683": "{count, plural, one {Revisou {count} pull request} other {Revisou {count} pull requests}}",
   "638678077ba2e050": "{count, plural, one {Tentou revisar {count} pull request} other {Tentou revisar {count} pull requests}}",
   "420bea546d5f8802": "Thread copiada",

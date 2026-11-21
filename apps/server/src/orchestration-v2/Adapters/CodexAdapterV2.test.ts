@@ -1672,7 +1672,11 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       const continuationRequests: Array<ProviderContinuationRequests.ProviderContinuationRequest> =
         [];
       const driver = yield* CodexReplay.makeReplayDriver(
-        withConfigReads(transcript, undefined, cloud === undefined),
+        withConfigReads(
+          transcript,
+          undefined,
+          cloud === undefined && policy.runDestination === undefined,
+        ),
         beforeEmitInbound === undefined ? {} : { beforeEmitInbound },
       );
       const commandStopWatchers: Array<PortScanner.AgentCommandStopWatcher> = [];
@@ -10846,11 +10850,17 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       const resumeParams = {
         threadId: nativeThreadId,
         excludeTurns: true,
-        cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
-        model: CODEX_TEST_MODEL_SELECTION.model,
         config: CodexAdapterV2.CODEX_THREAD_CONFIG,
       };
-      const thread = codexReplayThreadResult({ nativeThreadId, forkedFromId: null });
+      const savedThread = codexReplayThreadResult({ nativeThreadId, forkedFromId: null });
+      const thread = {
+        ...savedThread,
+        thread: {
+          ...savedThread.thread,
+          model: "target-thread-model",
+          cwd: "/target-thread-workspace",
+        },
+      };
       const exchange = (
         id: number,
         method: string,
@@ -10912,7 +10922,16 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           ),
         ],
       });
-      const harness = yield* makeCodexReplayHarness(transcript);
+      const resumes: Array<Record<string, unknown>> = [];
+      const harness = yield* makeCodexReplayHarness(
+        transcript,
+        () => Effect.void,
+        (method, params) =>
+          Effect.sync(() => {
+            if (method === "thread/resume") resumes.push(params as Record<string, unknown>);
+          }),
+      );
+      resumes.length = 0;
       const now = yield* DateTime.now;
       const firstTurn = codexReplaySourceTurn({
         id: "provider-turn-first",
@@ -10940,6 +10959,11 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         providerThreadTurns: [firstTurn, secondTurn],
       });
 
+      assert.equal(resumes.length, 2);
+      for (const resume of resumes) {
+        assert.notProperty(resume, "model");
+        assert.notProperty(resume, "cwd");
+      }
       assert.equal(snapshot.providerThread.nativeThreadRef?.nativeId, nativeThreadId);
       assert.deepEqual(snapshot.providerThread.nativeConversationHeadRef, firstTurn.nativeTurnRef);
     }).pipe(

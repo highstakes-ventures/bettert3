@@ -342,6 +342,8 @@
   "39949fd3853031e5": "{count, plural, one {Kunde inte köra om {count} kontroll} other {Kunde inte köra om {count} kontroller}}",
   "15d8d7174c79fc23": "{count, plural, one {Körde om {count} kontroll} other {Körde om {count} kontroller}}",
   "24d802debbab31e0": "{rerun, plural, one {Körde om {rerun} kontroll, {refused} nekades} other {Körde om {rerun} kontroller, {refused} nekades}}",
+  "6b52225fea8e8e78": "{count, plural, one {Uppdaterade {count} e-postgranskning} other {Uppdaterade {count} e-postgranskningar}}",
+  "3e5a8b87246e31bb": "{count, plural, one {Försökte uppdatera {count} e-postgranskning} other {Försökte uppdatera {count} e-postgranskningar}}",
   "8146ee71f7426683": "{count, plural, one {Granskade {count} pull request} other {Granskade {count} pull requests}}",
   "638678077ba2e050": "{count, plural, one {Försökte granska {count} pull request} other {Försökte granska {count} pull requests}}",
   "420bea546d5f8802": "Tråden kopierades",

@@ -342,6 +342,8 @@
   "39949fd3853031e5": "{count, plural, one {Impossible de relancer {count} vérification} other {Impossible de relancer {count} vérifications}}",
   "15d8d7174c79fc23": "{count, plural, one {{count} vérification relancée} other {{count} vérifications relancées}}",
   "24d802debbab31e0": "{rerun, plural, one {{rerun} vérification relancée, {refused} refusées} other {{rerun} vérifications relancées, {refused} refusées}}",
+  "6b52225fea8e8e78": "{count, plural, one {{count} révision d’e-mail mise à jour} other {{count} révisions d’e-mails mises à jour}}",
+  "3e5a8b87246e31bb": "{count, plural, one {Tentative de mise à jour de {count} révision d’e-mail} other {Tentative de mise à jour de {count} révisions d’e-mails}}",
   "8146ee71f7426683": "{count, plural, one {{count} pull request relue} other {{count} pull requests relues}}",
   "638678077ba2e050": "{count, plural, one {Tentative de revue de {count} pull request} other {Tentative de revue de {count} pull requests}}",
   "420bea546d5f8802": "Fil copié",

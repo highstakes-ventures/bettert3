@@ -1,3 +1,4 @@
+import { T, useGT } from "gt-react";
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -40,6 +41,7 @@ function ReleaseStudioPanelContent({
   environmentId: EnvironmentId;
   threadId: ThreadId;
 }) {
+  const gt = useGT();
   const request = useAtomCommand(marketingEnvironment.request, { reportFailure: false });
   const query = marketingEnvironment.read({ environmentId, input: { threadId } });
   const result = useAtomValue(query);
@@ -51,7 +53,7 @@ function ReleaseStudioPanelContent({
   const error =
     mutationError ??
     (result._tag === "Failure"
-      ? "Studio could not load this draft. Refresh before retrying."
+      ? gt("Studio could not load this draft. Refresh before retrying.")
       : null);
   async function act(command: HumanCommand) {
     if (mutationInFlight.current) return;
@@ -62,11 +64,11 @@ function ReleaseStudioPanelContent({
       setMutationError(
         reply._tag === "Success"
           ? null
-          : "Studio could not complete the request. Refresh before retrying.",
+          : gt("Studio could not complete the request. Refresh before retrying."),
       );
       refresh();
     } catch {
-      setMutationError("Studio could not complete the request. Refresh before retrying.");
+      setMutationError(gt("Studio could not complete the request. Refresh before retrying."));
     }
     mutationInFlight.current = false;
     setBusy(false);
@@ -74,10 +76,10 @@ function ReleaseStudioPanelContent({
   if (!value)
     return (
       <div className="space-y-3 p-5 text-sm text-muted-foreground" role="status">
-        <p>{error ?? "Opening release Studio..."}</p>
+        <p>{error ?? gt("Opening release Studio...")}</p>
         {error && (
           <Button variant="ghost" size="sm" onClick={refresh}>
-            Retry
+            <T>Retry</T>
           </Button>
         )}
       </div>

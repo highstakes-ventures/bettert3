@@ -1788,7 +1788,17 @@ export function summarizeT3ToolCalls(
       break;
     }
     case "email-review":
-      label = `${done ? "Updated" : "Tried to update"} ${selected.length} email review${selected.length === 1 ? "" : "s"}`;
+      label = resolve(
+        done
+          ? msg(
+              "{count, plural, one {Updated {count} email review} other {Updated {count} email reviews}}",
+              { count: selected.length },
+            )
+          : msg(
+              "{count, plural, one {Tried to update {count} email review} other {Tried to update {count} email reviews}}",
+              { count: selected.length },
+            ),
+      );
       break;
     case "review-pr": {
       const count = selected.length;

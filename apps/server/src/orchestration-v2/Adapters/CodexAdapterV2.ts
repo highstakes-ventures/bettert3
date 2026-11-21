@@ -9138,8 +9138,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                       ? undefined
                       : yield* readMcpSession(threadInput.providerThread.appThreadId),
                     stdioMcpServers: yield* readStdioMcpServers(undefined),
-                    modelSelection: input.modelSelection,
-                    runtimePolicy: input.runtimePolicy,
                   }),
                 });
               }

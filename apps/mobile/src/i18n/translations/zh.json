@@ -342,6 +342,8 @@
   "39949fd3853031e5": "{count, plural, other {无法重新运行 {count} 项检查}}",
   "15d8d7174c79fc23": "{count, plural, other {已重新运行 {count} 项检查}}",
   "24d802debbab31e0": "{rerun, plural, other {已重新运行 {rerun} 项检查，{refused} 项被拒绝}}",
+  "6b52225fea8e8e78": "已更新 {count} 项邮件审阅",
+  "3e5a8b87246e31bb": "已尝试更新 {count} 项邮件审阅",
   "8146ee71f7426683": "{count, plural, other {已审查 {count} 个 PR}}",
   "638678077ba2e050": "{count, plural, other {尝试审查 {count} 个 PR}}",
   "420bea546d5f8802": "已复制会话",
