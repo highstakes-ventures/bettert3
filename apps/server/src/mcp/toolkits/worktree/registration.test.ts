@@ -1,3 +1,6 @@
+import * as GitManager from "../../../git/GitManager.ts";
+import * as IssueService from "../../../issue/IssueService.ts";
+import * as ThreadIssueService from "../../../orchestration-v2/ThreadIssueService.ts";
 import * as EnvironmentThemeService from "../../../environmentTheme.ts";
 import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -52,6 +55,9 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 
 const layerStubServices = Layer.mergeAll(
+  Layer.mock(GitManager.GitManager)({}),
+  Layer.mock(IssueService.IssueService)({}),
+  Layer.mock(ThreadIssueService.ThreadIssueService)({}),
   Layer.mock(EnvironmentThemeService.EnvironmentThemeService)({}),
   Layer.mock(PullRequestService.PullRequestService)({}),
   Layer.mock(Marketing.MarketingService)({}),
@@ -66,7 +72,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(MationExecution.AutomationExecutionService)({}),
   Layer.mock(WorkflowService.WorkflowService)({}),
   Layer.mock(Orchestrator.OrchestratorV2)({}),
-  Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+  Layer.mock(ProjectionStore.ProjectionStoreV2)({ getThreadShell: () => Effect.succeed(null) }),
   Layer.mock(DeviceService.DeviceService)({}),
   Layer.mock(ThreadManagementService.ThreadManagementService)({}),
   Layer.mock(ProviderRegistry.ProviderRegistry)({}),

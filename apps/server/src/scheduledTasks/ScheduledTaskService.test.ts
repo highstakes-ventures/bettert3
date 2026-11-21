@@ -423,9 +423,10 @@ it.effect("thread cleanup notifies subscribers and a finishing run cannot recrea
 );
 
 it.effect.each([
-  { status: "failed", error: "Weekly usage limit reached" },
-  { status: "interrupted", error: "The run was stopped." },
-  { status: "cancelled", error: "The run was cancelled." },
+  { status: "failed", error: "Weekly usage limit reached", heldWarning: false },
+  { status: "failed", error: "Weekly usage limit reached", heldWarning: true },
+  { status: "interrupted", error: "The run was stopped.", heldWarning: false },
+  { status: "cancelled", error: "The run was cancelled.", heldWarning: false },
 ] as const)("a run that ends $status after its message was accepted records it", (outcome) =>
   Effect.gen(function* () {
     const projectId = ProjectId.make("project:test");
@@ -496,9 +497,15 @@ it.effect.each([
         interactionMode: "default",
       });
       yield* service.runNow({ id: task.id });
+      if (outcome.heldWarning) {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE scheduled_tasks SET last_run_status = 'failed',
+          last_run_error = 'A previous occurrence is held in the thread queue. Resume or remove it to run this task again.'
+          WHERE task_id = ${task.id}`;
+      }
       const failed = yield* service.subscribeList().pipe(
         Stream.map(({ tasks }) => tasks.find((candidate) => candidate.id === task.id)),
-        Stream.filter((current) => current?.lastRunStatus === "failed"),
+        Stream.filter((current) => current?.lastRunError === outcome.error),
         Stream.runHead,
         Effect.forkChild,
       );
@@ -506,6 +513,50 @@ it.effect.each([
       const recorded = Option.getOrUndefined(yield* Fiber.join(failed));
       assert.equal(recorded?.lastRunError, outcome.error);
       assert.equal(recorded?.runCount, 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+// Mation owns one-time triggers in BetterT3. The standalone upstream lifecycle does not apply.
+it.effect("requires Mation to own one-time triggers without saving a native task", () =>
+  Effect.gen(function* () {
+    const projectId = ProjectId.make("project:test");
+    const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          ManagedPolicy.layerTest(),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            getThreadShell: () => Effect.succeed(threadShell(projectId)),
+          }),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            namedProjectsRoot: "/projects",
+            isScratchProject: () => Effect.succeed(false),
+          }),
+          NodeCrypto.layer,
+          Scheduler.layer,
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const error = yield* service
+        .upsert({
+          title: "Release notes",
+          prompt: "Draft the release notes",
+          enabled: true,
+          schedule: { type: "once", at: "2026-11-25T08:00:00.000Z" },
+          projectId,
+          threadId: ThreadId.make("thread:once"),
+          workspaceStrategy: { type: "root" },
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+        })
+        .pipe(Effect.flip);
+      assert.equal(error.message, "One-time triggers require Mation scheduling ownership.");
+      assert.deepEqual((yield* service.list()).tasks, []);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
